@@ -1,0 +1,23 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+.import_linter_cache/
+build/
+dist/
+# Node
+node_modules/
+# Environment and secrets
+.env
+.env.*
+!.env.example
+# Local data and run state
+backend/var/
+var/
+*.log
+*.pid
