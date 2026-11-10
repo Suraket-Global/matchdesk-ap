@@ -2,7 +2,7 @@
 
 Read [AGENTS.md](AGENTS.md) first. It is canonical for reading order, sources of truth, conventions, tenant safety, migrations, tests, Git hygiene and completion reporting. This file adds only what is specific to this product. Where the two differ, AGENTS.md wins.
 
-The repository holds planning documents only. No code exists. Every command is proposed.
+Build milestone B1 (2026-11-11) added the foundation and the match core under `backend/`; see AGENTS.md for the state line and which commands exist. Everything else is still proposed.
 
 ## The question this product must answer
 

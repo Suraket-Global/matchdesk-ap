@@ -2,7 +2,7 @@
 
 Canonical instructions for any coding or documentation agent working in this repository. `CLAUDE.md` adds product-specific guidance and defers to this file.
 
-**State of the repository:** planning documents only. No application code, scripts, migrations or infrastructure exist. Every command named anywhere in this repository is **proposed** and will fail if run today.
+**State of the repository:** the ten planning documents at the root, plus build milestone B1 (2026-11-11, authorised by the owner before the Phase 0 gate) under `backend/`: the package layout, `core`, the pure `matching` engine, migrations with row-level security, match runs, a minimal API and a worker, with unit and integration tests. Nothing is deployed; QuickBooks and extraction exist only as interfaces with fakes. What ran, and how, is in [verification-report-fixing.md section 9](verification-report-fixing.md#9-build-milestone-b1-2026-11-11). Commands marked **exists** in section 12 work locally; all others are still **proposed**.
 
 ## 1. Reading order
 
@@ -55,7 +55,30 @@ If two files disagree, the authoritative file wins and the other is corrected in
 - Amounts are `Decimal` and `NUMERIC`. No binary floats in money or quantity code.
 - Every mutating endpoint accepts an idempotency key; every editable record carries a version.
 
-Utilities index: *(empty until code exists)*.
+Utilities index (B1). Search here before adding a helper:
+
+| Need | Use | File |
+|---|---|---|
+| Decimal conversion refusing floats; half-up rounding to cents, price or quantity; line amount | `core.dec`, `core.round_cents`, `core.round_price`, `core.round_qty`, `core.line_amount` | `backend/src/matchdesk/core/money.py` |
+| Settings (one object for API and worker; `fingerprint()` for CI-02) | `core.load_settings()` | `core/settings.py` |
+| JSON logging, correlation ID, field allow-list | `core.configure_logging`, `core.set_correlation_id`, `core.get_logger` | `core/logging.py` |
+| Clock | `core.SystemClock`, `core.FixedClock` | `core/clock.py` |
+| Errors (404-equivalent, 403, 409, missing tenant) | `core.NotFoundError`, `ForbiddenError`, `ConflictError`, `TenantContextError` | `core/errors.py` |
+| Tenant transaction; no-tenant transaction; operator transaction | `tenancy.session(tenant_id)`, `tenancy.global_session()`, `tenancy.operator_session()` | `tenancy/db.py` |
+| Tenant-owned table boilerplate; composite tenant foreign key; column types | `TenantMixin`, `tenant_args()`, `tfk()`; `MONEY`, `PRICE`, `QTY` | `tenancy/db.py`, `tenancy/types.py` |
+| Compare-and-set state transition (the shared transition helper) | `tenancy.transition()` | `tenancy/transitions.py` |
+| Enqueue in the business transaction; claim with lease; job wrapper that refuses no tenant | `tenancy.enqueue`, `tenancy.claim`, `tenancy.run_claimed` | `tenancy/jobs.py` |
+| File keys and tenant-checked file access | `blobstore.build_key`, `blobstore.put`, `blobstore.get` | `blobstore/__init__.py` |
+| Document and supplier-code normalisation; deterministic document order | `matching.normalise_number`, `normalise_code`, `normalise_uom`, `document_order_key` | `matching/normalise.py` |
+| Rule set v1; counting-receipt rule; coverage rule; input fingerprint | `matching.evaluate`, `receipt_line_counts`, `is_covered`, `input_fingerprint` | `matching/engine.py`, `matching/fingerprint.py` |
+| Build match inputs from the database (no date filter); request and execute a match run; store results with supersede | `exceptions.build_match_input`, `request_run`, `execute_run`, `store_result` | `exceptions/inputs.py`, `runs.py`, `store.py` |
+| Who may resolve which exception with which code | `exceptions.check_resolution_allowed` | `exceptions/permissions.py` |
+| Audit event inside the business transaction | `audit.write_audit` | `audit/__init__.py` |
+| Batch, file intake, lease, completion, batch summary, retry failed | `intake.add_file`, `take`, `complete`, `batch_summary`, `retry_failed` | `intake/service.py` |
+| Extraction interface, fake, arithmetic gates | `extraction.Extractor`, `FakeExtractor`, `verification_gates` | `extraction/provider.py` |
+| QuickBooks read interface and fake (no write method) | `qbo.QboReader`, `qbo.FakeQboReader` | `qbo/client.py` |
+| Refund calculation over exceptions | `reporting.calculate_refund` | `reporting/refund.py` |
+| Session lookup | `identity.resolve_session`, `identity.issue_session` | `identity/__init__.py` |
 
 ## 6. Tenant safety
 
@@ -121,13 +144,14 @@ Utilities index: *(empty until code exists)*.
 
 ## 12. Proposed commands
 
-None of these exists yet. See `execution-plan.md` section 6 for purpose, inputs, outputs and failure behaviour.
+See `execution-plan.md` section 6 for purpose, inputs, outputs and failure behaviour. **Exists** means it runs locally since B1 (2026-11-11); the rest are proposed.
 
 | Command (proposed) | Purpose |
 |---|---|
-| `make up` / `make down` | Start or stop the local stack with health checks |
-| `make test` | Unit and integration suites |
-| `scripts/check_migrations` | Single head, ORM parity, manifest, lock rules |
+| `make up` / `make down` | Start or stop the local stack with health checks. **Exists**: starts API (port 8101) and worker directly, migrates `matchdesk_dev`, waits for `/readyz`; Compose is still proposed |
+| `make test` | Unit and integration suites. **Exists**: drops and re-migrates `matchdesk_test`, runs as `matchdesk_app` |
+| `make check` | **Exists** (added in B1): ruff, format check, mypy, import contracts, float lint |
+| `scripts/check_migrations` | Single head, ORM parity, manifest, lock rules. Proposed; head and parity are covered by `backend/tests/integration/test_migrations.py` |
 | `scripts/load_fixtures` | Two synthetic tenants and golden fixtures |
 | `scripts/eval_extraction` | Score an extraction provider on the fixture set |
 | `make deploy TAG=<hash>` | Deploy a pinned image |

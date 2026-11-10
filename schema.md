@@ -427,3 +427,18 @@ Every index is declared both in a migration and in the ORM model; a CI check com
 | New tenant-owned table | Must ship with `tenant_id`, the composite unique, the policy, and a test that selects from it without tenant context and expects zero rows. A CI check lists tables without a policy and fails unless they are on the global allow-list (R-05) |
 | Seed data | `ruleset_versions` rows by migration. Synthetic fixtures are loaded by a separate proposed command, never by a migration |
 | Restore compatibility | A backup restores into the schema version it was taken at; migrations then run forward |
+
+### 9.1 What build milestone B1 implemented (2026-11-11)
+
+Migrations `backend/migrations/versions/0001_base_schema.py` (tables, constraints, indexes, generated from the ORM models) and `0002_tenancy_rls.py` (role, policies, grants, triggers, rule set `v1`). B1 builds a subset of this dictionary; where it differs, the difference is listed here and the dictionary above stays the target.
+
+| Item | B1 state |
+|---|---|
+| Tables built | `tenants`, `users`, `memberships`, `sessions` (trimmed: no CSRF or support-grant columns), `vendors`, `items`, `purchase_orders`, `po_lines`, `qbo_bills`, `qbo_bill_lines`, `upload_batches`, `documents`, `invoices`, `invoice_lines`, `extraction_runs`, `receiving_imports`, `receipts`, `receipt_lines`, `item_aliases`, `tolerance_rules`, `ruleset_versions`, `match_runs`, `line_matches`, `exceptions`, `exception_events`, `audit_events`, `idempotency_keys`, plus `job_queue` (global, identifiers only). Several tables carry fewer columns than the dictionary |
+| Not built | `invitations`, `login_tokens`, `support_grants`, `pilot_engagements`, `qbo_connections`, `sync_runs`, `receiving_mappings`, `inbound_messages`, `intake_senders`, `approvals`, `backtest_reports`, `report_findings`, `usage_events`, `deletion_ledger`, `backfill_progress`. No table has an operator policy yet, because the three allow-listed tables do not exist |
+| `receipt_lines.counts` | Not stored. The rule engine decides whether a line counts from the import's class, state and void flag, the receipt's receiver marks and signer, and `added_after_exception` with `late_approved` (a boolean standing in for `late_approval_id` until `approvals` exists) |
+| Added columns | `po_lines.charge_kind` (`freight`, `fee`; check C1), `qbo_bills.references_invoice_number` (vendor credit tied by invoice number; shape unverified until T-1.1.1), `extraction_runs.in_use` with a partial unique index (one run in use per document), `exceptions.label` (for example "credited in QuickBooks, no document") |
+| Check constraints | As section 3.5 and 3.6, with `coalesce` on nullable columns so that a null cannot satisfy a `receipt_absent` check. A trigger refuses a `receipt_absent` exception linked to a `matched` result |
+| Grants | `matchdesk_app` has insert and select only on `audit_events` and `exception_events` (also refused by trigger), insert and select on `line_matches` with update only of `is_current` and `superseded_by_run_id`, update only of `valid_to` on `tolerance_rules`, select on `ruleset_versions` and `alembic_version` |
+| Roles | `matchdesk_app` (NOSUPERUSER NOBYPASSRLS) exists. Locally the owner is the machine's superuser instead of a `matchdesk_owner` role; tables also have `FORCE ROW LEVEL SECURITY`. `matchdesk_backup` is not created |
+| Manifest and CI parity | ORM parity is checked by `alembic check` in an integration test; the catalogue manifest of section 9 is not built (T-2.2.2) |

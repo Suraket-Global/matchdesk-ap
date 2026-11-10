@@ -95,7 +95,7 @@ One deployable codebase, two processes (web API and worker), one PostgreSQL data
 |---|---|---|---|
 | Backend | Python 3.12, FastAPI, Pydantic 2, SQLAlchemy 2, Alembic | Decimal arithmetic and a property-testing library suit the rule engine (MH-06); one language for API, worker and data scripts | Node: no first-class decimal type |
 | Structure | Modular monolith; `api` and `worker` are two entry points of the same package and image | Removes copied configuration and utilities between web and worker (R-03, R-06, R-07) | Separate services: more to deploy for one founder |
-| Jobs | PostgreSQL-backed queue (Procrastinate) | Jobs are enqueued in the same transaction as the business change, so nothing is lost between commit and enqueue (MH-04); no second datastore | Redis with Celery: extra service, enqueue outside the transaction |
+| Jobs | PostgreSQL-backed queue (Procrastinate proposed; B1 built a `job_queue` table behind `tenancy.jobs` with the same properties, so enqueue shares the business transaction without a second connection pool; see verification-report-fixing.md section 9.4) | Jobs are enqueued in the same transaction as the business change, so nothing is lost between commit and enqueue (MH-04); no second datastore | Redis with Celery: extra service, enqueue outside the transaction |
 | Database | PostgreSQL 16 with row-level security and `pg_trgm` | Tenant isolation enforced below the application (MH-01); trigram similarity for alias suggestions (MH-10) | SQLite: no row-level security |
 | Frontend | React 18, TypeScript, Vite, React Router, TanStack Query, PDF.js; built to static files | The match view is a keyboard-driven, three-pane screen with a PDF beside data (MH-11); no public pages, so server rendering buys nothing | Next.js (the research record's suggestion): a second server runtime to operate |
 | File storage | Local persistent volume behind a `blobstore` module; files streamed through the API after a tenant check | Every download passes one authorisation path (MH-01, R-05, R-13); no pre-signed links to leak or to point at internal hosts (R-16) | Object store on day one: deferred until volume needs it |
@@ -158,10 +158,10 @@ flowchart TB
 | `identity` | Users, memberships, sign-in links, sessions, invitations, support grants | kernel |
 | `qbo` | Connection, token encryption, sync runs, local copies of QuickBooks records | kernel, `audit` |
 | `receiving` | Imports, column mappings, receipts | kernel, `audit` |
-| `intake` | Batches, documents, inbound email | kernel, `audit` |
+| `intake` | Batches, documents, inbound email | kernel, `audit`, `extraction` (public interface, for document processing; B1) |
 | `extraction` | Provider adapters, extraction runs, verification rules | kernel |
 | `matching` | Rule set, alias resolution, tolerances, duplicate rules, credit netting. Functions take plain data and return decisions; no database or network | `core` only |
-| `exceptions` | Exceptions, resolutions, approvals | kernel, `matching` (types), `audit` |
+| `exceptions` | Exceptions, resolutions, approvals; match runs and their stored results | kernel, `matching`, `audit`, and the read models of `qbo`, `receiving` and `intake` to assemble match inputs (B1) |
 | `reporting` | Back-test report, weekly summary, usage | kernel, read interfaces of other modules |
 | `audit` | Append-only audit events | kernel |
 | `api`, `worker` | Wiring only | Any domain module through its public interface |
@@ -439,7 +439,7 @@ Whether QuickBooks exposes bill lines linked to purchase-order lines is unverifi
 | 6 | QuickBooks' billed quantity for the PO line does not exceed the invoiced quantity known from documents and bill lines | `history_incomplete` (does not stop; blocks `matched`) | Line amount, unverified |
 | 7 | At least one counting receipt line exists for the PO line. No setting disables this check | `receipt_absent` (does not stop; blocks `matched`; check 8 skipped). Sub-reason `not_received` if the line is covered, `supplier_slip_only` if only class C exists, otherwise `no_evidence` | Line amount. `not_received`: finding candidate. Others: unverified, unless the controller confirms non-delivery |
 | 8 | Cumulative invoiced quantity (documents and bill lines up to and including this document, net of credits, in PO units) ≤ cumulative received quantity + quantity tolerance | `qty_over_received`, on the later document | Excess quantity × invoice unit price, finding candidate |
-| 9 | Cumulative invoiced quantity ≤ ordered quantity + quantity tolerance | `qty_over_ordered` | Excess quantity × invoice unit price, finding candidate. Where 8 and 9 both fail on one line, one amount is reported: the larger |
+| 9 | Cumulative invoiced quantity ≤ ordered quantity + quantity tolerance | `qty_over_ordered` | Excess quantity × invoice unit price, finding candidate. Where 8 and 9 both fail on one line, one amount is reported: the larger; on equal amounts, the `qty_over_received` exception carries it and `qty_over_ordered` reports 0.00 |
 | 10 | Absolute price difference ≤ max(absolute tolerance, percentage tolerance × PO price) | `price_variance` | (Invoice price − PO price) × invoice quantity, less any price credit, finding candidate. Negative differences are recorded as favourable and raise nothing |
 
 **One line, several exceptions, no double count.** A line may carry a non-stopping exception (6 or 7) and one or more of 8 to 10; each is its own exception row with its own `variance_amount`. Its line result is stored once with status `exception`. Each exception also has a `reported_amount`, computed per line so that the amounts add up to no more than the line amount:
