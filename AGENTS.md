@@ -96,7 +96,7 @@ Utilities index: *(empty until code exists)*.
 | A task estimate | `execution-plan.md` section 5 totals; the build timeline, start month, ramp tables and troughs in `Decision.md` section 7.5; hour figures quoted in `Decision.md` sections 7.1, 9 and 11 |
 | The refund criterion, the evidence classes or the receiving-coverage rule | `Decision.md` sections 3 and 5.1 first; then `PRD.md` MH-03, MH-07, MH-16; `TRD.md` section 8.5; `schema.md` checks; tests UT-16, UT-17, UT-30, IT-17 |
 | An accepted security or accessibility gap | The gap tables in `TRD.md` sections 8.1, 8.3, 8.7 and `design.md` section 10; the open-items table in `verification-report-fixing.md` section 7 |
-| A source or a verified fact | `Decision.md` section 12 with date consulted, scope and restriction; remove "unverified" only where the source was actually read |
+| A source or a verified fact | `Decision.md` section 13 with date consulted, scope and restriction; remove "unverified" only where the source was actually read |
 | Stack or deployment | `TRD.md` sections 4 and 7; proposed commands in `execution-plan.md` section 6; this file's section 5 |
 | A risk's prevention or test | Only the row in `verification-report-fixing.md` section 5 |
 

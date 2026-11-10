@@ -11,7 +11,7 @@ Every number in this repository carries one of three labels.
 | Label | Meaning |
 |---|---|
 | **[chat]** | Stated in the portfolio owner's earlier discussion (recorded in the decision brief). |
-| **[source: SRC-nn]** | Read by the author at a named source listed in [section 12](#12-sources-and-assumptions). |
+| **[source: SRC-nn]** | Read by the author at a named source listed in [section 13](#13-sources-and-assumptions). |
 | **[assumption]** | Everything else: unit-economics inputs produced by the site model, figures from the unverified research record, and the author's own proposals. An assumption is never a finding. |
 
 Results calculated from assumptions are themselves assumptions. Currency is CAD throughout unless a line says otherwise. The only foreign-exchange conversion used is 1 USD = 1.38 CAD, direction USD to CAD, a site-model scenario value **[assumption]** with no sourced rate or rate date; it is used only to compare competitor list prices and one cost sensitivity.
@@ -253,6 +253,8 @@ In the downside the account base tops out at 15, below the 34 needed. The busine
 
 The base case takes **month 7** for the first subscription, which is the low build estimate with one developer. Month 8 is the high estimate. Month 6 needs two developers or the smaller 142–225 hour cut (225 ÷ 140 = 1.6 months). Both are shown as sensitivities.
 
+**Who builds while the founder sells.** The ramp keeps outreach running every month. From month 3 that is 20–30 hours of outreach and calls plus 1.2 hand deliveries at 12–20 hours (14.4–24.0), so 34.4–54.0 hours a month, 25–39% of 140 **[assumption]** ([section 12.8](#128-first-30-60-and-90-days)). Month 7 therefore holds only if a developer other than the selling founder builds, or if outreach pauses during the build. For a founder who builds alone and keeps selling, productive build hours are 140 − 34.4 = 105.6 to 140 − 54.0 = 86.0 a month: 338 ÷ 105.6 = 3.2 months on the low estimate, which puts the first subscription in **month 8** (the month-8 row of the table below is then the base), and 534 ÷ 86.0 = 6.2 months on the high estimate, which puts it in month 11. Month 11 is not tabulated; by the rule under the table (2,700 and 8,700 per month of delay) it is four months after the base: −27,826 − 4 × 2,700 = CAD −38,626 without founder compensation and −188,841 − 4 × 8,700 = CAD −223,641 with it, and 27 accounts in month 43. How many developers there are is a missing input.
+
 Rules used, all **[assumption]**:
 
 - New paying accounts per month from the start month: 1.2 in the base case (the chat's funnel, section 8).
@@ -300,6 +302,16 @@ Reading the base case:
 | Month 8 | −30,526 | 15 | −197,541 | 44 | 40 |
 
 Each month of delay adds 2,700 (fixed plus acquisition spend) to the trough without founder and 8,700 with founder.
+
+**Excluded from the ramp: the cost of a separate developer.** The ramp charges CAD 6,000 a month of founder compensation and no developer cash. The month-7 base holds only if someone other than the selling founder builds (see "Who builds while the founder sells" above). If that developer is paid at the model's CAD 100 an hour **[assumption]**, the build costs 338 × 100 = CAD 33,800 to 534 × 100 = CAD 53,400 (execution-plan.md section 5), spent in months 3 to 6, before either trough. It adds to them in full:
+
+| Case | Deepest cash without founder | Deepest cash with founder |
+|---|---|---|
+| Month 7 base, as tabulated (developer cost excluded) | −27,826 | −188,841 |
+| Month 7, paid developer, low estimate (338 hours) | −27,826 − 33,800 = −61,626 | −188,841 − 33,800 = −222,641 |
+| Month 8, paid developer, high estimate (534 hours) | −30,526 − 53,400 = −83,926 | −197,541 − 53,400 = −250,941 |
+
+The developer cost alone is larger than the tabulated trough without founder compensation. A founder who builds alone pays no such cost but reaches the first subscription in month 8 or 11, with the troughs given above.
 
 **Downside case, first subscription in month 7, CAD** (gross profit 146.48, churn 4%, 0.6 new accounts per month, acquisition spend 1,800 per month)
 
@@ -383,6 +395,7 @@ Checks:
 **Proposed revision [assumption], for the founder to accept or reject:**
 
 1. Contact a cohort of 500 distinct prospects in days 1–21, and record warm introductions separately. Lead cost 500 × 3.50 = CAD 1,750, which is CAD 550 above the research record's CAD 1,200 go-to-market budget; the founder must fund the difference or accept a cohort of 340 (1,200 ÷ 3.50 = 342), which the budget covers.
+   **Scheduled volume.** [Section 12.4](#124-channel-sequence-and-weekly-volume) finds that 500 in 21 days is 167 a week, more than one founder can send, and schedules 300 (100 a week). On 300 the last row of the table below applies to clause 3: it passes 33.8% of the time with the funnel as assumed. The cost is then 300 × 3.50 = CAD 1,050, inside the budget. Section 12.8 sets out the choice this leaves.
 2. Check at **day 60** (day 21 plus the 35-day cycle is day 56). Thirty-five days is an average, so about half of the last week's contacts will not have decided by then.
 3. **Stop** if fewer than 2 back-tests are paid from cold outreach by day 60.
 4. **Stop** if fewer than 5 of the first 8 qualified distributors can show independent receiving evidence (class A or B of section 3) for at least half of a sample of 20 purchase-order lines from last month. The 5-of-8 gate is the research record's; the sample and the one-half threshold are the author's.
@@ -417,15 +430,204 @@ The chat's 30-day rule stays on record and in force until the founder decides.
 
 ## 11. Open decisions for the founder
 
-1. Accept or reject the revised stop rule in section 9, including its stated false-stop risk and the CAD 550 budget overrun for a cohort of 500.
+1. Accept or reject the revised stop rule in section 9, including its stated false-stop risk and the CAD 550 budget overrun for a cohort of 500. The go-to-market plan schedules 300, not 500; on 300 clause 3 passes 33.8% of the time, so also choose between (a) and (b) in [section 12.8](#128-first-30-60-and-90-days) before day 1.
 2. Accept, change or reject the refund criterion in section 5.1, including the CAD 500 threshold and the accepted residual risk.
 3. Confirm the definitions of paying account and billable unit in section 6.
 4. Supply the composition of the CAD 900 monthly fixed cost and the location of the VPS (affects data-residency statements in [TRD.md](TRD.md)).
 5. Confirm who signs and pays for the pilot (section 2), what the CAD 500 covers and how Phase 0 back-tests are delivered by hand (section 5).
-6. Choose the full build (338–534 hours, first subscription about month 7) or the smaller cut (142–225 hours, about month 6) in [execution-plan.md section 5](execution-plan.md#5-estimate-summary).
+6. Choose the full build (338–534 hours) or the smaller cut (142–225 hours, about month 6) in [execution-plan.md section 5](execution-plan.md#5-estimate-summary), and say who builds. The full build has two readings ([section 7.5](#75-cash-required-during-the-acquisition-ramp)). (a) First subscription about month 7 with a developer other than the selling founder; that developer's cost, CAD 33,800–53,400 at CAD 100 an hour [assumption], is outside the ramp and deepens the trough to CAD −61,626 on the low estimate, or −83,926 on the high estimate with the first subscription in month 8 (without founder compensation). (b) A founder who builds alone and keeps selling: first subscription in month 8 (trough CAD −30,526 without founder compensation, −197,541 with) or month 11 (−38,626 and −223,641).
 7. Accept or change the definition of independent receiving evidence in section 3.
+8. Accept or change the go-to-market plan in [section 12](#12-go-to-market-plan): the weekly volume of 100 emailable prospects (12.4), the order-form step from pilot to subscription (12.6) and the three channel signals (12.9). Before T-0.2.2 sends anything, either obtain a lawyer's confirmation of the anti-spam reading in 12.4, or record here in words that the founder accepts the risk of sending on the author's unverified reading, with a maximum penalty of CAD 1,000,000 for an individual [source: SRC-13].
 
-## 12. Sources and assumptions
+## 12. Go-to-market plan
+
+How the first paying accounts are to be won. Nothing here has been done and no message has been sent to anyone. Every number in this section is **[assumption]** unless it is marked **[chat]** or **[source: SRC-nn]**; rates and counts taken from other sections keep the label they have there. Where another section already holds the content, this section cites it.
+
+### 12.1 Ideal customer profile
+
+| Item | Record |
+|---|---|
+| Firm, size, region | As in [section 2](#2-market-people-and-current-practice): Lower Mainland food, building-supply and industrial wholesale distributors on QuickBooks Online Plus or Advanced with purchase orders enabled; revenue CAD 5–50 million, 20–150 employees, 1–4 accounts-payable staff, 200–1,500 supplier invoices a month [assumption] |
+| Trigger that makes them need it now | The buying triggers of section 2: a duplicate or overpayment just discovered, the clerk leaving, a year-end audit finding, volume beyond one clerk [assumption]. Discovery asks "when did you last find an overpayment or duplicate?" and the funnel log records the answer |
+| Qualified | The qualification rule of section 2, unchanged |
+| Disqualified, do not offer the pilot | (1) Books on Sage 50, QuickBooks Desktop or Enterprise, or a QuickBooks Online plan below Plus (no purchase orders [source: SRC-06]). (2) Purchase orders for under 70% of purchases, or under 200 supplier invoices a month. (3) Already running a procurement suite or an accounts-payable tool with three-way match. (4) Most supplier invoices in a currency other than CAD; the planned rules do not convert (test UT-29) (author proposal). (5) Outside the Lower Mainland, for the launch cohort only |
+| Recorded, not sold to | A firm that passes the rule but has no independent receiving evidence (class A or B, [section 3](#3-competitor-gap-what-was-read-today-and-what-was-not)). It is counted under stop-rule clause 4 of [section 9](#9-stop-rule). If its controller still wants the back-test, the agreement says in advance that the result will be two-way only |
+
+### 12.2 Named roles
+
+| Question | Role | Basis |
+|---|---|---|
+| Who feels the pain | The accounts-payable clerk, daily; the controller when an overpayment surfaces | Section 2 [assumption] |
+| Who signs and pays | The controller; the owner where the controller cannot sign | Section 2 (author proposal, open decision 5) |
+| Who can block | The owner (budget, under about CAD 10,000 a year); the warehouse or receiving lead, by not handing over the receiving log; whoever holds QuickBooks administrator rights, often an outside bookkeeper, by not granting read access | Owner from section 2; the other two are author assumptions to be confirmed in T-0.1.2 |
+| Who supplies the sample data | Controller: QuickBooks read access and the evidence-class attestation. Clerk: invoice and credit-note PDFs and earlier invoices on open purchase orders. Receiving lead: the warehouse record | Inputs listed in [section 5](#5-offer-channel-and-pilot) |
+
+### 12.3 Prospect list
+
+- **Sources.** Those named in section 5. None of the lists was opened; their size and terms of use are unverified, no source consulted ([section 13](#13-sources-and-assumptions)).
+- **How many exist.** Unknown: a missing input (section 8, "Universe size"). T-0.1.1 produces two counts: all distinct entities, and the **emailable** ones defined below. Both are compared with 300 (one month of this plan), 9,900 and 11,400.
+- **How it is built.** T-0.1.1 in [execution-plan.md](execution-plan.md): pull the lists, merge on legal name and address, drop entities outside 12.1, add one named finance contact per entity. Cost CAD 3.50 per row (section 5).
+- **Consent basis per row.** For each contact the list records where that person's or firm's email address is published (the page address and the date seen), whether the page carries a statement refusing unsolicited messages, and so one of two values: *emailable* (published by the firm or the person, no such statement, and the contact's role covers supplier invoices) or *phone only*. An address guessed from a pattern, returned by a contact-finding tool or read from LinkedIn is phone only, whether or not a verification tool says it delivers. The reason is in 12.4.
+- **How it is checked.** One row per legal entity; source recorded per row; a named contact on at least 80% of rows; and a hand check of 20 random rows against the firm's own website for "still trading", "wholesale", "Lower Mainland" and, on emailable rows, that the address is where the row says it is (author proposal). If more than 4 of the 20 fail, the list is rebuilt before any send. Whether a firm uses QuickBooks Online cannot be read from a list; it is learned at the reply or the call, which is why the funnel counts qualification separately.
+
+### 12.4 Channel, sequence and weekly volume
+
+First channel to test: direct outreach to controllers, leading with the paid back-test (section 5). The first 10 offers go to warm introductions and are logged apart from cold outreach (section 5; metrics M-1a and M-1b).
+
+**What Canada's anti-spam law allows, as the author read it.** This is the author's reading of the statute, not legal advice, and no lawyer has seen it. The Act [source: SRC-13] and its Regulations [source: SRC-14] were read on 2026-11-10 through a summarising page fetch, so wording below is paraphrase. The regulator's guidance and the regulations that prescribe the form of the identification were not read: unverified, no source consulted.
+
+| Point | What the text says | Effect on this plan |
+|---|---|---|
+| What is covered | Section 6 prohibits sending a commercial electronic message to an electronic address without the recipient's express or implied consent. "Electronic address" covers email, instant-messaging, telephone and similar accounts, and a message is commercial by its purpose. The Regulations give no general exemption for business-to-business messages between strangers | A LinkedIn connection note or message sent to open a sale is covered as well as an email, however it is worded. The earlier idea of LinkedIn as a fallback is dropped |
+| Implied consent this plan can rely on | Section 10(9)(b): the recipient has conspicuously published the address, or caused it to be published; the publication carries no statement that they do not want unsolicited commercial messages; and the message is relevant to their business role or duties | Email goes only to *emailable* rows (12.3). The first touch is about checking supplier invoices and goes to the person responsible for them |
+| No consent basis | An address found or inferred by a tool was not published by the recipient. Section 13 puts the burden of proving consent on the sender | *Phone only* rows are never emailed. The list keeps the proof for every emailable row |
+| Telephone | Section 6(8)(a): section 6 does not apply to an interactive two-way voice conversation | The phone call is the only step open for phone-only rows. Canada's telemarketing rules were not read: unverified, no source consulted |
+| After a call or a reply | Section 10(9)(c): consent is implied where the recipient gave the sender the address without saying they do not want such messages, and the message is relevant to their role | If a contact on a call asks for details by email, that email may be sent to the address they give; the log records the date and their words |
+| Warm introductions | Regulations section 4: the consent rule does not apply to the first message sent after a referral by someone who has a business or personal relationship with both sender and recipient, provided the message gives the referrer's full name and says it is sent because of the referral | Every warm-introduction email names the referrer in full and says so. Only that first message is covered; a second needs a reply or another basis |
+| Content of every message | Section 6(2): identify the sender, give contact information that stays valid for 60 days (section 6(3)), and include an unsubscribe mechanism. Section 11(3): an unsubscribe request is honoured within 10 business days | All three emails of 12.5 carry the same footer. The funnel log has a "do not contact" date per prospect, checked before every send |
+| Penalty | Section 20(4): the maximum penalty for a violation is CAD 1,000,000 for an individual | The first send waits for a lawyer's confirmation of this table, or for the founder's written acceptance of the risk under open decision 8. An experienced peer's opinion is not enough for this point |
+
+**Sequence for one prospect.**
+
+| Day | Emailable row | Phone-only row |
+|---|---|---|
+| 0 | First-touch email (12.5) | No message. May be chosen for a call |
+| 4 | Phone call to the main line asking for accounts payable, for the 30 best-fitting prospects of the month, emailable or not | The same |
+| 7 | Follow-up email (12.5) | — |
+| 14 | Closing email: two lines saying this is the last note and repeating the offer in one sentence, with the same footer. No further contact unless they reply | — |
+| On a reply or a call that leads somewhere | A 20–30 minute discovery call (T-0.2.5): the five discovery questions of T-0.1.2, the qualification rule, "who signs a CAD 500 pilot", then a walk through a synthetic sample report. No application exists in Phase 0, so this call is the "demo" of section 8 | The same |
+
+LinkedIn is used to find who holds the finance role, not to send messages.
+
+**One volume, used everywhere in this plan.** 100 new emailable prospects a week for three weeks, and no new sends in the fourth week, which goes to calls, follow-ups and hand delivery of back-tests. That is 100 × 3 = **300 a month**, the chat's 300 **[chat]**, or 300 ÷ 4.33 = 69 a week on average. Founder time: 12–18 hours a month on sending and the 30 calls (T-0.2.2) and 8–12 on discovery calls (T-0.2.5), so 20–30 hours a month, 5–7.5 a week; this assumes templated sends through an email tool with only the name and firm changed by hand. The schedule (12.8), the tasks and their hours, and the stop-rule probabilities quoted in 12.8 all use this volume. The 500-prospect cohort in clause 1 of section 9 would need 167 a week (500 ÷ 3), which one founder cannot sustain beside the census and the hand match; this plan does not schedule it, and section 9 now says what clause 3 is worth on 300.
+
+**Reconciliation with the funnel, the ramp and the acquisition cost.**
+
+| Step | Arithmetic | Result per month |
+|---|---|---|
+| New emailable distinct prospects | 100 × 3 waves | 300 |
+| Replies at 5% | 300 × 0.05 | 15 |
+| Discovery calls at 40% | 15 × 0.40 | 6 |
+| Paid back-tests at 20% | 6 × 0.20 | 1.2 |
+| Paying accounts, Reading A (every back-test converts) | 1.2 × 1.00 | **1.2** |
+| Paying accounts, Reading B (half convert) | 1.2 × 0.50 | 0.6 |
+
+1.2 is the "New" column of the base ramp in [section 7.5](#75-cash-required-during-the-acquisition-ramp) and 0.6 that of the downside case; the rates are those of [section 8](#8-funnel-recomputed-from-distinct-reachable-prospects). The ramp spends CAD 1,800 a month, which is 1.2 × the model's CAD 1,500 by definition and so confirms nothing; the only identified cash is list cost, 300 × 3.50 = 1,050 a month, CAD 875 per account on Reading A (section 8). Timing: 35 days **[chat]** from first contact to a paid back-test; a recurring account can start only once the application exists, month 7 in the base case. Back-tests sold before then wait for release (section 5); at 1.2 a month the ramp could have about five waiting when the application is released, and it does not count them, which is conservative.
+
+**The funnel restated on emailable rows.** The 5% reply rate is an email rate. The brief gives no conversion rate for phone-only prospects, so they add nothing to the expected numbers. The share of list rows that are emailable is unknown until T-0.1.1.
+
+| Emailable share of the list | List rows needed for 300 emailable a month | List cost a month (× 3.50) | List cost per paying account (÷ 1.2) | Expected paid back-tests if only 300 rows are built |
+|---|---|---|---|---|
+| 100% | 300 | 1,050 | 875 | 300 × 0.004 = 1.2 |
+| 50% | 600 | 2,100 | 1,750 | 150 × 0.004 = 0.6 |
+| 25% | 1,200 | 4,200 | 3,500 | 75 × 0.004 = 0.3 |
+
+Below a share of 1,050 ÷ 1,800 = 58%, list cost alone exceeds the CAD 1,800 a month the ramp allows for all acquisition. The thresholds of section 8 (9,900 and 11,400) are counts of prospects who can be contacted, so here they mean emailable rows; at a 50% share the list would need 19,800 rows for 27 accounts. The limit of the launch market stated in [section 1](#1-proposed-decision) is therefore tighter than section 8 shows, by a factor nobody knows yet.
+
+### 12.5 Messages (synthetic; never sent)
+
+The firm and the people are invented. Neither message quotes a result, because none exists; once T-0.1.4 has produced one, the founder may add one sentence stating that single figure and that it comes from one distributor. Every email, including the day-14 closing note, ends with the same footer.
+
+**First touch**
+
+> Subject: Checking supplier invoices against what was received at Fictional Distributor A
+>
+> Hello Ms. Example,
+>
+> I am a Vancouver developer working on one narrow thing for wholesale distributors on QuickBooks Online: checking every supplier invoice line against the purchase order and against your own receiving record, then listing only the lines that do not agree.
+>
+> The offer is a back-test of last month for CAD 500. If the discrepancies we can evidence come to less than CAD 500, the fee is refunded.
+>
+> From you it needs four things: read-only access to purchase orders and bills in QuickBooks; last month's supplier invoice and credit-note PDFs; for any purchase order still open from earlier months, the earlier invoices and credit notes on it; and your warehouse receiving log or receiver-signed delivery slips for those orders. Without a receiving record of your own the check is two-way only, and I would tell you that before you pay.
+>
+> Would 20 minutes next week be useful? If someone else looks after accounts payable, I would be glad to be pointed to them.
+>
+> [Founder's full name], [business name]
+> [Postal address] · [phone] · [email]
+> I wrote to this address because it is published on [page] as the contact for accounts at Fictional Distributor A. To receive nothing further from me, reply "stop" or use [unsubscribe link]; I will remove you within 10 business days.
+
+**Follow-up, day 7**
+
+> Subject: Re: Checking supplier invoices against what was received at Fictional Distributor A
+>
+> Hello Ms. Example,
+>
+> One addition to my note of last week. The back-test is done by hand for now. Your side is to connect QuickBooks, send the invoice PDFs with the earlier invoices on still-open purchase orders, export the receiving log, and confirm in one line who keeps that log. You get the report within 15 business days. It lists short shipments, price differences against the purchase order and duplicate invoices, each with its documents, and it also says how many lines could not be checked.
+>
+> The CAD 500 covers that report and, once the application is released, 30 days of the same check on new invoices before they are paid. Nothing recurs unless you choose a monthly plan afterwards.
+>
+> If this is not a problem at Fictional Distributor A, a one-line reply saying so helps me too.
+>
+> [Founder's full name], [business name]
+> [Postal address] · [phone] · [email]
+> To receive nothing further from me, reply "stop" or use [unsubscribe link]; I will remove you within 10 business days.
+
+The refund wording follows the proposal of [section 5.1](#51-refund-criterion-proposal) and changes if the founder changes it. Neither message says how much of the clerk's time the inputs take; that is unknown until T-0.1.4 has measured it. "Read-only" is used only if T-1.1.1 or Intuit's consent screen confirms such a scope exists; otherwise the sentence says "we read and never write". A warm-introduction email opens instead with the referrer's full name and the statement that it is sent because of that referral (12.4).
+
+### 12.6 Pilot offer and the step to a recurring account
+
+| Item | Record |
+|---|---|
+| What the buyer gets, pays and supplies | Section 5: the 30-day pilot for CAD 500 **[chat]**, the four inputs listed there, hand delivery within 15 business days while no application exists |
+| What ends the pilot | Day 30 of live checking. The refund is decided once, on the governing report (section 5.1). For a Phase 0 account the 30 days run from the day the application is released to it |
+| Exact step to a recurring paid account (author proposal) | At the report review session (T-7.2.2), and no later than day 25, the founder gives the controller a one-page order form. It names the tier by the invoice and credit-note count measured during the pilot (up to 300 Starter, up to 800 Pro, up to 2,000 Business; prices **[chat]**), monthly billing, and a start date of day 31. The controller, or the owner where the controller cannot sign, signs it and pays the first month through a manually issued invoice or payment link (PRD section 9 defers in-app billing). The account counts as paying when that first payment is received |
+| If the form is not signed by day 30 | Live checking stops on day 30. Nothing is charged. The report stays with the buyer; data is deleted on the schedule of the pilot agreement |
+
+The pilot-to-subscription rate is unknown (missing inputs, section 7.5). Reading A takes it as 100% and Reading B as 50%.
+
+### 12.7 Three likely objections
+
+| Objection | Honest answer |
+|---|---|
+| "Our clerk already checks invoices against the purchase order and packing slip." (the current workaround) | That may be enough, and the back-test is how to find out. The research record says many firms check only totals or invoices above a threshold [assumption]; nobody has measured it here. If the back-test evidences under CAD 500 of discrepancies in a month, the fee is refunded and the honest conclusion is that the manual check works |
+| "We do not record receiving in QuickBooks." | Nobody does in the sense that matters: the quantity QuickBooks shows as received appears to come from entering the bill ([section 3](#3-competitor-gap-what-was-read-today-and-what-was-not), still an assumption). What is needed is a warehouse log or delivery slips signed by the receiver. A supplier's unsigned packing slip does not count. With neither, the report is a two-way check, every line reads "receipt absent", and the pilot is probably not worth CAD 500 to that firm |
+| "We already pay for BILL" or "BILL does this." | BILL's pricing page lists two-way matching from its Corporate plan at $89 per user per month and three-way matching only on the custom-priced Enterprise plan [source: SRC-01]. If a two-way check is enough, BILL Corporate for two users costs about the same as MatchDesk's Starter tier (section 4) and already handles payments; MatchDesk is not the better buy there. MatchDesk is for the firm that wants the receipt checked as well and wants to keep purchasing in QuickBooks. Nothing is claimed about BILL in Canada (section 3) |
+
+Two objections from the research record are answered elsewhere: supplier item codes that differ from the firm's own (the alias map, PRD MH-10) and Sage 50 (disqualified, 12.1). The research record's answer that scanned packing slips can serve as the receipt is **not** used: it holds only for receiver-signed slips (class B).
+
+### 12.8 First 30, 60 and 90 days
+
+Day 1 is the first send, after T-0.1.1 and the confirmation of 12.4. Each month repeats 12.4: waves of 100 emailable prospects on days 1–7, 8–14 and 15–21 of the month. A wave is counted as decided 35 days after it ends, so the first month's waves are decided on days 42, 49 and 56 and the second month's on days 72, 79 and 86. Thirty-five days is an average; real sales will spread around these dates.
+
+| Cumulative by | Day 30 | Day 60 | Day 90 |
+|---|---|---|---|
+| Emailable prospects contacted (100 a week in three weeks of four) | 300 | 600 | 900 |
+| Expected replies (5%) | 15 | 30 | 45 |
+| Expected discovery calls (40%) | 6 | 12 | 18 |
+| Waves decided | 0 of 3 | 3 of 6 | 6 of 9 |
+| Expected paid back-tests from cold outreach (0.4% of decided prospects) | 0 | 300 × 0.004 = 1.2 | 600 × 0.004 = 2.4 |
+| Stop rule read at this point | The chat's rule, in force: 2 paid in 30 days | Clause 3 of the proposed revision: 2 paid from cold outreach | Clause 3 again, only if the founder extended at day 60 (read on day 86) |
+| Chance that rule passes if the funnel performs exactly as assumed | From cold outreach alone, close to nil: no wave is decided. It can pass only on warm introductions, whose rate is unknown | **33.8%** (300 decided) | 69.2% (600 decided) |
+| Chance it passes if the funnel runs at half the assumed rate | — | 12.2% | 33.7% |
+| Recurring paid accounts | 0 | 0 | 0 |
+| List cost at a 100% emailable share (CAD 3.50 each; see 12.4 for lower shares) | 1,050 | 2,100 | 3,150 |
+| Cash out as the ramp of section 7.5 charges it, without founder | 4,700 | 7,400 | 10,100 |
+| The same, with founder compensation | 10,700 | 19,400 | 28,100 |
+| Pilot fees received before refunds, net of card fee (not in the ramp) | 0 | 1.2 × 485.20 = 582.24 | 2.4 × 485.20 = 1,164.48 |
+| Founder hours, from the task estimates | 69–109 | 107–170 | 142–224 |
+
+- **What this schedule means for the stop rule, stated plainly.** Run exactly as scheduled, with the funnel performing exactly as assumed, this plan fails the chat's 30-day rule unless warm introductions supply the sales, and fails clause 3 of the proposed revision at day 60 about two times in three (66.2%, the "cohort of 300" row of section 9). A "stop" at Gate A is therefore the likely result even of a working funnel. What follows is a choice the founder makes before day 1, under open decision 1: (a) accept that and stop at day 60 on a miss; or (b) decide now that a miss at day 60 with at least 15 replies and 6 discovery calls from the first 300 means one more cohort, read on day 86, where 600 decided prospects give a 69.2% chance of passing and a failing funnel at half the rate still passes 33.7% of the time. Option (b) is option (b) of section 9 made specific; it moves Gate A by about one month, which adds CAD 2,700 to the cash trough without founder compensation and CAD 8,700 with it (section 7.5).
+- **The day-90 column exists only if outreach continues past day 60:** after a pass at Gate A, or under choice (b). After a stop at day 60 there is no third month.
+- **Recurring accounts stay at zero through day 90** because no application exists; the first is expected in month 7 or 8 (section 7.5). What these 90 days can produce is paid back-tests and the evidence for Gate A.
+- **Money.** The research record's go-to-market budget is CAD 1,200 inside CAD 2,000 cash for the first 30 days (section 5); the month-1 list cost of 1,050 fits inside it only if nearly every row is emailable (12.4). The ramp's higher figures are the ones the economics use.
+- **Founder hours.** Day 30: T-0.1.1 to T-0.1.5 (45–71) + T-0.2.1 (4–8) + one month of T-0.2.2 and T-0.2.5 (20–30) = 69–109; the research record says 80. Day 60 adds a second month of outreach and calls (20–30), T-0.2.3 (2–4), T-0.2.4 (2–3) and hand delivery (T-0.2.6) of 1.2 back-tests at 12–20 hours each (14.4–24.0): 107.4–170. Day 90 adds a third month (20–30) and 1.2 more deliveries (14.4–24.0): 141.8–224. The Phase 0 total in execution-plan.md section 5 (97–156 hours) covers one month of outreach, the first hand match and two deliveries; further months of outreach and further deliveries are extra. From month 3 the same selling and delivery take 34–54 hours a month from whoever does them, which is why section 7.5 gives a later first subscription for a founder who also builds.
+- **Weekly targets, weeks 1–3 of each month:** 100 first-touch emails, 10 phone calls, last week's follow-ups, 5 expected replies and 2 discovery calls. **Week 4:** no new sends; closing notes, remaining calls, hand delivery. In month 1 the eight census visits of T-0.1.2 and the hand match of T-0.1.4 run alongside.
+
+### 12.9 GTM stop rule
+
+**The product** is dropped on the rule of [section 9](#9-stop-rule): the chat's rule is in force, the revision is a proposal, and clauses 4 and 5 (receiving evidence, discrepancies under CAD 500) are what say the product, not the channel, has failed. Nothing here replaces it.
+
+**The channel** needs earlier signals, because replies and calls arrive weeks before sales. The three below are author proposals, checked for each month's 300 prospects 14 days after its third wave (day 35 for the first month). Percentages are binomial calculations on the assumed rates.
+
+| Signal | Chance of seeing it if the funnel is as assumed | If the rate is half | What it means |
+|---|---|---|---|
+| Fewer than 8 replies from 300 (expected 15) | 1.6% | 52.4% | First time: change the list source or the message once. Two months running: drop cold email as the first channel and move to the backup channel of section 5 |
+| Fewer than 3 discovery calls from 15 replies (expected 6) | 2.7% | 39.8% | Replies are not turning into conversations: the offer as worded is the problem, not the list. Rewrite 12.5 once before the next wave |
+| No paid back-test from 12 discovery calls (two months, read on day 86) | 6.9% | 28.2% | The price or the refund terms are failing. Stop spending on outreach and re-plan the offer. This signal is reached only under choice (b) of 12.8: clause 3 was missed at day 60 and the founder extended by one cohort. If the founder did not extend, clause 3 has already stopped the plan at day 60 |
+
+Replies and calls at or above expectation with sales below it at day 60 is the case choice (b) of 12.8 covers. The fit of pilot to subscription cannot be read inside 90 days; it is judged at Gate B (T-7.2.4).
+
+## 13. Sources and assumptions
 
 Date consulted for every row: **2026-11-10**. Access was through an automated page fetch; pages that render with scripts could not be read.
 
@@ -441,11 +643,14 @@ Date consulted for every row: **2026-11-10**. Access was through an automated pa
 | SRC-08 | Stripe Canada pricing, `stripe.com/en-ca/pricing` | Canada; standard published rates | 2.9% + CAD 0.30 for domestic cards; pre-authorised debit 1% + CAD 0.40 capped at CAD 5.00 | None |
 | SRC-11 | Intuit Australia product post "Easily keep track of backordered items", `quickbooks.intuit.com/au/blog/product-update/easily-keep-track-backordered-items/` | Australia; QuickBooks Online Plus; page metadata dates 2017-07-19 and 2023-07-05 | Several bills, expenses, cheques per purchase order; "Received" column; "Closed" tick; no item receipt mentioned | Vendor marketing post, not documentation. Pointed out by the independent reviewer (F-022) and then opened by the author |
 | SRC-12 | Intuit community thread "Process for receiving partial items on a PO…", reply by a QuickBooks Team member dated 2023-08-02 | Intuit-hosted forum, en-us; QuickBooks Online | Purchase orders close automatically when all quantities are added to bills, expenses or checks | Staff forum reply, not documentation. Does not state whether an item receipt exists. Pointed out by the reviewer (F-022) and then opened by the author |
+| SRC-13 | Justice Laws, *An Act to promote the efficiency and adaptability of the Canadian economy by regulating certain activities that discourage reliance on electronic means of carrying out commercial activities…* (S.C. 2010, c. 23), `laws-lois.justice.gc.ca/eng/acts/E-1.6/`; page states current to 2026-10-19, last amended 2026-01-01 | Canada, federal statute | Sections 1(1), 1(2), 6(1) to 6(3), 6(8), 10(9), 11(3), 13, 20(4), as used in section 12.4 | Read through a summarising page fetch that returns short quotations and paraphrase; the author did not see every provision word for word. The author's reading, not legal advice |
+| SRC-14 | Justice Laws, Electronic Commerce Protection Regulations, SOR/2013-221, `laws-lois.justice.gc.ca/eng/regulations/SOR-2013-221/`; page states current to 2026-10-19 | Canada, federal regulations | Section 3 (excluded messages; no general business-to-business exclusion between strangers; messaging services only with consent) and section 4 (first message after a referral) | Same restriction as SRC-13 |
 | SRC-09 | GitHub Spec Kit README and `spec-driven.md` | Method reference | Requirement, plan and task structure; see below | None |
 | SRC-10 | arc42 overview, `arc42.org/overview/` | Method reference | Section checklist for [TRD.md](TRD.md) | None |
 | — | Intuit developer documentation (PurchaseOrder entity, API features, partner programme FAQ) | — | Not read | Pages returned only a title. Every statement about the QuickBooks API in this repository is **unverified, no source consulted** until T-1.1.1 |
 | — | Intuit help article on adding a purchase order to a bill | — | Not read | HTTP 404 on two URL variants |
 | — | Prospect lists and associations named in section 5 | — | Not read | Not attempted; their size and terms of use are **unverified, no source consulted** |
+| — | Regulator's guidance on the anti-spam law, the regulations prescribing the form of sender identification, and Canada's telemarketing rules | — | Not read | Not attempted by the author; the reviewer reported HTTP 403 on the regulator's guidance page. **unverified, no source consulted** |
 | — | Extraction model pricing | — | Not read | The CAD 0.03 per invoice figure is a model assumption |
 | — | WCAG 2.2 and OWASP ASVS 5.0.0 | — | Criteria in [design.md](design.md) were cited from the author's knowledge. ASVS requirement numbers in [TRD.md](TRD.md) are those the independent reviewer cited from ASVS 5.0.0 in review round 1; the author did not open either standard | The reviewer reported that all WCAG criterion numbers, names and levels in design.md are correct |
 
@@ -456,4 +661,4 @@ Date consulted for every row: **2026-11-10**. Access was through an automated pa
 
 **Items from the research record deliberately not used in calculations, with reasons.** Launch, minimum and maximum prices (CAD 299, 149, 999): not reconciled with the tiers in chat. USD and AED price lists and the US and UAE market scores: outside the launch market. Week-4 gate of CAD 750 MRR: cannot be met inside the sales cycle (section 5). "Pull item receipts from QuickBooks Online" and "post matched bills to QuickBooks": replaced and deferred, see section 3 and [PRD.md section 9](PRD.md#9-non-goals-and-deferred-items). Sage 50 file-based pilot and desktop connector: out of scope. Scale steps (QuickBooks app store listing, US verticals): after the pilot question is answered.
 
-**Assumptions preserved unresolved.** Every unit-economics input; the tier mix; all funnel rates; the 35-day cycle applying to the back-test sale; the ideal-account description; the customer-benefit model; the brief's claim about BILL in Canada; the Procurify price; everything about the QuickBooks API; whether QuickBooks bills carry line quantities linked to purchase-order lines (needed for open-PO history); the definition of independent receiving evidence; the refund criterion.
+**Assumptions preserved unresolved.** Every unit-economics input; the tier mix; all funnel rates; the 35-day cycle applying to the back-test sale; the ideal-account description; the customer-benefit model; the brief's claim about BILL in Canada; the Procurify price; everything about the QuickBooks API; whether QuickBooks bills carry line quantities linked to purchase-order lines (needed for open-PO history); the definition of independent receiving evidence; the refund criterion; the author's reading of anti-spam law in section 12.4 and the share of prospects whose address is published.
