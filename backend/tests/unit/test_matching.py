@@ -207,7 +207,10 @@ def test_ut12_september_qbo_bill_counts_as_invoiced():
     assert line.qty_invoiced_cum_net == D("200")
     assert line.qty_invoiced_prior_qbo == D("100")
     e = one(res, T.QTY_OVER_RECEIVED)
-    assert (e.variance_qty, e.variance_amount) == (D("100"), D("420.00"))
+    assert (e.variance_qty, e.variance_amount, e.reported_amount) == (D("100"), D("420.00"), D("420.00"))
+    # Ordered is also exceeded by the same 100; only one amount is reported for the line.
+    assert one(res, T.QTY_OVER_ORDERED).reported_amount == D("0.00")
+    assert sum(x.reported_amount for x in res.exceptions) == D("420.00")
 
 
 def test_ut13_receipt_before_test_month_counts():
