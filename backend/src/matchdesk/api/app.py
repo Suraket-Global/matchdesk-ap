@@ -29,7 +29,7 @@ from matchdesk.core import (
     new_correlation_id,
     set_correlation_id,
 )
-from matchdesk.exceptions import request_run
+from matchdesk.exceptions import request_run, stale_runs
 from matchdesk.exceptions.models import ExceptionRow, LineMatch, MatchRun
 from matchdesk.identity import Principal, resolve_session
 from matchdesk.intake.models import DocumentRow, InvoiceLineRow, InvoiceRow
@@ -222,7 +222,9 @@ def create_app() -> FastAPI:
             run = s.get(MatchRun, run_id)
             if run is None:
                 raise NotFoundError("match run")
-            return _run_body(run)
+            body = _run_body(run)
+            body["stale"] = bool(stale_runs(s, [run.id]).get(run.id)) if run.state == "succeeded" else None
+            return body
 
     @app.get("/api/v1/invoices/{invoice_id}")
     def get_invoice(invoice_id: uuid.UUID, p: Auth) -> dict[str, Any]:
@@ -244,7 +246,11 @@ def create_app() -> FastAPI:
                 )
             }
             excs = s.scalars(select(ExceptionRow).where(ExceptionRow.invoice_id == inv.id)).all()
+            stale = stale_runs(s, [lm.match_run_id for lm in results.values()])
+            run_of_match = {lm.id: lm.match_run_id for lm in results.values()}
+            any_stale = any(stale.values())
             return {
+                "stale": any_stale,
                 "id": str(inv.id),
                 "doc_type": inv.doc_type,
                 "doc_number": inv.doc_number,
@@ -254,12 +260,20 @@ def create_app() -> FastAPI:
                     {
                         "id": str(ln.id),
                         "line_no": ln.line_no,
-                        "status": results[ln.id].status if ln.id in results else None,
+                        **_line_status(results.get(ln.id), stale),
                         "checks_run": results[ln.id].checks_run if ln.id in results else [],
                     }
                     for ln in lines
                 ],
-                "exceptions": [_exc_body(e) for e in excs],
+                "exceptions": [
+                    {
+                        **_exc_body(e),
+                        "stale": stale.get(run_of_match.get(e.line_match_id), any_stale)  # type: ignore[arg-type]
+                        if e.line_match_id
+                        else any_stale,
+                    }
+                    for e in excs
+                ],
             }
 
     @app.get("/api/v1/exceptions/{exception_id}")
@@ -268,7 +282,18 @@ def create_app() -> FastAPI:
             e = s.get(ExceptionRow, exception_id)
             if e is None:
                 raise NotFoundError("exception")
-            return _exc_body(e)
+            body = _exc_body(e)
+            lm = s.get(LineMatch, e.line_match_id) if e.line_match_id else None
+            if lm is not None:
+                body["stale"] = bool(stale_runs(s, [lm.match_run_id]).get(lm.match_run_id))
+            else:
+                runs = s.scalars(
+                    select(LineMatch.match_run_id)
+                    .join(InvoiceLineRow, InvoiceLineRow.id == LineMatch.invoice_line_id)
+                    .where(InvoiceLineRow.invoice_id == e.invoice_id, LineMatch.is_current.is_(True))
+                ).all()
+                body["stale"] = any(stale_runs(s, list(runs)).values())
+            return body
 
     @app.get("/api/v1/documents/{document_id}/content")
     def get_document_content(document_id: uuid.UUID, p: Auth) -> Response:
@@ -288,6 +313,20 @@ def create_app() -> FastAPI:
             )
 
     return app
+
+
+def _line_status(lm: LineMatch | None, stale: dict[uuid.UUID, bool]) -> dict[str, Any]:
+    """A result whose inputs changed since its run is shown as ``stale``, never as plain
+    ``matched``; the earlier result stays visible as ``result_status`` (B1-001)."""
+    if lm is None:
+        return {"status": None, "result_status": None, "stale": False, "match_run_id": None}
+    is_stale = bool(stale.get(lm.match_run_id))
+    return {
+        "status": "stale" if is_stale else lm.status,
+        "result_status": lm.status,
+        "stale": is_stale,
+        "match_run_id": str(lm.match_run_id),
+    }
 
 
 def _run_body(run: MatchRun) -> dict[str, Any]:

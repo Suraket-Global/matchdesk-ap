@@ -139,3 +139,36 @@ def execute_run(s: Session, payload: dict[str, Any], ruleset_code: str = "v1", c
     s.flush()
     s.refresh(run)
     transition(s, "match_runs", run.id, run.state_version, "succeeded")
+
+
+def stale_runs(
+    s: Session, run_ids: list[uuid.UUID], ruleset_code: str = "v1", currency: str = "CAD"
+) -> dict[uuid.UUID, bool]:
+    """Read-time staleness (B1-001): a run's stored result is stale when the current inputs of its
+    scope no longer have the fingerprint it evaluated. Derived from the inputs on every read,
+    never from a background job, so a receipt voided, a credit removed, an alias changed or a
+    document added on an in-scope PO shows at once."""
+    out: dict[uuid.UUID, bool] = {}
+    for rid in sorted(set(run_ids)):
+        run = s.get(MatchRun, rid)
+        if run is None:
+            continue
+        inp = build_match_input(
+            s, [uuid.UUID(i) for i in run.scope.get("invoice_ids", [])], currency, ruleset_code
+        )
+        out[rid] = input_fingerprint(inp) != run.input_fingerprint
+    return out
+
+
+def rematch_alias(s: Session, tenant_id: uuid.UUID, alias_id: uuid.UUID) -> MatchRun | None:
+    """Request a run for every invoice whose current result used ``alias_id`` (MH-10)."""
+    invoice_ids = s.scalars(
+        select(InvoiceLineRow.invoice_id)
+        .join(LineMatch, LineMatch.invoice_line_id == InvoiceLineRow.id)
+        .where(LineMatch.alias_id == alias_id, LineMatch.is_current.is_(True))
+        .distinct()
+    ).all()
+    if not invoice_ids:
+        return None
+    run, _created = request_run(s, tenant_id, list(invoice_ids), trigger="alias_change", trigger_ref=alias_id)
+    return run
