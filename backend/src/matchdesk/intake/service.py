@@ -12,6 +12,7 @@ import hashlib
 import uuid
 from collections import Counter
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import Engine, select, text
@@ -207,7 +208,7 @@ def complete(
             prompt_version=extracted.prompt_version,
             input_sha256=input_sha,
             status="succeeded",
-            raw_output=extracted.output,
+            raw_output=_jsonable(extracted.output),
             verification=gates,
             correlation_id=doc.correlation_id,
             in_use=True,
@@ -217,6 +218,17 @@ def complete(
         new_state = "succeeded" if passed else "needs_review"
         transition(s, "documents", doc.id, doc.state_version, new_state, lease_expires_at=None)
         return new_state
+
+
+def _jsonable(value: Any) -> Any:
+    """Decimals are stored as strings in JSON, never converted to floats (B1-007)."""
+    if isinstance(value, Decimal):
+        return str(value)
+    if isinstance(value, dict):
+        return {k: _jsonable(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_jsonable(v) for v in value]
+    return value
 
 
 def process_document(

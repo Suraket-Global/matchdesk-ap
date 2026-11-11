@@ -1,7 +1,8 @@
 """CI-04 lint: no binary floats in money and quantity code (TRD section 8.4).
 
-Checks ``matchdesk/matching`` and ``matchdesk/core/money.py`` by default, or the
-files given as arguments. Fails on float literals, ``float(...)`` calls and
+Checks the whole ``matchdesk`` package by default (B1-007: every module that may
+handle amounts, not only ``matching`` and ``core.money``), or the files given as
+arguments. Fails on float literals, ``float(...)`` calls and
 ``round(...)`` (rounding belongs to ``core.money``). Exit status 1 on any hit.
 """
 
@@ -12,7 +13,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_TARGETS = [ROOT / "src/matchdesk/matching", ROOT / "src/matchdesk/core/money.py"]
+DEFAULT_TARGETS = [ROOT / "src/matchdesk"]
 
 
 def _files(targets: list[Path]) -> list[Path]:

@@ -23,7 +23,8 @@ from dataclasses import dataclass, field, replace
 from datetime import date, timedelta
 from decimal import Decimal
 
-from matchdesk.core.money import ZERO, dec, round_cents, round_price
+from matchdesk.core import ZERO, dec, round_cents, round_price
+from matchdesk.matching.fingerprint import assert_no_floats
 from matchdesk.matching.normalise import (
     document_order_key,
     normalise_code,
@@ -211,6 +212,7 @@ class _State:
 
 
 def evaluate(inp: MatchInput) -> MatchResult:
+    assert_no_floats(inp)
     docs = sorted(inp.documents, key=_doc_key)
     pos = sorted(inp.purchase_orders, key=lambda p: p.id)
     imports = tuple(sorted(inp.receiving_imports, key=lambda i: i.id))
@@ -229,7 +231,9 @@ def evaluate(inp: MatchInput) -> MatchResult:
     active: list[Document] = []  # documents whose lines feed matching and history
     stopped_at: dict[str, tuple[str, ...]] = {}
     for doc in docs:
-        if not _is_verified(doc):
+        if not _is_verified(doc) or not doc.vendor_id:
+            # A document whose vendor is not identified cannot be matched; it is an exception,
+            # never silently dropped (B1-006).
             _doc_exception(st, doc, ExceptionType.EXTRACTION_UNVERIFIED, ValueClass.UNVERIFIED)
             stopped_at[doc.id] = ("1",)
             continue
@@ -251,7 +255,7 @@ def evaluate(inp: MatchInput) -> MatchResult:
                 st,
                 doc,
                 ExceptionType.DUPLICATE,
-                ValueClass.FINDING_CANDIDATE,
+                _duplicate_class(doc),
                 related_document_id=seen_number[k].id,
             )
             duplicates.add(doc.id)
@@ -288,7 +292,7 @@ def evaluate(inp: MatchInput) -> MatchResult:
                     st,
                     doc,
                     ExceptionType.DUPLICATE,
-                    ValueClass.FINDING_CANDIDATE,
+                    _duplicate_class(doc),
                     related_document_id=earlier.id,
                 )
                 duplicates.add(doc.id)
@@ -298,9 +302,14 @@ def evaluate(inp: MatchInput) -> MatchResult:
                     st,
                     doc,
                     ExceptionType.POSSIBLE_DUPLICATE,
-                    ValueClass.OPEN_UNDECIDED,
+                    ValueClass.OPEN_UNDECIDED if doc.doc_type == DocType.INVOICE else ValueClass.NONE,
                     related_document_id=earlier.id,
                 )
+                if doc.doc_type == DocType.CREDIT_NOTE:
+                    # A credit that may be a second copy is not netted until a person decides,
+                    # so one credit can never be netted twice (B1-003).
+                    duplicates.add(doc.id)
+                    continue
         kept.append(doc)
     for doc_id in duplicates:
         stopped_at[doc_id] = ("1", "2")
@@ -311,6 +320,7 @@ def evaluate(inp: MatchInput) -> MatchResult:
     # ---- checks 3 to 5: purchase order, alias, unit ---------------------------------
     resolved: list[_Resolved] = []
     po_of_doc: dict[str, PurchaseOrder] = {}
+    charge_cum: dict[tuple[str, LineKind], Decimal] = defaultdict(lambda: ZERO)
     for doc in invoices:
         found = po_by_number.get((doc.vendor_id, normalise_number(doc.po_number)), [])
         if len(found) != 1 or not normalise_number(doc.po_number):
@@ -322,7 +332,7 @@ def evaluate(inp: MatchInput) -> MatchResult:
         tol = _tolerance_for(inp, doc.vendor_id)
         for line in doc.lines:
             if line.kind != LineKind.ITEM:
-                _charge_check(st, doc, line, po, tol)
+                _charge_check(st, doc, line, po, tol, charge_cum)
                 continue
             r = _resolve_line(st, doc, line, po, aliases)
             if r is not None:
@@ -378,7 +388,13 @@ def evaluate(inp: MatchInput) -> MatchResult:
             vendor_only_credits.append(bill)
 
     # ---- invoiced history per PO line: documents and QuickBooks bills ---------------
-    counted_numbers = {(d.vendor_id, normalise_number(d.doc_number)) for d in invoices if d.doc_number}
+    # A QuickBooks bill line is represented by an uploaded invoice only when that invoice's line
+    # on the same PO line was resolved and counted (B1-002).
+    counted = {
+        (r.doc.vendor_id, normalise_number(r.doc.doc_number), r.po_line.id)
+        for r in resolved
+        if r.doc.doc_number
+    }
     events: dict[str, list[tuple[tuple, Decimal, _Resolved | None]]] = defaultdict(list)
     prior_qbo: dict[str, list[tuple[tuple, Decimal]]] = defaultdict(list)
     for r in resolved:
@@ -386,12 +402,14 @@ def evaluate(inp: MatchInput) -> MatchResult:
     for bill in bills:
         if bill.txn_type != "bill":
             continue
-        if (bill.vendor_id, normalise_number(bill.doc_number)) in counted_numbers:
-            continue  # an uploaded invoice represents this bill
         for ln in bill.lines:
+            if (bill.vendor_id, normalise_number(bill.doc_number), ln.po_line_id) in counted:
+                continue  # an uploaded invoice line represents this bill line
             if ln.po_line_id and ln.qty is not None:
                 events[ln.po_line_id].append((_bill_key(bill), dec(ln.qty), None))
                 prior_qbo[ln.po_line_id].append((_bill_key(bill), dec(ln.qty)))
+
+    gaps = _history_gaps(docs, active, duplicates, resolved, po_by_number, bills)
 
     receipts_by_po_line: dict[str, list[ReceiptLine]] = defaultdict(list)
     for rl in receipts:
@@ -435,6 +453,7 @@ def evaluate(inp: MatchInput) -> MatchResult:
                 applicable_credits=applicable,
                 prior_qbo_qty=prior_q,
                 imports=imports,
+                history_gap=any(k < order_key for k in gaps.get(r.po.id, [])),
             )
 
     # ---- price-only credits, then possibly-credited flags ---------------------------
@@ -584,11 +603,73 @@ def _find_alias(aliases: list[Alias], vendor_id: str, code: str | None) -> Alias
     return candidates[0] if candidates else None
 
 
+def alias_converts(alias: Alias) -> bool:
+    """An alias converts when its factor is not 1 or its supplier and item units differ.
+
+    A converting alias needs the controller's approval before any line passes (MH-10, B1-008).
+    """
+    sup, item = normalise_uom(alias.supplier_uom), normalise_uom(alias.item_uom)
+    return dec(alias.conversion_factor) != 1 or (sup is not None and item is not None and sup != item)
+
+
+def _duplicate_class(doc: Document) -> ValueClass:
+    """A duplicate invoice is a finding worth its total; a duplicate credit note is not money owed (B1-003)."""
+    return ValueClass.FINDING_CANDIDATE if doc.doc_type == DocType.INVOICE else ValueClass.NONE
+
+
+def _history_gaps(
+    docs: list[Document],
+    active: list[Document],
+    duplicates: set[str],
+    resolved: list[_Resolved],
+    po_by_number: dict[tuple[str, str], list[PurchaseOrder]],
+    bills: list[QboBill],
+) -> dict[str, list[tuple]]:
+    """Order keys of invoices on each PO with an item line whose quantity is unknown (B1-002).
+
+    An invoice line that stopped at check 1, 4 or 5 (or lacks a quantity) adds an unknown quantity
+    to some line of its PO, unless a QuickBooks bill with the same number has lines linked to that
+    PO, in which case those bill lines count instead.
+    """
+    active_ids = {d.id for d in active}
+    resolved_ids = {r.line.id for r in resolved}
+    gaps: dict[str, list[tuple]] = defaultdict(list)
+    for doc in docs:
+        if doc.doc_type != DocType.INVOICE or doc.id in duplicates or not doc.vendor_id:
+            continue
+        found = po_by_number.get((doc.vendor_id, normalise_number(doc.po_number)), [])
+        if len(found) != 1:
+            continue
+        po = found[0]
+        unresolved = [
+            ln
+            for ln in doc.lines
+            if ln.kind == LineKind.ITEM and (doc.id not in active_ids or ln.id not in resolved_ids)
+        ]
+        if not unresolved:
+            continue
+        po_line_ids = {pl.id for pl in po.lines}
+        represented = any(
+            b.txn_type == "bill"
+            and b.vendor_id == doc.vendor_id
+            and normalise_number(b.doc_number) == normalise_number(doc.doc_number)
+            and any(bl.po_line_id in po_line_ids for bl in b.lines)
+            for b in bills
+        )
+        if not represented:
+            gaps[po.id].append(_doc_key(doc))
+    return gaps
+
+
 def _conversion(line: DocLine, po_line: PoLine, alias: Alias) -> Decimal | None:
     """Item units per invoice unit, or None when the unit cannot be converted (check 5)."""
     inv_uom = normalise_uom(line.uom)
     po_uom = normalise_uom(po_line.uom)
-    if inv_uom is None or inv_uom == po_uom:
+    if inv_uom is None:
+        # No unit on the invoice: assume the PO unit only when the alias does not convert (B1-008).
+        sup = normalise_uom(alias.supplier_uom)
+        return Decimal("1") if (sup is None or sup == po_uom) and not alias_converts(alias) else None
+    if inv_uom == po_uom:
         return Decimal("1")
     if inv_uom == normalise_uom(alias.supplier_uom) and normalise_uom(alias.item_uom) == po_uom:
         return dec(alias.conversion_factor)
@@ -605,7 +686,7 @@ def _resolve_line(
     usable = (
         alias is not None
         and alias.status == AliasStatus.ACTIVE
-        and (dec(alias.conversion_factor) == 1 or alias.approved)
+        and (not alias_converts(alias) or alias.approved)
     )
     if alias is None or not usable:
         _line_stop(
@@ -646,15 +727,33 @@ def _resolve_line(
     )
 
 
-def _charge_check(st: _State, doc: Document, line: DocLine, po: PurchaseOrder, tol: Tolerance) -> None:
-    """Check C1 for freight, fee and discount lines."""
+def _charge_check(
+    st: _State,
+    doc: Document,
+    line: DocLine,
+    po: PurchaseOrder,
+    tol: Tolerance,
+    charge_cum: dict[tuple[str, LineKind], Decimal],
+) -> None:
+    """Check C1 for freight, fee and discount lines, cumulatively per PO and charge kind (B1-005).
+
+    Charges of one kind billed on the PO's invoices, in document order, may total at most the
+    PO's charge lines of that kind plus the vendor's charge allowance (applied once per PO).
+    The excess on each line is ``unmatched_charge``.
+    """
     amount = _line_amount(line)
-    on_po = any(
-        pl.charge_kind == line.kind and pl.amount is not None and dec(pl.amount) >= amount for pl in po.lines
-    )
-    ok = line.kind == LineKind.DISCOUNT or amount <= 0 or on_po or amount <= dec(tol.charge_allowance)
+    excess = ZERO
+    if line.kind != LineKind.DISCOUNT and amount > 0:
+        limit = sum(
+            (dec(pl.amount) for pl in po.lines if pl.charge_kind == line.kind and pl.amount is not None),
+            ZERO,
+        ) + dec(tol.charge_allowance)
+        key = (po.id, line.kind)
+        charge_cum[key] += amount
+        excess = min(amount, max(ZERO, charge_cum[key] - limit))
+    ok = excess <= 0
     if not ok:
-        _line_exception(st, doc, line, ExceptionType.UNMATCHED_CHARGE, ValueClass.FINDING_CANDIDATE, amount)
+        _line_exception(st, doc, line, ExceptionType.UNMATCHED_CHARGE, ValueClass.FINDING_CANDIDATE, excess)
     st.lines[line.id] = LineResult(
         document_id=doc.id,
         line_id=line.id,
@@ -696,7 +795,7 @@ def _link_credit_note(
             usable = (
                 alias is not None
                 and alias.status == AliasStatus.ACTIVE
-                and (dec(alias.conversion_factor) == 1 or alias.approved)
+                and (not alias_converts(alias) or alias.approved)
             )
             if alias is not None and usable:
                 pls = [pl for pl in po.lines if pl.item_id == alias.item_id and pl.charge_kind is None]
@@ -729,12 +828,21 @@ def _evaluate_resolved(
     applicable_credits: list[_QtyCredit],
     prior_qbo_qty: Decimal,
     imports: tuple[ReceivingImport, ...],
+    history_gap: bool = False,
 ) -> None:
     doc, line, pl = r.doc, r.line, r.po_line
     tol = _tolerance_for(inp, doc.vendor_id)
     checks = ["1", "2", "3", "4", "5", "6"]
     # Check 6: QuickBooks billed quantity not explained by known invoices (does not stop).
-    if pl.qbo_billed_qty is not None and dec(pl.qbo_billed_qty) > known_invoiced:
+    billed_unexplained = pl.qbo_billed_qty is not None and dec(pl.qbo_billed_qty) > known_invoiced
+    if history_gap and not billed_unexplained:
+        # An earlier invoice on this PO has a line that could not be resolved to a PO line and no
+        # QuickBooks bill line stands in for it: its quantity is unknown, so this line cannot pass.
+        _line_exception(
+            st, doc, line, ExceptionType.HISTORY_INCOMPLETE, ValueClass.UNVERIFIED, _line_amount(line)
+        )
+    if billed_unexplained:
+        assert pl.qbo_billed_qty is not None
         _line_exception(
             st,
             doc,
@@ -748,7 +856,9 @@ def _evaluate_resolved(
     checks.append("7")
     inv_date = doc.doc_date or r.po.txn_date
     covered = is_covered(imports, r.po.txn_date, inv_date + timedelta(days=COVERAGE_DAYS_AFTER_INVOICE))
-    if counting_count == 0:
+    if counting_count == 0 or received <= 0:
+        # No counting receipt, or receipts that net to nothing kept: receipt_absent whatever the
+        # tolerance (B1-004).
         if line.id in inp.confirmed_not_received:
             _line_exception(
                 st,
@@ -825,7 +935,7 @@ def _evaluate_resolved(
     blocking = [
         e for e in line_excs if e.status == ExceptionStatus.OPEN or e.type == ExceptionType.RECEIPT_ABSENT
     ]
-    matched = not blocking and counting_count > 0
+    matched = not blocking and counting_count > 0 and received > 0
     st.lines[line.id] = LineResult(
         document_id=doc.id,
         line_id=line.id,
@@ -984,7 +1094,10 @@ def _assign_reported_amounts(st: _State, docs: list[Document]) -> list[Exception
         ]
         suppressed: set[int] = set()
         if len(over) == 2:
-            smaller = min(over, key=lambda e: (e.variance_amount or ZERO, e.type.value))
+            # Tie: qty_over_received carries the amount (explicit priority, TRD 8.5).
+            smaller = min(
+                over, key=lambda e: (e.variance_amount or ZERO, e.type != ExceptionType.QTY_OVER_ORDERED)
+            )
             suppressed.add(id(smaller))
         for e in finding_like:
             active = e.status == ExceptionStatus.OPEN or (

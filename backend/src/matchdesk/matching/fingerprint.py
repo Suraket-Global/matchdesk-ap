@@ -36,6 +36,18 @@ def _canonical(value: object) -> object:
     return value
 
 
+def assert_no_floats(value: object) -> None:
+    """Refuse a binary float anywhere in the input (TRD 8.4); raises ``TypeError``."""
+    if isinstance(value, float):
+        raise TypeError("floats are not allowed in match inputs")
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        for f in dataclasses.fields(value):
+            assert_no_floats(getattr(value, f.name))
+    elif isinstance(value, (tuple, list, frozenset, set)):
+        for v in value:
+            assert_no_floats(v)
+
+
 def input_fingerprint(inp: MatchInput) -> bytes:
     text = json.dumps(_canonical(inp), sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(text.encode()).digest()

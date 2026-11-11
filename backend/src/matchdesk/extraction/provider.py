@@ -47,7 +47,8 @@ class FakeExtractor:
             raise ExtractionPermanentError("password_protected")
         if not data.startswith(b"%FAKE-PDF"):
             raise ExtractionPermanentError("unreadable")
-        body = json.loads(data.split(b"\n", 1)[1].decode())
+        # Amounts are read as Decimal, never as binary floats (B1-007).
+        body = json.loads(data.split(b"\n", 1)[1].decode(), parse_float=Decimal, parse_int=Decimal)
         return Extracted(self.provider, self.model, self.prompt_version, body)
 
 
