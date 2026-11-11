@@ -12,12 +12,13 @@ import base64
 import hashlib
 import hmac
 import secrets
+import time
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import Engine, delete, func, select, update
+from sqlalchemy import Engine, delete, func, select, text, update
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
@@ -54,7 +55,13 @@ RATE_LIMITS: dict[str, tuple[int, timedelta]] = {
     "link_address": (5, timedelta(minutes=15)),
     "link_ip": (20, timedelta(hours=1)),
     "exchange_fail_ip": (10, timedelta(hours=1)),
+    # B2-S02: wrong one-time codes per account, whatever the IP. Reaching it burns every open link.
+    "totp_fail_user": (5, timedelta(minutes=15)),
 }
+# B2-S02: a link is burned after this many wrong one-time codes.
+LINK_MAX_TOTP_FAILURES = 3
+# B2-S07: a sign-in link request takes at least this long, so known and unknown addresses look alike.
+LINK_REQUEST_FLOOR_NS = 40_000_000
 TOTP_CONTEXT = b"matchdesk:users.totp_secret_enc"
 
 
@@ -87,7 +94,7 @@ class SessionContext:
     absolute_expires_at: datetime
 
     def principal(self) -> Principal | None:
-        if self.tenant_id is None or self.role is None:
+        if self.is_operator or self.tenant_id is None or self.role is None:
             return None
         return Principal(self.user_id, self.tenant_id, self.role, self.session_id)
 
@@ -127,26 +134,64 @@ def _now(now: datetime | None) -> datetime:
     return now or datetime.now(UTC)
 
 
-def _rate_key(kind: str, value: str) -> bytes:
-    return hashlib.sha256(f"{kind}:{value.strip().lower()}".encode()).digest()
+def _rate_key(cfg: Settings, kind: str, value: str) -> bytes:
+    """HMAC under the server's session key (B2-S06): the address or IP cannot be recovered by
+    hashing candidates, because the key never leaves the server."""
+    if not cfg.session_key:
+        raise RuntimeError("MATCHDESK_SESSION_KEY is not set")
+    msg = f"rate\x00{kind}\x00{value.strip().lower()}".encode()
+    return hmac.new(cfg.session_key.encode(), msg, hashlib.sha256).digest()
 
 
-def _over_limit(s: Session, kind: str, value: str, now: datetime) -> bool:
+def _lock_key(s: Session, key_hash: bytes) -> None:
+    """Serialise every counter on one key for the rest of the transaction (B2-S04)."""
+    s.execute(
+        text("select pg_advisory_xact_lock(:k)"),
+        {"k": int.from_bytes(key_hash[:8], "big", signed=True)},
+    )
+
+
+def _over_limit(s: Session, cfg: Settings, kind: str, value: str, now: datetime) -> bool:
     limit, window = RATE_LIMITS[kind]
+    key = _rate_key(cfg, kind, value)
+    _lock_key(s, key)
     n = s.scalar(
         select(func.count())
         .select_from(AuthRateEvent)
         .where(
             AuthRateEvent.kind == kind,
-            AuthRateEvent.key_hash == _rate_key(kind, value),
+            AuthRateEvent.key_hash == key,
             AuthRateEvent.created_at > now - window,
         )
     )
     return int(n or 0) >= limit
 
 
-def _count_event(s: Session, kind: str, value: str, now: datetime) -> None:
-    s.add(AuthRateEvent(kind=kind, key_hash=_rate_key(kind, value), created_at=now))
+def _count_event(s: Session, cfg: Settings, kind: str, value: str, now: datetime) -> None:
+    s.add(AuthRateEvent(kind=kind, key_hash=_rate_key(cfg, kind, value), created_at=now))
+
+
+def _take(s: Session, cfg: Settings, kind: str, value: str, now: datetime) -> bool:
+    """Count one event if the limit allows it, in one statement under the key's lock (B2-S04).
+    Returns False, counting nothing, when the limit is reached."""
+    limit, window = RATE_LIMITS[kind]
+    key = _rate_key(cfg, kind, value)
+    _lock_key(s, key)
+    taken = s.execute(
+        text(
+            "insert into auth_rate_events (kind, key_hash, created_at) "
+            "select :kind, :key, :now where (select count(*) from auth_rate_events "
+            "where kind = :kind and key_hash = :key and created_at > :since) < :limit returning id"
+        ),
+        {"kind": kind, "key": key, "now": now, "since": now - window, "limit": limit},
+    ).first()
+    return taken is not None
+
+
+def _pad(started_ns: int) -> None:
+    remaining = LINK_REQUEST_FLOOR_NS - (time.perf_counter_ns() - started_ns)
+    if remaining > 0:
+        time.sleep(remaining / 1_000_000_000)
 
 
 def _active_memberships(engine: Engine, user_id: uuid.UUID) -> list[tuple[uuid.UUID, str, str]]:
@@ -181,33 +226,48 @@ def request_login_link(
     The caller answers identically either way. Raises ``AuthError('rate_limited')`` only for the
     per-IP limit, which says nothing about the address; the per-address limit is silent.
     """
+    started = time.perf_counter_ns()
+    try:
+        return _request_login_link(engine, email, ip, browser_binding, settings or load_settings(), _now(now))
+    finally:
+        _pad(started)  # B2-S07: the same floor for known, unknown and refused addresses
+
+
+def check_link_ip(engine: Engine, ip: str | None, settings: Settings | None = None) -> None:
+    """Count one link request against the IP; ``AuthError('rate_limited')`` over the limit."""
+    if not ip:
+        return
     cfg = settings or load_settings()
-    at = _now(now)
-    address = email.strip()
     with global_session(engine) as s:
-        if ip and _over_limit(s, "link_ip", ip, at):
+        if not _take(s, cfg, "link_ip", ip, _now(None)):
             raise AuthError("rate_limited")
-        if ip:
-            _count_event(s, "link_ip", ip, at)
-        if _over_limit(s, "link_address", address, at):
+
+
+def _request_login_link(
+    engine: Engine, email: str, ip: str | None, browser_binding: str, cfg: Settings, at: datetime
+) -> OutgoingMail | None:
+    address = email.strip()
+    token = new_token()
+    with global_session(engine) as s:
+        if ip and not _take(s, cfg, "link_ip", ip, at):
+            raise AuthError("rate_limited")
+        if not _take(s, cfg, "link_address", address, at):
             return None
-        _count_event(s, "link_address", address, at)
         user = s.scalar(select(User).where(User.email == address, User.deactivated_at.is_(None)))
         user_id = user.id if user is not None else None
         is_operator = bool(user and user.is_operator)
-    if user_id is None:
+    # The membership query runs for unknown addresses too, against an identifier nobody has.
+    memberships = _active_memberships(engine, user_id or uuid.uuid4())
+    if user_id is None or (not is_operator and not memberships):
         return None
-    if not is_operator and not _active_memberships(engine, user_id):
-        return None
-    token = new_token()
     with global_session(engine) as s:
+        # requested_ip is no longer stored (B2-S06); the column stays null until it is dropped.
         s.add(
             LoginToken(
                 user_id=user_id,
                 token_hash=hash_token(token),
                 browser_binding_hash=hash_token(browser_binding),
                 expires_at=at + LINK_TTL,
-                requested_ip=ip,
                 created_at=at,
             )
         )
@@ -238,10 +298,12 @@ def exchange_login_token(
     refusal: str | None = None
     user_id: uuid.UUID | None = None
     with global_session(engine) as s:
-        if ip and _over_limit(s, "exchange_fail_ip", ip, at):
+        if ip and _over_limit(s, cfg, "exchange_fail_ip", ip, at):
             raise AuthError("rate_limited")
         row = s.scalar(select(LoginToken).where(LoginToken.token_hash == hash_token(token)).with_for_update())
-        user = s.get(User, row.user_id) if row is not None else None
+        # The user row is locked too: one-time-code checks and counters for one account run one at
+        # a time, so a step is used once and failures are counted exactly (B2-S02, B2-S04).
+        user = s.get(User, row.user_id, with_for_update=True) if row is not None else None
         if row is None or row.used_at is not None or row.expires_at <= at or user is None:
             refusal = "invalid"
         elif user.deactivated_at is not None:
@@ -251,16 +313,12 @@ def exchange_login_token(
         ):
             refusal = "other_browser"  # not consumed: the right browser can still use it
         elif user.is_operator:
-            step = _check_totp(cfg, user, totp_code, at)
-            if step is None:
-                refusal = "totp_required"
-            else:
-                user.totp_last_step = step
+            refusal = _operator_factor(s, cfg, user, totp_code, at, row)
         if refusal is None and row is not None and user is not None:
             row.used_at = at
             user_id = user.id
         elif ip:
-            _count_event(s, "exchange_fail_ip", ip, at)
+            _count_event(s, cfg, "exchange_fail_ip", ip, at)
     if refusal is not None or user_id is None:
         raise AuthError(refusal or "invalid")
     memberships = _active_memberships(engine, user_id)
@@ -287,6 +345,41 @@ def _check_totp(cfg: Settings, user: User, code: str | None, at: datetime) -> in
     return totp.verify(secret, code.strip(), at, user.totp_last_step)
 
 
+def _operator_factor(
+    s: Session, cfg: Settings, user: User, code: str | None, at: datetime, link: LoginToken | None
+) -> str | None:
+    """Check an operator's one-time code with the user row locked by the caller. Returns a refusal
+    code or None. Wrong codes count per account and per link; at the account limit every open link
+    is burned and further attempts are refused for the window (B2-S02). A step is stored as used in
+    the same transaction (B2-S04)."""
+    if _over_limit(s, cfg, "totp_fail_user", str(user.id), at):
+        _burn_links(s, user.id, at)
+        return "rate_limited"
+    if not code:
+        return "totp_required"  # nothing guessed: not counted
+    step = _check_totp(cfg, user, code, at)
+    if step is not None:
+        user.totp_last_step = step
+        return None
+    _count_event(s, cfg, "totp_fail_user", str(user.id), at)
+    if link is not None:
+        link.totp_failures += 1
+        if link.totp_failures >= LINK_MAX_TOTP_FAILURES:
+            link.used_at = at  # burned
+    s.flush()
+    if _over_limit(s, cfg, "totp_fail_user", str(user.id), at):
+        _burn_links(s, user.id, at)
+    return "totp_required"
+
+
+def _burn_links(s: Session, user_id: uuid.UUID, at: datetime) -> None:
+    s.execute(
+        update(LoginToken)
+        .where(LoginToken.user_id == user_id, LoginToken.used_at.is_(None))
+        .values(used_at=at)
+    )
+
+
 def enroll_operator(engine: Engine, email: str, settings: Settings | None = None) -> bytes:
     """Give an existing user a fresh TOTP seed and the operator flag. Returns the raw seed once."""
     cfg = settings or load_settings()
@@ -298,6 +391,8 @@ def enroll_operator(engine: Engine, email: str, settings: Settings | None = None
         user.totp_secret_enc = seal(cfg.token_key, cfg.token_key_id, secret, TOTP_CONTEXT)
         user.totp_last_step = None
         user.is_operator = True
+        # Sessions opened before the flag may carry a tenant; they end now (B2-S01).
+        s.execute(delete(SessionRow).where(SessionRow.user_id == user.id))
     return secret
 
 
@@ -310,6 +405,9 @@ def _issue(
     token = new_token()
     csrf = csrf_for(token, cfg)
     with global_session(engine) as s:
+        user = s.get(User, user_id)
+        if user is not None and user.is_operator:
+            tenant_id = None  # B2-S01; the database trigger refuses it as well
         s.add(
             SessionRow(
                 user_id=user_id,
@@ -346,6 +444,10 @@ def load_session(
         if row is None:
             return None
         user = s.get(User, row.user_id)
+        tenant = s.get(Tenant, row.active_tenant_id) if row.active_tenant_id is not None else None
+        if tenant is not None and tenant.status == "ended":
+            s.delete(row)  # B2-S05: a session ends with its tenant
+            return None
         if (
             row.ended_at is not None
             or at >= row.expires_at
@@ -360,6 +462,10 @@ def load_session(
         sid, uid, tid, csrf_hash = row.id, row.user_id, row.active_tenant_id, row.csrf_token_hash
         idle_deadline, absolute = row.last_seen_at + IDLE_TIMEOUT, row.expires_at
         is_operator = user.is_operator
+    if is_operator:
+        # B2-S01: an operator never acts in a tenant without an active support grant, and support
+        # grants are not built, so an operator session carries no tenant on any path.
+        tid = None
     role: str | None = None
     if tid is not None:
         with session(tid, engine) as s:
@@ -382,7 +488,7 @@ def end_session(engine: Engine, session_id: uuid.UUID) -> None:
 
 
 def switch_tenant(engine: Engine, ctx: SessionContext, tenant_id: uuid.UUID) -> None:
-    if tenant_id not in {m[0] for m in _active_memberships(engine, ctx.user_id)}:
+    if ctx.is_operator or tenant_id not in {m[0] for m in _active_memberships(engine, ctx.user_id)}:
         raise NotFoundError("tenant")
     with global_session(engine) as s:
         s.execute(
@@ -517,13 +623,13 @@ def accept_invitation(
     at = _now(now)
     th = hash_token(token)
     with global_session(engine) as s:
-        if ip and _over_limit(s, "exchange_fail_ip", ip, at):
+        if ip and _over_limit(s, cfg, "exchange_fail_ip", ip, at):
             raise AuthError("rate_limited")
     with invitation_lookup_session(th, engine) as s:
         inv = s.scalar(select(Invitation).where(Invitation.token_hash == th))
         found = (inv.tenant_id, inv.id) if inv is not None else None
     if found is None:
-        _fail(engine, ip, at)
+        _fail(engine, cfg, ip, at)
         raise AuthError("invalid")
     tenant_id, inv_id = found
     with global_session(engine) as s:
@@ -537,15 +643,26 @@ def accept_invitation(
         if not tenant_ok or inv.accepted_at is not None or inv.revoked_at is not None or inv.expires_at <= at:
             refusal = "invalid"
         else:
-            user_id = _user_for_invitation(engine, inv.email)
-            if user_id is None:
+            found_user = _user_for_invitation(engine, inv.email)
+            m = (
+                s.scalar(select(Membership).where(Membership.user_id == found_user[0]))
+                if found_user is not None
+                else None
+            )
+            if found_user is None:
+                refusal = "invalid"
+            elif found_user[1]:
+                # B2-S01: an operator never joins a tenant through an invitation, so an invitation
+                # can never stand in for the one-time code; operators enter only by support grant.
+                refusal = "operator_invitation"
+            elif m is not None and m.status != "active":
+                # B2-S03: a deactivated member is not re-activated by any invitation; only a
+                # controller's PATCH /memberships/{id} can.
                 refusal = "invalid"
             else:
-                m = s.scalar(select(Membership).where(Membership.user_id == user_id))
+                user_id = found_user[0]
                 if m is None:
                     s.add(Membership(tenant_id=tenant_id, user_id=user_id, role=inv.role))
-                elif m.status != "active":
-                    m.status, m.role = "active", inv.role
                 inv.accepted_at = at
                 write_audit(
                     s,
@@ -558,19 +675,20 @@ def accept_invitation(
                     after={"role": inv.role},
                 )
     if refusal is not None or user_id is None:
-        _fail(engine, ip, at)
-        raise AuthError("invalid")
+        _fail(engine, cfg, ip, at)
+        raise AuthError(refusal or "invalid")
     return _issue(engine, user_id, tenant_id, cfg, at)
 
 
-def _fail(engine: Engine, ip: str | None, at: datetime) -> None:
+def _fail(engine: Engine, cfg: Settings, ip: str | None, at: datetime) -> None:
     if ip:
         with global_session(engine) as s:
-            _count_event(s, "exchange_fail_ip", ip, at)
+            _count_event(s, cfg, "exchange_fail_ip", ip, at)
 
 
-def _user_for_invitation(engine: Engine, email: str) -> uuid.UUID | None:
-    """The existing user for this address, or a new one. A deactivated user is not revived."""
+def _user_for_invitation(engine: Engine, email: str) -> tuple[uuid.UUID, bool] | None:
+    """(user id, is operator) for this address, creating the user if needed. A deactivated user is
+    not revived."""
     with global_session(engine) as s:
         user = s.scalar(select(User).where(User.email == email))
         if user is None:
@@ -579,7 +697,7 @@ def _user_for_invitation(engine: Engine, email: str) -> uuid.UUID | None:
             s.flush()
         elif user.deactivated_at is not None:
             return None
-        return user.id
+        return user.id, user.is_operator
 
 
 # ---------------------------------------------------------------- users and memberships
@@ -639,6 +757,19 @@ def update_membership(
                 after={"role": m.role, "status": m.status},
             )
             target, ended = m.user_id, m.status == "deactivated"
+            if ended:
+                # B2-S03: every open invitation to this person in the tenant is revoked with it.
+                member = s.get(User, m.user_id)
+                assert member is not None
+                s.execute(
+                    update(Invitation)
+                    .where(
+                        Invitation.email == member.email,
+                        Invitation.accepted_at.is_(None),
+                        Invitation.revoked_at.is_(None),
+                    )
+                    .values(revoked_at=func.now())
+                )
             body = {"membership_id": str(m.id), "user_id": str(m.user_id), "role": m.role, "status": m.status}
     except DBAPIError as exc:
         if "last active controller" in str(exc.orig):
@@ -646,9 +777,6 @@ def update_membership(
         raise
     if ended:
         with global_session(engine) as s:
-            s.execute(
-                delete(SessionRow).where(
-                    SessionRow.user_id == target, SessionRow.active_tenant_id == p.tenant_id
-                )
-            )
+            # B2-S03: all of the person's sessions end, not only those open in this tenant.
+            s.execute(delete(SessionRow).where(SessionRow.user_id == target))
     return body

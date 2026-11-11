@@ -13,6 +13,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Index,
+    Integer,
     LargeBinary,
     String,
     Text,
@@ -83,15 +84,20 @@ class LoginToken(GlobalMixin, Base):
     browser_binding_hash: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # No longer written (B2-S06); kept null until a later contract migration drops it.
     requested_ip: Mapped[str | None] = mapped_column(INET)
+    # Wrong one-time codes against this link; the link is burned at the limit (B2-S02).
+    totp_failures: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
 
 
 class AuthRateEvent(GlobalMixin, Base):
-    """One counted sign-in event; the key is a hash of the address or IP, never the value itself."""
+    """One counted sign-in event; the key is an HMAC of the address, IP or user ID under a server key."""
 
     __tablename__ = "auth_rate_events"
     __table_args__ = (
-        CheckConstraint(enum_check("kind", ("link_address", "link_ip", "exchange_fail_ip")), name="kind"),
+        CheckConstraint(
+            enum_check("kind", ("link_address", "link_ip", "exchange_fail_ip", "totp_fail_user")), name="kind"
+        ),
         Index("ix_auth_rate_events_kind_key_hash_created_at", "kind", "key_hash", "created_at"),
     )
     kind: Mapped[str] = mapped_column(Text, nullable=False)

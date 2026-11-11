@@ -39,7 +39,7 @@ def code_at_step(secret: bytes, step: int) -> str:
 
 def verify(secret: bytes, code: str, when: datetime, last_step: int | None) -> int | None:
     """Return the matched step, or None. A step at or before ``last_step`` is refused."""
-    if not (len(code) == DIGITS and code.isdigit()):
+    if not (len(code) == DIGITS and code.isascii() and code.isdigit()):  # B2 review s15: ASCII only
         return None
     now = step_at(when)
     for step in range(now - DRIFT_STEPS, now + DRIFT_STEPS + 1):

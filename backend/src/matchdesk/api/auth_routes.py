@@ -43,6 +43,7 @@ REFUSALS = {
     ),
     "totp_required": (401, "Enter the current code from your authenticator app."),
     "rate_limited": (429, "Too many attempts. Wait a while and try again."),
+    "operator_invitation": (409, "Operator accounts cannot join an account through an invitation."),
 }
 
 

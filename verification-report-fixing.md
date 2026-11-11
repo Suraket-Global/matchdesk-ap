@@ -463,9 +463,9 @@ IT-18 is now partly run (the cases above); still `Not run`: GET of the link page
 
 Requirement texts were read on 2026-11-11 from the OWASP ASVS repository at tag v5.0.0 (chapters V3, V6, V7, V8).
 
-Implemented (with the test or code that shows it): 3.3.1, 3.3.2, 3.3.3, 3.3.4 (cookie attributes; `test_sign_in_end_to_end...`), 3.3.5 (43-character token), 3.5.1 (anti-forgery token plus origin check; `test_sign_in_end_to_end...`, `test_cross_tenant...`), 3.5.3 (state changes only on POST, PUT, PATCH, DELETE); 6.1.1 (TRD 8.1), 6.3.1 (`test_rate_limits...`), 6.3.2 (no default accounts: migrations create none), 6.3.4 (two pathways, both documented in TRD 8.1), 6.4.1 (links and invitations random, expiring, single use), 6.5.1 (links, invitations and TOTP steps used once), 6.5.3 (`secrets`), 6.5.4 (256-bit tokens), 6.5.5 (10-minute links; TOTP 30-second steps), 6.5.8 (TOTP on the server clock), 6.6.2 (`test_link_from_another_browser...`), 6.6.3 (`test_rate_limits...`); 7.1.1 (TRD 8.1), 7.2.1, 7.2.2, 7.2.3 (server-side reference tokens, 256 bits), 7.2.4 (new token at every sign-in; the browser's previous session is deleted, that last part not separately tested), 7.3.1, 7.3.2 (`test_idle_and_absolute_limits`), 7.4.1 (logout test), 7.4.2 (membership deactivation ends sessions, tested; a user with `deactivated_at` is refused on every request, not separately tested), 7.6.2 (a session starts only on an explicit POST); 8.1.1 (schema.md 4.1), 8.2.1 (viewer 403), 8.2.2 and 8.4.1 (cross-tenant 404, row-level security), 8.3.1 (checks in the API and database), 8.3.2 (role read from the membership on every request; deactivation effective at once).
+Implemented (with the test or code that shows it; see 10.6 for the tests added after the security review): 3.3.1, 3.3.2, 3.3.3, 3.3.4 (cookie attributes; `test_sign_in_end_to_end...`), 3.3.5 (43-character token), 3.5.1 (anti-forgery token plus origin check; `test_sign_in_end_to_end...`, `test_cross_tenant...`), 3.5.3 (state changes only on POST, PUT, PATCH, DELETE); 6.1.1 (TRD 8.1), 6.3.1 (`test_rate_limits...`), 6.3.2 (no default accounts: migrations create none), 6.3.4 (two pathways, both documented in TRD 8.1), 6.4.1 (links and invitations random, expiring, single use), 6.5.1 (links, invitations and TOTP steps used once), 6.5.3 (`secrets`), 6.5.4 (256-bit tokens), 6.5.5 (10-minute links; TOTP 30-second steps), 6.5.8 (TOTP on the server clock), 6.6.2 (`test_link_from_another_browser...`), 6.6.3 (`test_rate_limits...`); 7.1.1 (TRD 8.1), 7.2.1, 7.2.2, 7.2.3 (server-side reference tokens, 256 bits), 7.2.4 (new token at every sign-in; the browser's previous session is deleted, that last part not separately tested), 7.3.1, 7.3.2 (`test_idle_and_absolute_limits`), 7.4.1 (logout test), 7.4.2 (membership deactivation ends sessions, tested; a user with `deactivated_at` is refused on every request, not separately tested), 7.6.2 (a session starts only on an explicit POST); 8.1.1 (schema.md 4.1), 8.2.1 (viewer 403), 8.2.2 and 8.4.1 (cross-tenant 404, row-level security), 8.3.1 (checks in the API and database), 8.3.2 (role read from the membership on every request; deactivation effective at once).
 
-Partly met: 6.3.8 (same response and status for unknown addresses; response time not measured); 7.4.5 (a controller can end a user's sessions only by deactivating them).
+Partly met: 7.4.5 (a controller can end a user's sessions only by deactivating them).
 
 Not met or not applicable: 6.2.1 to 6.2.12, 6.4.2 to 6.4.6 (no passwords, AD-09); 6.3.3 for tenant users (email link only; accepted gap, TRD 8.1); 6.3.5 and 6.3.7 (no security notifications); 6.3.6 (Level 3; email is the factor for tenant users); 6.5.2 (no lookup secrets); 6.5.6 (no way to revoke an operator's authenticator except re-enrolment); 6.8.1 to 6.8.4 (no outside identity provider; OIDC deferred); 7.1.2 and 7.5.2 (no concurrent-session policy or session list; accepted gap); 7.4.3 (no factor-change flow); 7.4.4 (no screens yet); 7.5.1 (no endpoint changes authentication attributes); 13.3.1, 13.3.2 (environment file, not a secrets manager; accepted gap, TRD 8.3).
 
@@ -473,3 +473,32 @@ Not met or not applicable: 6.2.1 to 6.2.12, 6.4.2 to 6.4.6 (no passwords, AD-09)
 
 TRD.md sections 5 (identity may import `audit`), 8.1 (as built: activity resets the idle timer; HMAC anti-forgery token; cookie names; rate-limit storage; no sign-in link for an invitation-only address; operator enrolment; SMTP), the 8.1 ASVS table statuses, 8.7 (as built: S3 store, key format, upload checks); schema.md dictionary (`users.totp_last_step`, `auth_rate_events`) and 9.1 (migration 0006 row, tables built); AGENTS.md (state line, utilities index, commands); R-13 row in section 5; this section.
 
+
+### 10.6 Security fixes after B2 review, awaiting recheck (2026-11-11)
+
+Review: `_coordination/review/matchdesk-ap-b2-sec-round1.md` (19 attack cases, 7 mutations). Before the fixes the reviewer's script gave 10 passed, 9 failed; mutation mode 1 killed, 6 survived. The fixes below are **security fixes after B2 review, awaiting recheck**: the author recorded them; the reviewer has not retested them.
+
+| Finding | Fix | Regression test (`backend/tests/integration/test_b2_sign_in.py`) |
+|---|---|---|
+| B2-S01 (major) | An operator account cannot accept an invitation (409). In the data access layer an operator session never carries a tenant: `load_session` drops it, `SessionContext.principal()` returns none, `_issue` and `switch_tenant` refuse it, a database trigger (`sessions_operator_no_tenant`, migration 0007) refuses it, and enrolling a user as operator ends their existing sessions. Support grants are not built, so no path gives an operator tenant data | `test_b2_s01_operator_cannot_enter_a_tenant_through_an_invitation` |
+| B2-S02 (major) | Wrong one-time codes count per IP, per link and per account under the locked user row: a link is burned after 3; 5 per account in 15 minutes burns every open link and answers 429 for the window | `test_b2_s02_wrong_codes_are_limited_per_link_and_per_account` |
+| B2-S03 (major) | Deactivation revokes the person's open invitations in the tenant and deletes all their sessions; accepting never re-activates a deactivated membership (only a controller's `PATCH /memberships/{id}`) | `test_b2_s06_deactivation_revokes_invitations_and_no_invitation_reactivates` (both orders: invitation before and after the deactivation) |
+| B2-S04 | User row locked (`FOR UPDATE`) during the code check, step recorded in the same transaction; link limits counted and checked in one conditional insert under `pg_advisory_xact_lock` on the key | `test_b2_s03_one_totp_step_signs_in_once_under_concurrency` (0 of 8), `test_b2_s04_link_limit_holds_for_parallel_requests` (exactly 5 of 20) |
+| B2-S05 | `load_session` deletes a session whose tenant is ended | `test_b2_s07_sessions_end_when_the_tenant_ends` |
+| B2-S06 | Rate-limit keys are HMAC-SHA256 under the session key; `requested_ip` no longer written and cleared | `test_b2_s18_no_ip_at_rest_and_rate_keys_are_keyed` |
+| B2-S07 | A link request takes at least 40 ms whatever the address, and the membership query runs for unknown addresses too | `test_b2_s16_link_requests_take_the_same_time_for_known_and_unknown` (midpoint classifier under 75%) |
+| B2-S08 | Tests that fail when each control is removed: 8.2.1 (M1, M2), 6.4.1 invitation expiry (M3), 7.2.4 (M4), 7.4.2 `users.deactivated_at` (M5), Origin check of 3.5.1 on all three public POSTs (M6) | `test_b2_m1_m2_...`, `test_b2_m3_...`, `test_b2_m4_...`, `test_b2_m5_...`, `test_b2_m6_...` (3 cases) |
+| Observation s15 | A code must be six ASCII digits; full-width digits give a clean 401 | `test_b2_s15_non_ascii_code_is_a_clean_refusal` |
+
+Not changed (observations of the review, still open): request-body limit before multipart spooling (proxy, TRD 7); client IP behind a proxy; the sealed TOTP seed is not bound to the user ID; the binding cookie value is accepted from the client; the future `/invite` page must ask for confirmation.
+
+Commands and results (from `matchdesk-ap/`, Mailpit and MinIO running):
+
+| Command | Result |
+|---|---|
+| `make test` (drops and re-migrates `matchdesk_test` 0001 to 0007) | 159 passed, 1 warning (httpx deprecation) |
+| `make check` | exit 0 (ruff, format, mypy, 5 contracts kept, import rule, float lint) |
+| Reviewer's script: `cd backend && .venv/bin/python -m pytest -q -p no:cacheprovider ../../_coordination/review/matchdesk-ap-b2-sec_attack.py` | 19 passed, 0 failed |
+| `... matchdesk-ap-b2-sec_attack.py mutate` | 7 of 7 mutations killed by the repository's own tests |
+
+ASVS 5.0.0 changes against 10.4: 6.3.8 moves to implemented (timing floor; tested); 6.3.1 and 6.6.3 now include per-account limits; 6.5.1 now holds under concurrency; 7.2.4, 7.4.2 and 3.5.1 (origin) now have tests that fail without the control. Documents changed: TRD 8.1 (as built), schema.md (`auth_rate_events`, migration 0007 row), this section.
