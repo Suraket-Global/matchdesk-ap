@@ -112,6 +112,7 @@ class ItemAlias(TenantMixin, Base):
     vendor_id: Mapped[uuid.UUID] = mapped_column(UUIDT, nullable=False)
     supplier_item_code: Mapped[str] = mapped_column(Text, nullable=False)
     supplier_item_code_norm: Mapped[str] = mapped_column(Text, nullable=False)
+    supplier_description: Mapped[str | None] = mapped_column(Text)
     item_id: Mapped[uuid.UUID] = mapped_column(UUIDT, nullable=False)
     supplier_uom: Mapped[str | None] = mapped_column(Text)
     item_uom: Mapped[str | None] = mapped_column(Text)

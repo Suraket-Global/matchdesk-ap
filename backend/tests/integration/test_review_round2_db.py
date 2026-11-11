@@ -100,3 +100,66 @@ def test_alias_conversion_change_resets_approval_and_rematches(app_engine):  # t
     assert body["lines"][0]["status"] == "exception" and body["stale"] is False
     assert [e["type"] for e in body["exceptions"] if e["status"] == "open"] == ["alias_unconfirmed"]
     assert uuid.UUID(str(run.id))
+
+
+def _approve_x12(s, w) -> int:  # type: ignore[no-untyped-def]
+    s.execute(
+        text(
+            "update item_aliases set supplier_uom = 'CS', item_uom = 'EA', conversion_factor = 12, "
+            "supplier_description = 'Widget, case of 12'"
+        )
+    )
+    s.execute(text("update item_aliases set approved_by = :u, status = 'active'"), {"u": str(w.user_id)})
+    row = s.execute(text("select status, approved_by, version from item_aliases")).one()
+    assert row[0] == "active" and row[1] is not None
+    return int(row[2])
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        "vendor",
+        "supplier_item_code",
+        "supplier_item_code_norm",
+        "supplier_description",
+        "description_cleared",
+    ],
+)
+def test_round3_alias_key_change_resets_approval(app_engine, change):  # type: ignore[no-untyped-def]
+    """Round-3 observation (MH-10): supplier, supplier item code or description change loses approval."""
+    from matchdesk.qbo.models import Vendor
+
+    from .seed import NOW
+
+    w, client, h, _run = _matched_world(app_engine, f"Alias key change {change}")
+    with session(w.tenant_id, app_engine) as s:
+        version = _approve_x12(s, w)
+        params: dict[str, str] = {}
+        if change == "vendor":
+            v2 = Vendor(tenant_id=w.tenant_id, qbo_id="V2", name="Fictional Supplier U", synced_at=NOW)
+            s.add(v2)
+            s.flush()
+            sql, params = "update item_aliases set vendor_id = :v", {"v": str(v2.id)}
+        elif change == "supplier_item_code":
+            sql = "update item_aliases set supplier_item_code = 'W-200', supplier_item_code_norm = 'W200'"
+        elif change == "supplier_item_code_norm":
+            sql = "update item_aliases set supplier_item_code_norm = 'W200'"
+        elif change == "supplier_description":
+            sql = "update item_aliases set supplier_description = 'Widget, case of 24'"
+        else:
+            sql = "update item_aliases set supplier_description = null"
+        # The same statement also tries to keep the approval: the trigger still clears it.
+        s.execute(text(sql + ", approved_by = :u, status = 'active'"), {**params, "u": str(w.user_id)})
+        row = s.execute(text("select status, approved_by, version from item_aliases")).one()
+    assert row[0] == "pending_approval" and row[1] is None and row[2] == version + 1
+    line = client.get(f"/api/v1/invoices/{w.invoices['oct']}", headers=h).json()["lines"][0]
+    assert line["status"] != "matched"
+
+
+def test_round3_alias_unrelated_update_keeps_approval(app_engine):  # type: ignore[no-untyped-def]
+    w, _client, _h, _run = _matched_world(app_engine, "Alias unrelated update")
+    with session(w.tenant_id, app_engine) as s:
+        version = _approve_x12(s, w)
+        s.execute(text("update item_aliases set valid_to = now()"))
+        row = s.execute(text("select status, approved_by, version from item_aliases")).one()
+    assert row[0] == "active" and row[1] is not None and row[2] == version

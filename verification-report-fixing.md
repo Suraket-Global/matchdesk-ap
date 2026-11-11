@@ -368,3 +368,41 @@ The edits below were **fixed after retest**: the author recorded them and they h
 Still open: no alias edit endpoint calls `rematch_alias` (alias screens are not built). No input change starts a run automatically; the reader sees `stale` until a run is requested.
 
 Documents changed in round 2: TRD.md sections 6.3, 8.5 (check 7) and 12 (invoices row); schema.md 9.1; AGENTS.md utilities index; this section.
+
+### 9.7 Review round 3 (final retest) and the open item fixed after it (2026-11-11)
+
+Reviewer's verdicts, copied unchanged from `_coordination/review/matchdesk-ap-b1-verdicts.json` (round 3, commit `6e7bf6f`). Reviewer reproduced: `make test` 116 passed (unit 60, integration 56); `make check` clean; 5 contracts kept; import rule and float lint clean.
+
+| Finding | Severity | Verdict |
+|---|---|---|
+| B1-001 | blocker | Closed |
+| B1-002 | major | Closed |
+| B1-003 | major | Closed |
+| B1-004 | major | Closed |
+| B1-005 | major | Closed |
+| B1-006 | major | Closed |
+| B1-007 | minor | Closed |
+| B1-008 | minor | Closed |
+| B1-009 | minor | Closed |
+| B1-010 | minor | Closed |
+| B1-011 | minor | Closed |
+| B1-012 | major | Closed |
+
+Counts: closed 12, closed part open 0, still open 0, new 0. Observations, unchanged:
+
+- Changing an approved converting alias's supplier_item_code keeps its approval (vendor column not tested); handle when alias editing is built (T-4.1.1, MH-10).
+- rematch_alias exists but nothing calls it yet; the stale marker covers the gap until a run is requested.
+- B1 has only detail endpoints; stale-on-read for list and report endpoints cannot be tested until they exist.
+- A full return later fully credited ends as line status exception with only a resolved exception; no dollar effect.
+
+The edit below was **fixed after round-3 retest, lead-checked**: the lead named the item; it has not been re-reviewed by the reviewer.
+
+| Item | Fix | Regression test |
+|---|---|---|
+| Alias key observation (MH-10) | Migration 0005 adds `item_aliases.supplier_description` (the dictionary column used as the alias's description key) and extends the trigger `item_aliases_reset_approval`: a change of supplier (`vendor_id`), `supplier_item_code`, `supplier_item_code_norm` or `supplier_description` clears `approved_by`, increments `version` and returns a converting alias to `pending_approval`, also when the same statement sets `approved_by`. Updates of other columns keep the approval | `test_review_round2_db.py::test_round3_alias_key_change_resets_approval` (5 cases: vendor, code with norm, norm only, description changed, description cleared; each also checks the invoice line no longer reads `matched`), `test_round3_alias_unrelated_update_keeps_approval`. With the trigger conditions of 0004 only, all 5 cases fail; with 0005 they pass |
+
+Commands and results after the fix (from `matchdesk-ap/`): `make test` (drops and re-migrates `matchdesk_test`, 0001 to 0005): 122 passed, 1 warning (httpx deprecation); `pytest -q tests/unit` 60 passed, `pytest -q tests/integration` 62 passed; `make check` exit 0 (ruff, format, mypy, 5 contracts kept, import rule, float lint).
+
+Limit, stated as a gap: list and report endpoints do not exist yet, so stale-on-read is proven only on the detail endpoints `GET /invoices/{id}`, `GET /match-runs/{id}` and `GET /exceptions/{id}`. TRD section 12 requires list and report endpoints to use the same comparison when they are built. The other observations stay open: nothing calls `rematch_alias` yet, and a fully credited full return ends as `exception` with only a resolved exception.
+
+Documents changed: schema.md 9.1 (migration 0005 row); this section.
