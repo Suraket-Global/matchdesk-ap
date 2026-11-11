@@ -1,7 +1,7 @@
 [project]
 name = "matchdesk"
 version = "0.1.0"
-description = "MatchDesk AP three-way match (build milestone B1)"
+description = "MatchDesk AP three-way match (build milestones B1, B2)"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "fastapi==0.162.4",
@@ -10,6 +10,9 @@ dependencies = [
     "SQLAlchemy==2.1.8",
     "alembic==1.20.1",
     "psycopg[binary]==3.3.8",
+    "boto3==1.44.0",
+    "cryptography==50.0.2",
+    "python-multipart==0.0.33",
 ]
 
 [project.optional-dependencies]
@@ -110,3 +113,7 @@ name = "worker never imports api or a web framework (R-07)"
 type = "forbidden"
 source_modules = ["matchdesk.worker"]
 forbidden_modules = ["matchdesk.api", "fastapi", "starlette", "uvicorn"]
+
+[[tool.mypy.overrides]]
+module = ["boto3", "boto3.*", "botocore", "botocore.*"]
+ignore_missing_imports = true

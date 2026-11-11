@@ -12,7 +12,7 @@ from sqlalchemy import Engine
 
 from matchdesk import blobstore
 from matchdesk.exceptions.models import ItemAlias
-from matchdesk.identity import Membership, Tenant, User, issue_session
+from matchdesk.identity import Membership, Tenant, User, csrf_for, issue_session
 from matchdesk.intake.models import DocumentRow, InvoiceLineRow, InvoiceRow
 from matchdesk.matching import normalise_code, normalise_number
 from matchdesk.qbo.models import Item, PoLineRow, PurchaseOrderRow, Vendor
@@ -35,6 +35,15 @@ class World:
     import_id: uuid.UUID | None = None
     invoices: dict[str, uuid.UUID] = field(default_factory=dict)
     documents: dict[str, uuid.UUID] = field(default_factory=dict)
+
+    @property
+    def headers(self) -> dict[str, str]:
+        """Fixture session: the session cookie and its anti-forgery token (B2; replaces B1 bearer)."""
+        return auth_headers(self.token)
+
+
+def auth_headers(token: str) -> dict[str, str]:
+    return {"Cookie": f"__Host-md_session={token}", "X-CSRF-Token": csrf_for(token)}
 
 
 def make_tenant(engine: Engine, name: str, role: str = "clerk") -> World:

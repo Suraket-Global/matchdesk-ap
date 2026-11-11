@@ -31,7 +31,7 @@ def drain(engine) -> None:  # type: ignore[no-untyped-def]
 
 
 def _run(client, engine, w):  # type: ignore[no-untyped-def]
-    h = {"Authorization": f"Bearer {w.token}"}
+    h = w.headers
     r = client.post("/api/v1/match-runs", json={"invoice_ids": [str(w.invoices["oct"])]}, headers=h)
     assert r.status_code in (200, 202), r.text
     drain(engine)
@@ -122,7 +122,7 @@ def test_b1_010_auth_before_validation_and_problem_json(app_engine):  # type: ig
     r = client.post(
         "/api/v1/match-runs",
         json={"invoice_ids": ["secret-probe"]},
-        headers={"Authorization": f"Bearer {w.token}"},
+        headers=w.headers,
     )
     assert r.status_code == 422 and r.headers["content-type"].startswith("application/problem+json")
     assert "secret-probe" not in r.text
@@ -132,7 +132,7 @@ def test_b1_010_expired_key_not_replayed_and_concurrent_key_replays(app_engine, 
     w = make_tenant(app_engine, "B1-010 keys")
     add_invoice(app_engine, w, "oct", "INV-1000", date(2026, 10, 8), "60")
     client = TestClient(create_app())
-    h = {"Authorization": f"Bearer {w.token}", "Idempotency-Key": "k-exp"}
+    h = {**w.headers, "Idempotency-Key": "k-exp"}
     first = client.post(
         "/api/v1/match-runs", json={"invoice_ids": [str(w.invoices["oct"])]}, headers=h
     ).json()

@@ -36,6 +36,7 @@ log = get_logger("matchdesk.intake")
 TASK = "process_document"
 LEASE = timedelta(minutes=5)
 MAX_ATTEMPTS = 4
+EXTENSIONS = {"application/pdf": "pdf", "image/png": "png", "image/jpeg": "jpg", "text/csv": "csv"}
 
 # Stored state -> displayed state (TRD 6.3). Every stored state maps to exactly one.
 DISPLAYED = {
@@ -83,8 +84,12 @@ def add_file(
             DocumentRow.deleted_at.is_(None),
         )
     )
-    key = blobstore.build_key(tenant_id, "invoice", data)
+    doc_id = uuid.uuid4()
+    key = blobstore.build_key(
+        tenant_id, "invoice", data, source="upload", record_id=doc_id, ext=EXTENSIONS.get(mime_type, "bin")
+    )
     doc = DocumentRow(
+        id=doc_id,
         tenant_id=tenant_id,
         purpose="invoice",
         source="upload",
@@ -100,7 +105,7 @@ def add_file(
     s.add(doc)
     s.flush()
     if earlier is None:
-        blobstore.put(tenant_id, key, data)
+        blobstore.put(tenant_id, key, data, content_type=mime_type)
         enqueue(s, TASK, tenant_id, {"document_id": str(doc.id)}, corr)
     s.execute(
         text("update upload_batches set file_count = file_count + 1 where id = :b"), {"b": str(batch_id)}

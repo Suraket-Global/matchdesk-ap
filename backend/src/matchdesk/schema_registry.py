@@ -19,5 +19,14 @@ def load_all_models() -> type[Base]:
 
 
 GLOBAL_TABLES = frozenset(
-    {"tenants", "users", "sessions", "ruleset_versions", "job_queue", "alembic_version"}
+    {
+        "tenants",
+        "users",
+        "sessions",
+        "login_tokens",
+        "auth_rate_events",
+        "ruleset_versions",
+        "job_queue",
+        "alembic_version",
+    }
 )

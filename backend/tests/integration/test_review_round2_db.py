@@ -29,7 +29,7 @@ def _matched_world(app_engine, name):  # type: ignore[no-untyped-def]
     add_invoice(app_engine, w, "oct", "INV-1000", date(2026, 10, 8), "60")
     add_receipt(app_engine, w, "60", date(2026, 10, 6))
     client = TestClient(create_app())
-    h = {"Authorization": f"Bearer {w.token}"}
+    h = w.headers
     run_id = client.post(
         "/api/v1/match-runs", json={"invoice_ids": [str(w.invoices["oct"])]}, headers=h
     ).json()["id"]

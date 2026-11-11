@@ -1,8 +1,9 @@
-"""HTTP entry point (wiring only). Minimal core path of TRD section 12 for B1.
+"""HTTP entry point (wiring only). Core path of TRD section 12 plus sign-in (B1, B2).
 
-Tenant comes from the session, never from the URL or body. A record in another
+Tenant comes from the session cookie, never from the URL or body. A record in another
 tenant returns 404, identical to a missing record. Errors are problem+json with
-the correlation ID.
+the correlation ID. Every mutating request of a signed-in session must carry the
+session's anti-forgery token in ``X-CSRF-Token``.
 """
 
 import time
@@ -11,7 +12,7 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
+from fastapi import FastAPI, Header, HTTPException, Request, Response, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -20,46 +21,60 @@ from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 
 from matchdesk import blobstore
+from matchdesk.api.auth_routes import PUBLIC_API_PATHS, register_auth_routes
+from matchdesk.api.common import CSRF_HEADER, MUTATING, SESSION_COOKIE, Auth, problem, require
 from matchdesk.core import (
+    ConflictError,
+    ForbiddenError,
+    Mailer,
     NotFoundError,
     configure_logging,
-    get_correlation_id,
     get_logger,
     load_settings,
+    mailer_from_settings,
     new_correlation_id,
     set_correlation_id,
 )
 from matchdesk.exceptions import request_run, stale_runs
 from matchdesk.exceptions.models import ExceptionRow, LineMatch, MatchRun
-from matchdesk.identity import Principal, resolve_session
-from matchdesk.intake.models import DocumentRow, InvoiceLineRow, InvoiceRow
+from matchdesk.identity import Principal, csrf_matches, load_session
+from matchdesk.intake import add_file, create_batch
+from matchdesk.intake.models import DocumentRow, InvoiceLineRow, InvoiceRow, UploadBatch
 from matchdesk.tenancy import get_engine, global_session, session
 from matchdesk.tenancy.models import IdempotencyKey
 
 log = get_logger("matchdesk.api")
+
+MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # TRD 8.7
+EXTENSIONS = {"application/pdf": "pdf", "image/png": "png", "image/jpeg": "jpg"}
 
 
 class MatchRunRequest(BaseModel):
     invoice_ids: list[uuid.UUID] = Field(min_length=1, max_length=500)
 
 
-def problem(status: int, title: str) -> JSONResponse:
-    return JSONResponse(
-        status_code=status,
-        media_type="application/problem+json",
-        content={
-            "type": "about:blank",
-            "title": title,
-            "status": status,
-            "detail": title,
-            "correlation_id": get_correlation_id(),
-        },
-    )
+def sniff(data: bytes) -> str | None:
+    """Content type from the bytes; the declared type and the file name are ignored (TRD 8.7)."""
+    if data.startswith(b"%PDF-"):
+        return "application/pdf"
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if data.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    return None
 
 
-def create_app() -> FastAPI:
+def _same_origin(request: Request, app_base_url: str) -> bool:
+    """A browser sends ``Origin`` on every cross-origin POST; when present it must be the app's own."""
+    origin = request.headers.get("Origin")
+    return origin is None or origin.rstrip("/") == app_base_url.rstrip("/")
+
+
+def create_app(mailer: Mailer | None = None) -> FastAPI:
     settings = load_settings()
-    app = FastAPI(title="MatchDesk API", version="0.1.0", docs_url=None, redoc_url=None)
+    settings.require_secrets()
+    app = FastAPI(title="MatchDesk API", version="0.2.0", docs_url=None, redoc_url=None)
+    out_mail = mailer or mailer_from_settings(settings)
 
     def engine() -> Any:
         return get_engine(settings.database_url)
@@ -73,18 +88,27 @@ def create_app() -> FastAPI:
             corr = new_correlation_id()
         set_correlation_id(corr)
         started = time.monotonic()
-        if request.url.path.startswith("/api/"):
+        path = request.url.path
+        if path.startswith("/api/") and path not in PUBLIC_API_PATHS:
             # Authenticate before the body is parsed or validated, so an anonymous caller gets
-            # 401 and learns nothing about the request shape (B1-010).
-            auth = request.headers.get("Authorization", "")
-            p = None
-            if auth.startswith("Bearer "):
-                p = await run_in_threadpool(resolve_session, engine(), auth.removeprefix("Bearer ").strip())
-            if p is None:
+            # 401 and learns nothing about the request shape (B1-010). Only the cookie counts.
+            token = request.cookies.get(SESSION_COOKIE)
+            ctx = await run_in_threadpool(load_session, engine(), token) if token else None
+            denied = None
+            if ctx is None:
                 denied = problem(401, "Not signed in")
+            elif request.method in MUTATING and not csrf_matches(ctx, request.headers.get(CSRF_HEADER)):
+                denied = problem(403, "Anti-forgery token missing or wrong")
+            if denied is not None:
                 denied.headers["X-Correlation-Id"] = corr
+                denied.headers["Cache-Control"] = "no-store"
                 return denied
-            request.state.principal = p
+            request.state.session = ctx
+        elif path in PUBLIC_API_PATHS and not _same_origin(request, settings.app_base_url):
+            # Public POSTs carry no session; a cross-site form post is refused by origin (ASVS 3.5.1).
+            denied = problem(403, "Cross-site request refused")
+            denied.headers["X-Correlation-Id"] = corr
+            return denied
         response = await call_next(request)
         response.headers["X-Correlation-Id"] = corr
         response.headers["Cache-Control"] = "no-store"
@@ -92,12 +116,14 @@ def create_app() -> FastAPI:
             "request",
             extra={
                 "method": request.method,
-                "path": request.url.path,
+                "path": path,
                 "status_code": response.status_code,
                 "duration_ms": int((time.monotonic() - started) * 1000),
             },
         )
         return response
+
+    register_auth_routes(app, settings, engine(), out_mail)
 
     @app.exception_handler(NotFoundError)
     async def not_found(_r: Request, _e: NotFoundError) -> JSONResponse:
@@ -112,13 +138,13 @@ def create_app() -> FastAPI:
         # problem+json without echoing the submitted input (B1-010).
         return problem(422, "Request is not valid")
 
-    def principal(request: Request) -> Principal:
-        p = getattr(request.state, "principal", None)
-        if p is None:
-            raise HTTPException(401, "Not signed in")
-        return p  # type: ignore[no-any-return]
+    @app.exception_handler(ForbiddenError)
+    async def forbidden(_r: Request, _e: ForbiddenError) -> JSONResponse:
+        return problem(403, "Forbidden")
 
-    Auth = Annotated[Principal, Depends(principal)]
+    @app.exception_handler(ConflictError)
+    async def conflict(_r: Request, e: ConflictError) -> JSONResponse:
+        return problem(409, str(e) or "Conflict")
 
     @app.get("/healthz")
     def healthz() -> dict[str, str]:
@@ -133,14 +159,7 @@ def create_app() -> FastAPI:
                 ok = head is not None
         except Exception:
             ok = False
-        try:
-            root = settings.blob_root
-            root.mkdir(parents=True, exist_ok=True)
-            probe = root / ".ready"
-            probe.write_bytes(b"1")
-            probe.unlink()
-        except OSError:
-            ok = False
+        ok = ok and blobstore.store(settings).ready()
         return JSONResponse(
             status_code=200 if ok else 503, content={"status": "ready" if ok else "not ready"}
         )
@@ -152,8 +171,7 @@ def create_app() -> FastAPI:
         response: Response,
         idempotency_key: Annotated[str | None, Header()] = None,
     ) -> dict[str, Any]:
-        if p.role not in ("controller", "clerk"):
-            raise HTTPException(403, "Forbidden")
+        require(p, "start_match_run")
         req_hash = str(sorted(str(i) for i in body.invoice_ids)).encode()
         try:
             return _create_match_run(p, body, req_hash, idempotency_key, response)
@@ -295,18 +313,54 @@ def create_app() -> FastAPI:
                 body["stale"] = any(stale_runs(s, list(runs)).values())
             return body
 
+    @app.post("/api/v1/intake/batches", status_code=201)
+    def post_batch(p: Auth) -> dict[str, Any]:
+        require(p, "upload_and_receiving")
+        with session(p.tenant_id, engine()) as s:
+            batch = create_batch(s, p.tenant_id)
+            return {"id": str(batch.id), "file_count": batch.file_count}
+
+    @app.post("/api/v1/intake/batches/{batch_id}/files", status_code=201)
+    async def post_file(
+        batch_id: uuid.UUID,
+        file: UploadFile,
+        p: Auth,
+        idempotency_key: Annotated[str, Header(min_length=1, max_length=200)],
+    ) -> dict[str, Any]:
+        require(p, "upload_and_receiving")
+        data = await file.read(MAX_UPLOAD_BYTES + 1)
+        if len(data) > MAX_UPLOAD_BYTES:
+            raise HTTPException(413, "File is larger than 20 MB")
+        mime = sniff(data)
+        if mime is None:
+            raise HTTPException(415, "Only PDF, PNG and JPEG invoices are accepted")
+        return await run_in_threadpool(_store_file, p, batch_id, idempotency_key, data, mime)
+
+    def _store_file(p: Principal, batch_id: uuid.UUID, key: str, data: bytes, mime: str) -> dict[str, Any]:
+        with session(p.tenant_id, engine()) as s:
+            if s.get(UploadBatch, batch_id) is None:
+                raise NotFoundError("batch")
+            doc = add_file(s, p.tenant_id, p.user_id, batch_id, key, data, mime)
+            return {
+                "id": str(doc.id),
+                "state": doc.state,
+                "byte_size": doc.byte_size,
+                "mime_type": doc.mime_type,
+            }
+
     @app.get("/api/v1/documents/{document_id}/content")
     def get_document_content(document_id: uuid.UUID, p: Auth) -> Response:
         with session(p.tenant_id, engine()) as s:
             doc = s.get(DocumentRow, document_id)
             if doc is None or doc.deleted_at is not None:
                 raise NotFoundError("document")
-            data = blobstore.get(p.tenant_id, doc.blob_key, settings.blob_root)
+            data = blobstore.get(p.tenant_id, doc.blob_key, settings=settings)
+            ext = EXTENSIONS.get(doc.mime_type, "bin")
             return Response(
                 content=data,
                 media_type=doc.mime_type,
                 headers={
-                    "Content-Disposition": f'attachment; filename="document-{doc.id}.pdf"',
+                    "Content-Disposition": f'attachment; filename="document-{doc.id}.{ext}"',
                     "Content-Security-Policy": "sandbox",
                     "X-Content-Type-Options": "nosniff",
                 },

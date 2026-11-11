@@ -2,7 +2,7 @@
 
 Canonical instructions for any coding or documentation agent working in this repository. `CLAUDE.md` adds product-specific guidance and defers to this file.
 
-**State of the repository:** the ten planning documents at the root, plus build milestone B1 (2026-11-11, authorised by the owner before the Phase 0 gate) under `backend/`: the package layout, `core`, the pure `matching` engine, migrations with row-level security, match runs, a minimal API and a worker, with unit and integration tests. Nothing is deployed; QuickBooks and extraction exist only as interfaces with fakes. What ran, and how, is in [verification-report-fixing.md section 9](verification-report-fixing.md#9-build-milestone-b1-2026-11-11). Commands marked **exists** in section 12 work locally; all others are still **proposed**.
+**State of the repository:** the ten planning documents at the root, plus build milestone B1 (2026-11-11, authorised by the owner before the Phase 0 gate) under `backend/`: the package layout, `core`, the pure `matching` engine, migrations with row-level security, match runs, a minimal API and a worker, with unit and integration tests; and build milestone B2 (2026-11-11): emailed sign-in links, cookie sessions with anti-forgery tokens, idle and absolute limits, rate limits, invitations, memberships, operator TOTP, mail over SMTP to the local Mailpit inbox and files over the S3 API to local MinIO. Nothing is deployed; QuickBooks and extraction exist only as interfaces with fakes; no real mail or storage provider is connected. What ran, and how, is in [verification-report-fixing.md sections 9](verification-report-fixing.md#9-build-milestone-b1-2026-11-11) and [10](verification-report-fixing.md#10-build-milestone-b2-sign-in-and-local-services-2026-11-11). Commands marked **exists** in section 12 work locally; all others are still **proposed**.
 
 ## 1. Reading order
 
@@ -55,20 +55,22 @@ If two files disagree, the authoritative file wins and the other is corrected in
 - Amounts are `Decimal` and `NUMERIC`. No binary floats in money or quantity code.
 - Every mutating endpoint accepts an idempotency key; every editable record carries a version.
 
-Utilities index (B1). Search here before adding a helper:
+Utilities index (B1, B2). Search here before adding a helper:
 
 | Need | Use | File |
 |---|---|---|
 | Decimal conversion refusing floats; half-up rounding to cents, price or quantity; line amount | `core.dec`, `core.round_cents`, `core.round_price`, `core.round_qty`, `core.line_amount` | `backend/src/matchdesk/core/money.py` |
-| Settings (one object for API and worker; `fingerprint()` for CI-02) | `core.load_settings()` | `core/settings.py` |
+| Settings (one object for API and worker; reads the environment, then the gitignored `backend/.env`; `fingerprint()` for CI-02 leaves secrets out; `require_secrets()`) | `core.load_settings()` | `core/settings.py` |
+| Outgoing mail (SMTP: Mailpit locally, a provider later; fake for tests) | `core.Mailer`, `core.SmtpMailer`, `core.RecordingMailer`, `core.mailer_from_settings` | `core/mail.py` |
 | JSON logging, correlation ID, field allow-list | `core.configure_logging`, `core.set_correlation_id`, `core.get_logger` | `core/logging.py` |
 | Clock | `core.SystemClock`, `core.FixedClock` | `core/clock.py` |
 | Errors (404-equivalent, 403, 409, missing tenant) | `core.NotFoundError`, `ForbiddenError`, `ConflictError`, `TenantContextError` | `core/errors.py` |
-| Tenant transaction; no-tenant transaction; operator transaction | `tenancy.session(tenant_id)`, `tenancy.global_session()`, `tenancy.operator_session()` | `tenancy/db.py` |
+| Tenant transaction; no-tenant transaction; operator transaction; a user's own memberships across tenants; one invitation by its token hash | `tenancy.session(tenant_id)`, `tenancy.global_session()`, `tenancy.operator_session()`, `tenancy.user_session(user_id)`, `tenancy.invitation_lookup_session(token_hash)` | `tenancy/db.py` |
+| Permission table of schema.md 4.1 as data; the one check | `tenancy.PERMISSIONS`, `tenancy.can(role, action)`; in the API `api.common.require(p, action)` | `tenancy/permissions.py`, `api/common.py` |
 | Tenant-owned table boilerplate; composite tenant foreign key; column types | `tenancy.TenantMixin`, `tenant_args()`, `tfk()`; `MONEY`, `PRICE`, `QTY`, `enum_check` (exported from `tenancy`) | `tenancy/db.py`, `tenancy/types.py` |
 | Compare-and-set state transition (the shared transition helper) | `tenancy.transition()` | `tenancy/transitions.py` |
 | Enqueue in the business transaction; claim with lease; job wrapper that refuses no tenant | `tenancy.enqueue`, `tenancy.claim`, `tenancy.run_claimed` | `tenancy/jobs.py` |
-| File keys and tenant-checked file access | `blobstore.build_key`, `blobstore.put`, `blobstore.get` | `blobstore/__init__.py` |
+| File keys (TRD 8.7 format) and tenant-checked file access over the configured store (local directory or S3/MinIO) | `blobstore.build_key`, `put`, `get`, `delete`, `store()` (`LocalStore`, `S3Store`) | `blobstore/__init__.py` |
 | Document and supplier-code normalisation; deterministic document order | `matching.normalise_number`, `normalise_code`, `normalise_uom`, `document_order_key` | `matching/normalise.py` |
 | Rule set v1; counting-receipt rule; coverage rule; whether an alias converts; input fingerprint; float refusal | `matching.evaluate`, `receipt_line_counts`, `is_covered`, `alias_converts` (in `engine.py`), `input_fingerprint`, `assert_no_floats` (in `fingerprint.py`) | `matching/engine.py`, `matching/fingerprint.py` |
 | Build match inputs from the database (no date filter); request and execute a match run (reuse only while current; per-tenant lock); store results with supersede | `exceptions.build_match_input`, `request_run`, `execute_run`, `store_result` | `exceptions/inputs.py`, `runs.py`, `store.py` |
@@ -79,7 +81,9 @@ Utilities index (B1). Search here before adding a helper:
 | Extraction interface, fake, arithmetic gates | `extraction.Extractor`, `FakeExtractor`, `verification_gates` | `extraction/provider.py` |
 | QuickBooks read interface and fake (no write method) | `qbo.QboReader`, `qbo.FakeQboReader` | `qbo/client.py` |
 | Refund calculation over exceptions | `reporting.calculate_refund` | `reporting/refund.py` |
-| Session lookup | `identity.resolve_session`, `identity.issue_session` | `identity/__init__.py` |
+| Sign-in links, session lookup and end, anti-forgery token, tenant switch, `/me` | `identity.request_login_link`, `exchange_login_token`, `load_session`, `resolve_session`, `issue_session` (fixtures), `end_session`, `csrf_for`, `csrf_matches`, `switch_tenant`, `describe_me` | `identity/auth.py` |
+| Invitations, users and memberships (last-controller guard is a trigger) | `identity.create_invitation`, `list_invitations`, `revoke_invitation`, `accept_invitation`, `list_users`, `update_membership` | `identity/auth.py` |
+| Operator TOTP (RFC 6238) and AES-256-GCM sealing with key id | `identity.enroll_operator`, `identity.totp.verify`, `identity.secrets_box.seal` / `unseal` | `identity/totp.py`, `identity/secrets_box.py` |
 
 ## 6. Tenant safety
 
@@ -149,8 +153,8 @@ See `execution-plan.md` section 6 for purpose, inputs, outputs and failure behav
 
 | Command (proposed) | Purpose |
 |---|---|
-| `make up` / `make down` | Start or stop the local stack with health checks. **Exists**: starts API (port 8101) and worker directly, migrates `matchdesk_dev`, waits for `/readyz`; Compose is still proposed |
-| `make test` | Unit and integration suites. **Exists**: drops and re-migrates `matchdesk_test`, runs as `matchdesk_app` |
+| `make up` / `make down` | Start or stop the local stack with health checks. **Exists**: starts API (port 8101) and worker directly, migrates `matchdesk_dev`, waits for `/readyz` (database, migrations, file store); needs `backend/.env` (copy `backend/.env.example`; session and token keys, MinIO settings); Mailpit (127.0.0.1:1025, UI 8025) and MinIO (127.0.0.1:9000) must be running; Compose is still proposed |
+| `make test` | Unit and integration suites. **Exists**: drops and re-migrates `matchdesk_test`, runs as `matchdesk_app`; the B2 tests use Mailpit and MinIO (they skip, and say so, when either is not running) |
 | `make check` | **Exists** (added in B1): ruff, format check, mypy, import contracts, top-level import rule (`backend/scripts/check_imports.py`), float lint over the whole package (`backend/scripts/check_no_float.py`) |
 | `scripts/check_migrations` | Single head, ORM parity, manifest, lock rules. Proposed; head and parity are covered by `backend/tests/integration/test_migrations.py` |
 | `scripts/load_fixtures` | Two synthetic tenants and golden fixtures |

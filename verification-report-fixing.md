@@ -117,7 +117,7 @@ This is the only home of the 22 production risks. Other documents cite the ID. E
 | R-10 | Merged branches introduce conflicting migration order | Two developers each add a migration; production applies them in an order nobody tested and a deploy fails during a pilot week | Single linear history; CI fails on more than one head | CI failure | CI-03: two branches each adding a migration; the second to merge fails CI until rebased | T-2.2.2 |
 | R-11 | Index creation locks busy production tables during deployment | Adding an index to `line_matches` or `exceptions` blocks the clerk's queue and a running match for minutes | Concurrent index builds, one per migration; `NOT VALID` then validate; `lock_timeout` 5 s | Deploy log showing lock timeout; request latency during deploy | OPS-06: in staging, hold a long transaction on `exceptions`, run the migration: it fails fast on lock timeout, and succeeds on retry without blocking reads | T-2.2.2 |
 | R-12 | Correlation IDs disappear across jobs and retries, or sensitive data leaks into logs | When a controller disputes a figure, the upload cannot be traced to its extraction and match run; or supplier unit prices appear in log files that are kept and copied with fewer protections than the database | Correlation ID stored in job payloads and on `documents`, `extraction_runs`, `match_runs`, `audit_events`; scrubbing filter; allow-list of loggable fields | Share of log lines without correlation ID; scrub-test failure | IT-16: one correlation ID across request, job, retry and match run; no fixture price, document text or token in captured logs. B1 2026-11-11: IT-16 passed in part: no fixture price, document number or token in logs; correlation ID carried from request to job (section 9) | T-2.1.4 |
-| R-13 | Upload keys collide or fail to isolate tenant, source and purpose | Two suppliers both send `invoice.pdf`; one overwrites the other and the evidence shown beside a finding is the wrong document; or a receiving file lands where an invoice is expected | Keys are `t/{tenant}/{purpose}/{source}/{yyyy}/{mm}/{record}/{sha256}`; user file names never used in paths; `blob_key` unique with a check that it starts with the row's tenant | Unique-violation count; hash mismatch on read | IT-03: key outside tenant prefix refused. IT-07: identical names with different content are stored separately; identical content is one document. B1 2026-11-11: IT-03 key refusal passed (section 9) | T-2.2.5 |
+| R-13 | Upload keys collide or fail to isolate tenant, source and purpose | Two suppliers both send `invoice.pdf`; one overwrites the other and the evidence shown beside a finding is the wrong document; or a receiving file lands where an invoice is expected | Keys are `t/{tenant}/{purpose}/{source}/{yyyy}/{mm}/{record}/{sha256}`; user file names never used in paths; `blob_key` unique with a check that it starts with the row's tenant | Unique-violation count; hash mismatch on read | IT-03: key outside tenant prefix refused. IT-07: identical names with different content are stored separately; identical content is one document. B1 2026-11-11: IT-03 key refusal passed (section 9). B2 2026-11-11: keys now follow the full format with the document ID as record and the sniffed extension; upload, download and cross-tenant refusal against MinIO passed (`test_b2_files.py`, section 10) | T-2.2.5 |
 | R-14 | Temporary uploads survive retention expiry or failed cleanup | Raw supplier emails, abandoned receiving previews and exported reports with cost prices stay on disk after the periods promised in the pilot agreement | `expires_at` on temporary documents; daily sweeper with counts; orphan-blob cleanup; alert on failure | Count of rows past `expires_at`; sweeper failure alert | IT-10: expired files and the orphan blob are removed; a simulated failure alerts and is retried | T-2.2.5 |
 | R-15 | Missing persistent volumes cause data loss after service recreation | Recreating containers during a deploy wipes the database or every invoice PDF of a pilot account; the back-test cannot be evidenced | Named volumes for database, blobs and proxy data in the Compose file; start-up refuses if a volume is missing or empty when the database expects files; nightly offsite backup | Start-up check failure; backup-age alert | OPS-03: recreate all containers, data intact. OPS-01: timed restore on a different machine from offsite backups and the offsite copy of the keys | T-7.1.1, T-7.1.2 |
 | R-16 | Generated file links use internal hosts or `localhost` behind a public proxy | The controller's sign-in email, the weekly summary link or the QuickBooks redirect points at an internal address; they cannot sign in or connect, and Intuit rejects the redirect | One `PUBLIC_BASE_URL` for all generated links; start-up validation; files are streamed through the API, no storage links | Start-up failure; link check in staging | OPS-05: sign-in email, export and authorise URL all use the public HTTPS host; bad setting stops start-up | T-7.1.1 |
@@ -406,3 +406,70 @@ Commands and results after the fix (from `matchdesk-ap/`): `make test` (drops an
 Limit, stated as a gap: list and report endpoints do not exist yet, so stale-on-read is proven only on the detail endpoints `GET /invoices/{id}`, `GET /match-runs/{id}` and `GET /exceptions/{id}`. TRD section 12 requires list and report endpoints to use the same comparison when they are built. The other observations stay open: nothing calls `rematch_alias` yet, and a fully credited full return ends as `exception` with only a resolved exception.
 
 Documents changed: schema.md 9.1 (migration 0005 row); this section.
+
+## 10. Build milestone B2: sign-in and local services (2026-11-11)
+
+Authorised by the owner on 2026-11-11 (build what needs no external account), still before the Phase 0 gate. Branch `feat/b2-local-auth`, from the B1 head after the round-3 open item (section 9.7). Synthetic data only; no real provider, account or key.
+
+### 10.1 What was built
+
+| Task | Built | Not built (reason) |
+|---|---|---|
+| T-2.2.3 (a) sign-in links | `POST /auth/login-links` (same 202 answer for every address; mail sent after the response), `POST /auth/sessions` (token in the body, binding cookie required, single use, 10 minutes), operator TOTP | A web page for `/login/verify` (no frontend in B2) |
+| T-2.2.3 (b) cookie and anti-forgery | `__Host-md_session` (HttpOnly, Secure, SameSite=Lax, Path=/), `X-CSRF-Token` on every mutating request, origin check on public POSTs; idle 60 minutes, absolute 24 hours, `POST /auth/session/extend`, `DELETE /auth/session`, `GET /me`, `PUT /me/active-tenant`. The B1 bearer header is removed; the fake remains only as `issue_session` in test fixtures | Proxy access-log rule (no proxy locally) |
+| T-2.2.3 (c) invitations | `POST/GET /invitations`, `DELETE /invitations/{id}`, `POST /invitations/accept` (7 days, single use, token in fragment and body) | |
+| T-2.2.3 (d) permission table as data | `tenancy.permissions` (schema.md 4.1 rows; `can()`), used by every B1 and B2 endpoint | IT-13 over every endpoint of TRD 12 (most endpoints do not exist yet) |
+| T-2.2.3 (e) last-controller guard | Database trigger; `PATCH /memberships/{id}` (role or deactivation; not one's own; deactivation deletes that user's sessions in the tenant); `GET /users` | |
+| Operator path | TOTP at sign-in; `identity.enroll_operator` | Support grants, `support_reader`, operator endpoints (T-5.1.5) |
+| Mail (TRD 3) | `core.mail.SmtpMailer` to Mailpit at 127.0.0.1:1025 without authentication; provider later through `MATCHDESK_SMTP_*` only | Inbound mail (MH-14) |
+| T-2.2.5 (a) blobstore over S3 | `blobstore.S3Store` to MinIO (`matchdesk-dev`, region `us-east-1`), `LocalStore` kept; key `t/{tenant}/{purpose}/{source}/{yyyy}/{mm}/{record}/{sha256}.{ext}`; private bucket, no public or presigned URL; `POST /intake/batches`, `POST /intake/batches/{id}/files` (content sniffing for PDF, PNG, JPEG; 20 MB); download only through `/documents/{id}/content`; readiness checks the bucket | Page, pixel, XLSX and CSV limits; retention sweeper (IT-10); malware scanning (accepted gap, TRD 8.7) |
+
+Out of scope and deferred: OIDC or any outside identity provider (not in the design: AD-09 uses emailed links); real mail provider; real object storage provider; deployment.
+
+Local secrets: `backend/.env` (gitignored, mode 600) holds a generated session key and token key and the local MinIO test credentials; `backend/.env.example` holds names and placeholders only. The test suite generates its own session and token keys per run (`tests/conftest.py`).
+
+### 10.2 Commands and results (from `matchdesk-ap/`)
+
+| Command | Result |
+|---|---|
+| `make test` (drops and re-migrates `matchdesk_test` 0001 to 0006, runs as `matchdesk_app`; Mailpit and MinIO running) | 143 passed, 1 warning (httpx deprecation in Starlette's test client) |
+| `cd backend && .venv/bin/pytest -q tests/unit` | 69 passed |
+| `cd backend && .venv/bin/pytest -q tests/integration` | 74 passed |
+| `cd backend && .venv/bin/pytest -q tests/integration/test_b2_sign_in.py tests/integration/test_b2_files.py` | 11 passed |
+| `make check` | exit 0: ruff clean, format clean, mypy no issues, 5 import contracts kept, import rule and float lint clean |
+| `make up`, `GET /readyz`, `make down` | ready (database, migrations at head, MinIO bucket); an unauthenticated `GET /api/v1/me` gives 401; stopped cleanly |
+
+### 10.3 Tests that ran
+
+| Test (file `backend/tests/...`) | What it shows | Result |
+|---|---|---|
+| `integration/test_b2_sign_in.py::test_sign_in_end_to_end_cookie_csrf_reuse_and_logout` | Link requested, read from Mailpit, exchanged by POST; cookie attributes; new session token; mutating request without or with a wrong anti-forgery token refused (403), with it accepted; bearer header refused (401); link reused refused; logout deletes the session and the replayed cookie gets 401; no link token, session token, anti-forgery token or address in the application log | Passed |
+| `...::test_link_from_another_browser_is_refused_and_not_consumed` | Other browser 409; the requesting browser then signs in (IT-18 binding) | Passed |
+| `...::test_expired_link_is_refused` | Link 11 minutes old refused | Passed |
+| `...::test_unknown_address_gets_the_same_answer_and_no_mail` | Same status and body for known and unknown; mail only for the known address | Passed |
+| `...::test_rate_limits_address_ip_and_failed_exchanges` | Sixth link for one address: same answer, five mails; 21st request from one IP: 429; 11th failed exchange from one IP: 429 | Passed |
+| `...::test_cross_tenant_session_is_refused` | Another tenant's invoice 404 like a missing one; switching to a tenant without membership 404; another session's anti-forgery token refused; cross-origin public POST refused | Passed |
+| `...::test_idle_and_absolute_limits` | Idle 58 minutes then extend: works; idle 61 minutes: 401 and the row deleted; past the absolute lifetime: 401 | Passed |
+| `...::test_operator_needs_a_one_time_code_used_once` | Operator without code or with a wrong code refused; current code signs in (no tenant, tenant data 404); the same code refused on a later link; seed stored sealed | Passed |
+| `...::test_invitation_roles_last_controller_and_deactivation` | Invitation mailed and accepted once with its role; viewer gets 403 on invite, users and match runs; revoked invitation refused; own membership change 403; last controller cannot be demoted (trigger); deactivation ends the user's session at once; audit events written | Passed |
+| `integration/test_b2_files.py::test_upload_and_download_for_one_tenant_refused_for_another` | Upload through the API lands in MinIO under `t/{A}/invoice/upload/...{doc}/{sha}.pdf`, no user file name in the key, type sniffed; download for A byte-identical with sandbox headers; B gets 404; signed out 401; B cannot upload into A's batch; `blobstore` refuses A's key for B; anonymous read of the object 403; non-PDF content 415; objects deleted afterwards | Passed |
+| `integration/test_b2_files.py::test_blobstore_put_get_delete_round_trip` | Put, get, delete against MinIO | Passed |
+| `unit/test_b2_identity_units.py` (9 tests) | RFC 6238 SHA-1 vectors; drift of one step and single use; AES-GCM sealing refuses another key, context or key id; anti-forgery token bound to the session token; permission table; mail fake | Passed |
+| `integration/test_tenancy.py` (updated) | `invitations` has forced row-level security and reads zero rows without a tenant; only the two read-only lookup policies exist beyond `tenant_isolation` | Passed |
+
+IT-18 is now partly run (the cases above); still `Not run`: GET of the link page three times (no web page exists; the API has no GET for it) and inspection of the proxy log (no proxy). IT-13 is run only for the endpoints that exist. IT-03 now also runs against MinIO.
+
+### 10.4 OWASP ASVS 5.0.0 requirements
+
+Requirement texts were read on 2026-11-11 from the OWASP ASVS repository at tag v5.0.0 (chapters V3, V6, V7, V8).
+
+Implemented (with the test or code that shows it): 3.3.1, 3.3.2, 3.3.3, 3.3.4 (cookie attributes; `test_sign_in_end_to_end...`), 3.3.5 (43-character token), 3.5.1 (anti-forgery token plus origin check; `test_sign_in_end_to_end...`, `test_cross_tenant...`), 3.5.3 (state changes only on POST, PUT, PATCH, DELETE); 6.1.1 (TRD 8.1), 6.3.1 (`test_rate_limits...`), 6.3.2 (no default accounts: migrations create none), 6.3.4 (two pathways, both documented in TRD 8.1), 6.4.1 (links and invitations random, expiring, single use), 6.5.1 (links, invitations and TOTP steps used once), 6.5.3 (`secrets`), 6.5.4 (256-bit tokens), 6.5.5 (10-minute links; TOTP 30-second steps), 6.5.8 (TOTP on the server clock), 6.6.2 (`test_link_from_another_browser...`), 6.6.3 (`test_rate_limits...`); 7.1.1 (TRD 8.1), 7.2.1, 7.2.2, 7.2.3 (server-side reference tokens, 256 bits), 7.2.4 (new token at every sign-in; the browser's previous session is deleted, that last part not separately tested), 7.3.1, 7.3.2 (`test_idle_and_absolute_limits`), 7.4.1 (logout test), 7.4.2 (membership deactivation ends sessions, tested; a user with `deactivated_at` is refused on every request, not separately tested), 7.6.2 (a session starts only on an explicit POST); 8.1.1 (schema.md 4.1), 8.2.1 (viewer 403), 8.2.2 and 8.4.1 (cross-tenant 404, row-level security), 8.3.1 (checks in the API and database), 8.3.2 (role read from the membership on every request; deactivation effective at once).
+
+Partly met: 6.3.8 (same response and status for unknown addresses; response time not measured); 7.4.5 (a controller can end a user's sessions only by deactivating them).
+
+Not met or not applicable: 6.2.1 to 6.2.12, 6.4.2 to 6.4.6 (no passwords, AD-09); 6.3.3 for tenant users (email link only; accepted gap, TRD 8.1); 6.3.5 and 6.3.7 (no security notifications); 6.3.6 (Level 3; email is the factor for tenant users); 6.5.2 (no lookup secrets); 6.5.6 (no way to revoke an operator's authenticator except re-enrolment); 6.8.1 to 6.8.4 (no outside identity provider; OIDC deferred); 7.1.2 and 7.5.2 (no concurrent-session policy or session list; accepted gap); 7.4.3 (no factor-change flow); 7.4.4 (no screens yet); 7.5.1 (no endpoint changes authentication attributes); 13.3.1, 13.3.2 (environment file, not a secrets manager; accepted gap, TRD 8.3).
+
+### 10.5 Documents changed in B2
+
+TRD.md sections 5 (identity may import `audit`), 8.1 (as built: activity resets the idle timer; HMAC anti-forgery token; cookie names; rate-limit storage; no sign-in link for an invitation-only address; operator enrolment; SMTP), the 8.1 ASVS table statuses, 8.7 (as built: S3 store, key format, upload checks); schema.md dictionary (`users.totp_last_step`, `auth_rate_events`) and 9.1 (migration 0006 row, tables built); AGENTS.md (state line, utilities index, commands); R-13 row in section 5; this section.
+

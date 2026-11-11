@@ -16,6 +16,7 @@ from matchdesk.core.logging import (
     set_correlation_id,
     set_log_tenant,
 )
+from matchdesk.core.mail import Mailer, OutgoingMail, RecordingMailer, SmtpMailer, mailer_from_settings
 from matchdesk.core.money import (
     CENT,
     ZERO,
@@ -26,7 +27,7 @@ from matchdesk.core.money import (
     round_price,
     round_qty,
 )
-from matchdesk.core.settings import Settings, load_settings
+from matchdesk.core.settings import Settings, SettingsError, load_settings
 
 __all__ = [
     "CENT",
@@ -36,9 +37,14 @@ __all__ = [
     "FixedClock",
     "FloatNotAllowedError",
     "ForbiddenError",
+    "Mailer",
     "MatchDeskError",
     "NotFoundError",
+    "OutgoingMail",
+    "RecordingMailer",
     "Settings",
+    "SettingsError",
+    "SmtpMailer",
     "SystemClock",
     "TenantContextError",
     "configure_logging",
@@ -47,6 +53,7 @@ __all__ = [
     "get_logger",
     "line_amount",
     "load_settings",
+    "mailer_from_settings",
     "new_correlation_id",
     "round_cents",
     "round_price",

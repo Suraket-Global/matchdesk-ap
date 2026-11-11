@@ -155,7 +155,7 @@ flowchart TB
 | `core` | Settings, structured logging, correlation IDs, `Money` and quantity types, clock, error types | Standard library only |
 | `tenancy` | Tenant context, database session with tenant set, permission table | `core` |
 | `blobstore` | Key construction, write, read, delete, retention sweep | `core`, `tenancy` |
-| `identity` | Users, memberships, sign-in links, sessions, invitations, support grants | kernel |
+| `identity` | Users, memberships, sign-in links, sessions, invitations, support grants | kernel, `audit` (sign-in, invitation and membership events in the same transaction; B2) |
 | `qbo` | Connection, token encryption, sync runs, local copies of QuickBooks records | kernel, `audit` |
 | `receiving` | Imports, column mappings, receipts | kernel, `audit` |
 | `intake` | Batches, documents, inbound email | kernel, `audit`, `extraction` (public interface, for document processing; B1) |
@@ -366,18 +366,29 @@ All values are proposals **[assumption]**.
 
 **Security standard and accepted gaps.** The review of this plan used OWASP ASVS 5.0.0; requirement numbers below are those the reviewer cited (finding F-012), not ones the author read. Proposed target: Level 1 for the pilot, with these Level 2 items knowingly unmet and to be revisited before a sixth paying account or before any write access to QuickBooks:
 
-| ASVS 5.0.0 item (as cited by the reviewer) | Status in this plan |
+| ASVS 5.0.0 item (as cited by the reviewer) | Status in this plan (B2 status from the requirement text read on 2026-11-11; full list in verification-report-fixing.md section 10) |
 |---|---|
 | 6.3.3 multi-factor authentication | Not met for tenant users (email link only); met for operators by TOTP. Accepted for the pilot because the user base is a handful of named people per account and no write path exists |
-| 6.5.5 out-of-band token lifetime at most 10 minutes; 6.6.2 binding to the originating request | Planned as above |
-| 6.1.1, 6.3.1 rate limiting | Planned as above |
+| 6.5.5 out-of-band token lifetime at most 10 minutes; 6.6.2 binding to the originating request | Built in B2 (10-minute single-use link bound to the binding cookie); tested |
+| 6.1.1, 6.3.1 rate limiting | Built in B2 as above; tested |
 | 7.1.2, 7.5.2 concurrent-session policy and user-visible session list | Not planned. Controller can end a user's sessions by deactivating them |
-| 7.3.1, 7.3.2 idle and absolute timeouts | Planned: 60 minutes and 24 hours |
+| 7.3.1, 7.3.2 idle and absolute timeouts | Built in B2: 60 minutes and 24 hours; tested |
 | 13.3.1, 13.3.2 secrets held in a secrets manager | Not met; see section 8.3 |
-| 14.2.1 no sensitive data in URLs | Planned: tokens in fragments only |
+| 14.2.1 no sensitive data in URLs | Built in B2 for sign-in and invitation links (fragment, then POST body); the proxy rule is still planned |
 | 14.3.1, 14.3.3 browser storage | Planned: none used |
 
 Planned test: IT-18.
+
+**As built in B2 (2026-11-11).** Implemented in `backend/src/matchdesk/identity/auth.py` and `api/auth_routes.py`; tested by `tests/integration/test_b2_sign_in.py` against the local Mailpit inbox. Decisions taken while building, recorded here because they refine the text above:
+
+- Any authenticated request counts as activity and resets the 60-minute idle timer; `POST /auth/session/extend` is the explicit "Stay signed in". An idle or absolute expiry deletes the session row, so it cannot be revived.
+- The anti-forgery token is `HMAC-SHA256(session key, session token)`; its hash is stored in `sessions.csrf_token_hash` and compared on every POST, PUT, PATCH and DELETE. It is returned by `POST /auth/sessions` and `POST /invitations/accept`. Public POSTs (`/auth/login-links`, `/auth/sessions`, `/invitations/accept`) carry no session; they are refused when an `Origin` header names another origin, and the sign-in link additionally needs the binding cookie.
+- Cookies: `__Host-md_session` (HttpOnly, Secure, SameSite=Lax, Path=/, no Domain, no Max-Age) and the 10-minute binding cookie `__Host-md_signin` (same attributes, Max-Age 600). The B1 bearer header is no longer accepted anywhere; test fixtures send the session cookie.
+- Rate limits are counted in the global table `auth_rate_events` (hashed address or IP, never the value). The per-address limit is silent (same 202 answer, no mail); the per-IP limits answer 429. Behind the proxy the client address must be taken from the proxy's forwarded header; B2 uses the socket peer.
+- A sign-in link is sent only to a user with an active membership in a tenant that has not ended, or to an operator. An address that has only an open invitation receives no sign-in link: its way in is the invitation link. This narrows the sentence above.
+- Mail is sent after the response (background task), so a known address does not answer measurably slower than an unknown one; timing was not measured.
+- Operators: `identity.enroll_operator` stores a fresh TOTP seed sealed with AES-256-GCM under `MATCHDESK_TOKEN_KEY` (key id `MATCHDESK_TOKEN_KEY_ID`) and sets `is_operator`. A step is accepted once, with one step of drift either side. There is no operator console or enrolment screen yet; enrolment is a function call. The support-reader path (`support_grants`) is not built.
+- Mail goes out over SMTP (`core.mail.SmtpMailer`): locally to Mailpit at 127.0.0.1:1025 without authentication; a provider later through the same settings (`MATCHDESK_SMTP_*`).
 
 ### 8.2 Tenancy
 
@@ -487,6 +498,8 @@ Key format: `t/{tenant_id}/{purpose}/{source}/{yyyy}/{mm}/{record_id}/{sha256}.{
 | `Content-Security-Policy` | `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob: data:; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'` |
 | `X-Content-Type-Options` | `nosniff` |
 | `Referrer-Policy` | `no-referrer` |
+
+**As built in B2.** `blobstore` builds keys in the format above (record ID is the document ID; the extension comes from the sniffed type) and stores through one interface with two back ends selected by `MATCHDESK_BLOB_BACKEND`: a local directory, or the S3 API (`MATCHDESK_S3_*`; locally MinIO at 127.0.0.1:9000, bucket `matchdesk-dev`). The bucket is private; no public or presigned URL is issued; files leave only through `/documents/{id}/content`. `POST /intake/batches/{id}/files` sniffs PDF, PNG and JPEG and refuses files above 20 MB; page, pixel, XLSX and CSV limits and the retention sweeper are not built yet. Tested by `tests/integration/test_b2_files.py` against MinIO.
 
 Document downloads (`/documents/{id}/content`) add `Content-Security-Policy: sandbox`, a fixed content type from the stored sniffed type, and `Content-Disposition` with a generated name. Supplier PDFs are drawn by PDF.js with script execution and dynamic code evaluation switched off. Planned tests: IT-19 (hostile and oversized files) and IT-20 (headers).
 

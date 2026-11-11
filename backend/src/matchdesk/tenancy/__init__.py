@@ -6,10 +6,12 @@ from matchdesk.tenancy.db import (
     TenantMixin,
     get_engine,
     global_session,
+    invitation_lookup_session,
     operator_session,
     session,
     tenant_args,
     tfk,
+    user_session,
 )
 from matchdesk.tenancy.jobs import (
     ClaimedJob,
@@ -19,11 +21,13 @@ from matchdesk.tenancy.jobs import (
     enqueue_raw,
     run_claimed,
 )
+from matchdesk.tenancy.permissions import PERMISSIONS, can, permissions_for
 from matchdesk.tenancy.transitions import transition
 from matchdesk.tenancy.types import MONEY, PRICE, QTY, UUIDT, enum_check
 
 __all__ = [
     "MONEY",
+    "PERMISSIONS",
     "PRICE",
     "QTY",
     "UUIDT",
@@ -32,16 +36,20 @@ __all__ = [
     "GlobalMixin",
     "PermanentJobError",
     "TenantMixin",
+    "can",
     "claim",
     "enqueue",
     "enqueue_raw",
     "enum_check",
     "get_engine",
     "global_session",
+    "invitation_lookup_session",
     "operator_session",
+    "permissions_for",
     "run_claimed",
     "session",
     "tenant_args",
     "tfk",
     "transition",
+    "user_session",
 ]

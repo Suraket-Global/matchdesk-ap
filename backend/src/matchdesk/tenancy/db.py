@@ -108,3 +108,22 @@ def operator_session(engine: Engine | None = None) -> Iterator[Session]:
     with Session(engine or get_engine(), expire_on_commit=False) as s, s.begin():
         s.execute(text("select set_config('app.operator', 'on', true)"))
         yield s
+
+
+@contextmanager
+def user_session(user_id: uuid.UUID | str, engine: Engine | None = None) -> Iterator[Session]:
+    """No tenant; sets ``app.user_id`` so the user's own memberships in every tenant are readable
+    (policy ``membership_self``, read-only). Used by sign-in, ``/me`` and the tenant switch (B2)."""
+    uid = str(uuid.UUID(str(user_id)))
+    with Session(engine or get_engine(), expire_on_commit=False) as s, s.begin():
+        s.execute(text("select set_config('app.user_id', :u, true)"), {"u": uid})
+        yield s
+
+
+@contextmanager
+def invitation_lookup_session(token_hash: bytes, engine: Engine | None = None) -> Iterator[Session]:
+    """No tenant; makes exactly the invitation with this token hash readable (policy
+    ``invitation_by_token``). The caller then opens ``session(invitation.tenant_id)`` to accept it."""
+    with Session(engine or get_engine(), expire_on_commit=False) as s, s.begin():
+        s.execute(text("select set_config('app.invitation_token_hash', :h, true)"), {"h": token_hash.hex()})
+        yield s

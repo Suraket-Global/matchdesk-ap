@@ -34,7 +34,7 @@ def test_golden_flow_supersede_and_credit(app_engine):  # type: ignore[no-untype
     add_receipt(app_engine, w, "60", date(2026, 10, 3))
     client = TestClient(create_app())
     h = {
-        "Authorization": f"Bearer {w.token}",
+        **w.headers,
         "Idempotency-Key": "k-1",
         "X-Correlation-Id": "00000000-0000-4000-8000-000000000001",
     }
@@ -63,7 +63,7 @@ def test_golden_flow_supersede_and_credit(app_engine):  # type: ignore[no-untype
     same = client.post(
         "/api/v1/match-runs",
         json={"invoice_ids": [str(w.invoices["inv"])]},
-        headers={"Authorization": h["Authorization"]},
+        headers=w.headers,
     )
     assert same.status_code == 200 and same.json()["id"] == run1
 
@@ -81,7 +81,7 @@ def test_golden_flow_supersede_and_credit(app_engine):  # type: ignore[no-untype
     r2 = client.post(
         "/api/v1/match-runs",
         json={"invoice_ids": [str(w.invoices["inv"]), str(cn)]},
-        headers={"Authorization": h["Authorization"]},
+        headers=w.headers,
     )
     assert r2.status_code == 202
     drain(app_engine)
@@ -147,7 +147,7 @@ def test_ut12_qbo_bill_history_through_database(app_engine):  # type: ignore[no-
     add_invoice(app_engine, w, "oct", "INV-01042", date(2026, 10, 8), "100")
     add_receipt(app_engine, w, "100", date(2026, 10, 6))
     client = TestClient(create_app())
-    h = {"Authorization": f"Bearer {w.token}"}
+    h = w.headers
     assert (
         client.post(
             "/api/v1/match-runs", json={"invoice_ids": [str(w.invoices["oct"])]}, headers=h
@@ -178,6 +178,6 @@ def test_viewer_cannot_start_a_run(app_engine):  # type: ignore[no-untyped-def]
     r = client.post(
         "/api/v1/match-runs",
         json={"invoice_ids": [str(w.invoices["inv"])]},
-        headers={"Authorization": f"Bearer {w.token}"},
+        headers=w.headers,
     )
     assert r.status_code == 403

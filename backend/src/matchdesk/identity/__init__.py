@@ -1,70 +1,88 @@
-"""Sessions and memberships (B1 subset). Sign-in links, invitations and TOTP are T-2.2.3, not built."""
+"""Users, memberships, sign-in links, sessions, invitations, operator TOTP (TRD 8.1; T-2.2.3; B2).
+
+The support-reader path (support grants) is not built yet.
+"""
 
 from __future__ import annotations
 
-import hashlib
-import secrets
-import uuid
-from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
-
-from sqlalchemy import Engine, select
-
-from matchdesk.identity.models import Membership, SessionRow, Tenant, User
-from matchdesk.tenancy import global_session, session
-
-SESSION_LIFETIME = timedelta(hours=24)
-
-
-@dataclass(frozen=True)
-class Principal:
-    user_id: uuid.UUID
-    tenant_id: uuid.UUID
-    role: str
-
-
-def hash_token(token: str) -> bytes:
-    return hashlib.sha256(token.encode()).digest()
-
-
-def issue_session(engine: Engine, user_id: uuid.UUID, tenant_id: uuid.UUID) -> str:
-    """Create a session and return the raw token (only its hash is stored)."""
-    token = secrets.token_urlsafe(32)
-    now = datetime.now(UTC)
-    with global_session(engine) as s:
-        s.add(
-            SessionRow(
-                user_id=user_id,
-                token_hash=hash_token(token),
-                active_tenant_id=tenant_id,
-                last_seen_at=now,
-                expires_at=now + SESSION_LIFETIME,
-            )
-        )
-    return token
-
-
-def resolve_session(engine: Engine, token: str) -> Principal | None:
-    now = datetime.now(UTC)
-    with global_session(engine) as s:
-        row = s.scalar(select(SessionRow).where(SessionRow.token_hash == hash_token(token)))
-        if row is None or row.ended_at is not None or row.expires_at < now or row.active_tenant_id is None:
-            return None
-        user_id, tenant_id = row.user_id, row.active_tenant_id
-    with session(tenant_id, engine) as s:
-        m = s.scalar(select(Membership).where(Membership.user_id == user_id, Membership.status == "active"))
-        if m is None:
-            return None
-        return Principal(user_id=user_id, tenant_id=tenant_id, role=m.role)
-
+from matchdesk.identity.auth import (
+    ABSOLUTE_LIFETIME,
+    IDLE_TIMEOUT,
+    INVITE_TTL,
+    LINK_TTL,
+    RATE_LIMITS,
+    AuthError,
+    IssuedSession,
+    Principal,
+    SessionContext,
+    accept_invitation,
+    create_invitation,
+    csrf_for,
+    csrf_matches,
+    describe_me,
+    end_session,
+    enroll_operator,
+    exchange_login_token,
+    hash_token,
+    issue_session,
+    list_invitations,
+    list_users,
+    load_session,
+    request_login_link,
+    resolve_session,
+    revoke_invitation,
+    switch_tenant,
+    update_membership,
+)
+from matchdesk.identity.models import (
+    ROLES,
+    AuthRateEvent,
+    Invitation,
+    LoginToken,
+    Membership,
+    SessionRow,
+    Tenant,
+    User,
+)
+from matchdesk.identity.totp import code_at_step, provisioning_uri, step_at
 
 __all__ = [
+    "ABSOLUTE_LIFETIME",
+    "IDLE_TIMEOUT",
+    "INVITE_TTL",
+    "LINK_TTL",
+    "RATE_LIMITS",
+    "ROLES",
+    "AuthError",
+    "AuthRateEvent",
+    "Invitation",
+    "IssuedSession",
+    "LoginToken",
     "Membership",
     "Principal",
+    "SessionContext",
     "SessionRow",
     "Tenant",
     "User",
+    "accept_invitation",
+    "code_at_step",
+    "create_invitation",
+    "csrf_for",
+    "csrf_matches",
+    "describe_me",
+    "end_session",
+    "enroll_operator",
+    "exchange_login_token",
     "hash_token",
     "issue_session",
+    "list_invitations",
+    "list_users",
+    "load_session",
+    "provisioning_uri",
+    "request_login_link",
     "resolve_session",
+    "revoke_invitation",
+    "step_at",
+    "switch_tenant",
+    "update_membership",
 ]

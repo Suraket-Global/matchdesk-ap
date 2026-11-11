@@ -36,7 +36,7 @@ def two_tenants(app_engine):  # type: ignore[no-untyped-def]
     r = client.post(
         "/api/v1/match-runs",
         json={"invoice_ids": [str(b.invoices["inv"])]},
-        headers={"Authorization": f"Bearer {b.token}"},
+        headers=b.headers,
     )
     assert r.status_code == 202, r.text
     while run_once(app_engine):
@@ -52,19 +52,25 @@ def test_app_role_cannot_bypass_rls(app_engine):  # type: ignore[no-untyped-def]
     assert tuple(row) == (False, False)
 
 
-def test_every_tenant_table_has_forced_rls_and_one_policy(owner_engine):  # type: ignore[no-untyped-def]
+def test_every_tenant_table_has_forced_rls_and_only_allowed_policies(owner_engine):  # type: ignore[no-untyped-def]
     with owner_engine.connect() as c:
         rows = c.execute(
             text(
                 "select c.relname, c.relrowsecurity, c.relforcerowsecurity, "
-                "(select count(*) from pg_policies p where p.tablename = c.relname) "
+                "(select string_agg(p.policyname, ',' order by p.policyname) from pg_policies p "
+                "where p.tablename = c.relname) "
                 "from pg_class c join pg_namespace n on n.oid = c.relnamespace "
                 "where n.nspname = 'public' and c.relkind = 'r'"
             )
         ).all()
     catalogue = {r[0]: r[1:] for r in rows}
+    # Exactly the tenant policy, plus the read-only lookup policies of B2 (schema.md 9.1).
+    expected = {
+        "memberships": "membership_self,tenant_isolation",
+        "invitations": "invitation_by_token,tenant_isolation",
+    }
     for table in TENANT_TABLES:
-        assert catalogue[table] == (True, True, 1), table
+        assert catalogue[table] == (True, True, expected.get(table, "tenant_isolation")), table
     unprotected = {t for t, (rls, _f, _n) in catalogue.items() if not rls}
     assert unprotected <= GLOBAL_TABLES, unprotected - GLOBAL_TABLES
 
@@ -113,7 +119,7 @@ def test_composite_fk_blocks_cross_tenant_reference(app_engine, two_tenants):  #
 
 def test_it01_cross_tenant_requests_return_404(app_engine, two_tenants):  # type: ignore[no-untyped-def]
     a, b, client, b_run = two_tenants
-    h = {"Authorization": f"Bearer {a.token}"}
+    h = a.headers
     with session(b.tenant_id, app_engine) as s:
         b_exc = s.execute(text("select id from exceptions limit 1")).scalar()
         before = s.execute(text("select count(*), max(version) from exceptions")).one()
