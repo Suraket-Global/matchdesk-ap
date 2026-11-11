@@ -88,7 +88,11 @@ def build_match_input(
     )
 
     # Every uploaded invoice and credit note of these vendors: history has no date limit.
-    inv_rows = s.scalars(select(InvoiceRow).where(InvoiceRow.vendor_id.in_(vendor_ids))).all()
+    # Test invoices are always loaded, even with no identified vendor, so none can drop out of
+    # the result silently (B1-006); the engine turns a vendor-less document into an exception.
+    inv_rows = s.scalars(
+        select(InvoiceRow).where(or_(InvoiceRow.vendor_id.in_(vendor_ids), InvoiceRow.id.in_(test_ids)))
+    ).all()
     lines = s.scalars(
         select(InvoiceLineRow).where(InvoiceLineRow.invoice_id.in_([i.id for i in inv_rows]))
     ).all()
@@ -103,7 +107,7 @@ def build_match_input(
         Document(
             id=str(i.id),
             doc_type=DocType(i.doc_type),
-            vendor_id=str(i.vendor_id),
+            vendor_id=str(i.vendor_id) if i.vendor_id else "",
             doc_number=i.doc_number,
             doc_date=i.doc_date,
             file_sha256=i.file_order_key,

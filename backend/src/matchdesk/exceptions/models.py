@@ -31,8 +31,18 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, TSTZRANGE, ExcludeConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
-from matchdesk.tenancy.db import Base, GlobalMixin, TenantMixin, tenant_args, tfk
-from matchdesk.tenancy.types import MONEY, PRICE, QTY, UUIDT, enum_check
+from matchdesk.tenancy import (
+    MONEY,
+    PRICE,
+    QTY,
+    UUIDT,
+    Base,
+    GlobalMixin,
+    TenantMixin,
+    enum_check,
+    tenant_args,
+    tfk,
+)
 
 EXCEPTION_TYPES = (
     "extraction_unverified",
@@ -85,7 +95,9 @@ class ItemAlias(TenantMixin, Base):
             enum_check("status", ("pending_approval", "active", "retired", "returned")), name="status"
         ),
         CheckConstraint(
-            "not (status = 'active' and conversion_factor <> 1) or approved_by is not null",
+            # A converting alias (factor not 1, or different units) needs approval (MH-10, B1-008).
+            "not (status = 'active' and (conversion_factor <> 1 or (supplier_uom is not null and item_uom is not null "
+            "and upper(trim(supplier_uom)) <> upper(trim(item_uom))))) or approved_by is not null",
             name="conversion_needs_approval",
         ),
         Index(
@@ -161,7 +173,16 @@ class RulesetVersion(GlobalMixin, Base):
 class MatchRun(TenantMixin, Base):
     __tablename__ = "match_runs"
     __table_args__ = tenant_args(
-        UniqueConstraint("tenant_id", "input_fingerprint"),
+        # A finished run is not unique on its inputs: returning to an earlier input state needs a new
+        # current run (B1-001). Only one pending run per input fingerprint may exist.
+        Index("ix_match_runs_tenant_fingerprint", "tenant_id", "input_fingerprint"),
+        Index(
+            "uq_match_runs_pending_fingerprint",
+            "tenant_id",
+            "input_fingerprint",
+            unique=True,
+            postgresql_where="state in ('queued', 'running', 'retry_wait')",
+        ),
         CheckConstraint(enum_check("trigger", MATCH_TRIGGERS), name="trigger"),
         CheckConstraint(enum_check("state", RUN_STATES), name="state"),
     )
