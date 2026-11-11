@@ -260,9 +260,9 @@ All commands run from the repository root on 2026-11-11, Python 3.12.16, Postgre
 | Command | Result |
 |---|---|
 | `make check` (ruff check, ruff format --check, mypy strict, lint-imports, top-level import check, float lint over the whole package) | Pass after review round 1: ruff no findings; 74 files formatted; mypy no issues in 48 source files; 5 contracts kept, 0 broken; `check_imports.py` and float lint clean |
-| `cd backend && .venv/bin/pytest -q tests/unit` | 58 passed, 0 failed (45 before review round 1) |
-| `cd backend && .venv/bin/pytest -q tests/integration` | 53 passed, 0 failed (46 before review round 1; 23 are one parametrised zero-rows test per tenant-owned table) |
-| `make test` (both suites, clean test database) | 111 passed, 0 failed (91 before review round 1) |
+| `cd backend && .venv/bin/pytest -q tests/unit` | 60 passed, 0 failed (45 before review round 1, 58 before round 2) |
+| `cd backend && .venv/bin/pytest -q tests/integration` | 56 passed, 0 failed (46 before review round 1, 53 before round 2; 23 are one parametrised zero-rows test per tenant-owned table) |
+| `make test` (both suites, clean test database) | 116 passed, 0 failed (91 before review round 1, 111 before round 2) |
 | `make up`, then `curl localhost:8101/readyz`, then `make down` | Ready in 3 s (2 s after review round 1, migrating to 0003); `{"status":"ready"}`; services stopped |
 | `MATCHDESK_MIGRATION_DATABASE_URL=...localhost:5999... make up` | Exit 2 with "database not reachable (is PostgreSQL running? ...)" |
 
@@ -317,7 +317,7 @@ Source: independent code review `_coordination/review/matchdesk-ap-b1-round1.md`
 | B1-001 (blocker) | A finished run is reused only if its inputs are identical **and** it is still the current result for every line in its scope; pending runs stay idempotent. Migration 0003 replaces the unique fingerprint constraint with a partial unique index on pending runs. A return to an earlier input state now creates a new run that supersedes the newer result | `test_b1_001_receipts_removed_after_a_match_re_evaluate`, `test_b1_001_voided_vendor_credit_re_evaluates` (the stored result equals `evaluate()` on current inputs) |
 | B1-002 | A QuickBooks bill line is skipped only when an uploaded invoice line on the same PO line was counted; an earlier unresolved invoice line with no bill standing in makes later lines on that PO `history_incomplete` | `test_b1_002_unresolved_earlier_line_does_not_hide_its_qbo_bill` (both billed quantities), `test_b1_002_unresolved_earlier_line_without_bill_blocks_as_history_incomplete` |
 | B1-003 | Duplicate credit notes are value class none, not qualifying, not netted; a possible duplicate credit is not netted until cleared | `test_b1_003_credit_note_uploaded_twice_is_not_a_finding_and_nets_once`, `test_b1_003_possible_duplicate_credit_is_not_netted_until_decided` |
-| B1-004 | Counting receipts that net to zero or less are `receipt_absent` under any tolerance | `test_b1_004_net_zero_receipts_are_receipt_absent_under_any_tolerance` (tolerance 0 and 10) |
+| B1-004 | Counting receipts that net to zero or less are `receipt_absent` under any tolerance (superseded after round 2 by B1-012, section 9.6: never a pass, and a qualifying `returned_no_credit` finding) | `test_b1_004_net_zero_receipts_never_pass_and_keep_the_finding` (tolerance 0 and 10) |
 | B1-005 | Check C1 is cumulative per PO and charge kind against the PO charge amount plus the allowance once per PO | `test_b1_005_freight_is_cumulative_against_the_po_amount` |
 | B1-006 | Test invoices are loaded even without a vendor; a vendor-less document stops at check 1 as `extraction_unverified` | `test_b1_006_vendor_less_test_invoice_is_an_exception` |
 | B1-007 | Fake extractor parses numbers as `Decimal`; raw output stored as strings; float lint covers the whole package; the engine refuses floats in any input | `test_b1_007_fake_extractor_reads_decimals_not_floats`, `test_floats_refused_at_the_engine_boundary` |
@@ -327,6 +327,44 @@ Source: independent code review `_coordination/review/matchdesk-ap-b1-round1.md`
 | B1-011 | Match runs of a tenant execute under a per-tenant advisory transaction lock and read inputs after taking it | `test_b1_011_out_of_order_runs_leave_current_inputs_result` (out-of-order execution; true parallel execution was not tested) |
 | Review note on the 8/9 tie | The tie is now an explicit priority, not alphabetical order | `test_tie_rule_is_explicit_priority` |
 
-Still open after round 1: there is no automatic trigger that starts a match run when a receipt is removed or a credit voided (T-4.1.6 triggers are not built). Until a run is requested, the stored result stays the earlier one; a run requested afterwards re-evaluates. AC-08 also changes meaning: a delivery fully returned with no credit is now `receipt_absent` (unverified unless covered), no longer a `qty_over_received` finding labelled "returned, credit not yet received". The label still applies when some quantity is kept.
+Still open after round 1 (both closed by the fixes in section 9.6, which are not yet retested): there is no automatic trigger that starts a match run when a receipt is removed or a credit voided (T-4.1.6 triggers are not built). Until a run is requested, the stored result stays the earlier one; a run requested afterwards re-evaluates. AC-08 also changes meaning: a delivery fully returned with no credit is now `receipt_absent` (unverified unless covered), no longer a `qty_over_received` finding labelled "returned, credit not yet received". The label still applies when some quantity is kept.
 
 Documents changed in round 1: TRD.md sections 5, 6.3 and 8.5 (checks 1, 2, 5, 7, the history paragraph, C1); schema.md 3.5 (`match_runs`, `item_aliases`) and 9.1; this section.
+
+### 9.6 Review round 2 (retest) and fixes after it (2026-11-11)
+
+Reviewer's verdicts, copied unchanged from `_coordination/review/matchdesk-ap-b1-verdicts.json` (round 2, commit `1947b9f`):
+
+| Finding | Severity | Verdict | Open part |
+|---|---|---|---|
+| B1-001 | blocker | Closed, part open | No stale marker on read: after inputs change and before the next run, GET /api/v1/invoices/{id} shows the old run's line as matched while evaluate() on current inputs gives receipt_absent (N-01b). Remaining part is still a blocker. |
+| B1-002 | major | Closed |  |
+| B1-003 | major | Closed |  |
+| B1-004 | major | Closed, part open | Never a pass now, but the fix removes the dollar finding for a full return; see B1-012. |
+| B1-005 | major | Closed |  |
+| B1-006 | major | Closed |  |
+| B1-007 | minor | Closed |  |
+| B1-008 | minor | Closed |  |
+| B1-009 | minor | Closed |  |
+| B1-010 | minor | Closed |  |
+| B1-011 | minor | Closed |  |
+
+New finding in round 2:
+
+| Finding | Severity | Summary |
+|---|---|---|
+| B1-012 | major (regression) | Fully returned delivery with no complete class A log becomes receipt_absent no_evidence unverified; the 42.00 qualifying qty_over_received (returned_no_credit) finding of round 1 is lost and the refund qualifying total drops to 0.00 (N-04). |
+
+Observation: Approved alias conversion_factor can be changed in place by the application role and approved_by survives; when alias edits are built, a factor or unit change must clear approval or version the alias (MH-10).
+
+The edits below were **fixed after retest**: the author recorded them and they have not been re-reviewed. The reviewer's script `matchdesk-ap-b1-round2_new.py` was run before them (N-01b and N-04 when not covered broken) and after them (N-01a to N-01d, N-03a, N-03b and all four N-04 cases hold; N-02 now shows that an in-place factor edit clears the approval). The four round-1 scripts still hold.
+
+| Item | Fix (fixed after retest) | Regression test |
+|---|---|---|
+| B1-001, open part | Stale on read: every read recomputes the input fingerprint of the result's run scope. `GET /invoices/{id}` returns a changed line as `status: stale` with `result_status` and `stale: true`, and sets `stale` on its exceptions and on the body. `GET /exceptions/{id}` and `GET /match-runs/{id}` carry `stale` too. No background job. B1 has no list endpoint or report yet; TRD 6.3 requires both to use the same comparison | `test_review_round2_db.py::test_b1_001_voided_receipt_import_reads_stale_before_any_new_run` (void, read before any run, re-run, un-void, read again), `test_b1_001_document_added_on_po_in_scope_reads_stale` |
+| B1-012 | When counting receipt lines net to zero or less, check 8 runs with no tolerance. The result is a qualifying `qty_over_received` finding with sub-reason `returned_no_credit` (42.00 in the fixture), covered or not. It is never `matched`; a credit note for the returned quantity removes the finding | `test_review_round1.py::test_b1_004_net_zero_receipts_never_pass_and_keep_the_finding` (now asserts the 42.00 finding and a qualifying total of 42.00), `test_b1_012_full_return_is_a_qualifying_finding_covered_or_not` |
+| Alias observation (MH-10) | Migration 0004: a database trigger clears approval and sets a converting alias to `pending_approval` on any change of factor, units or item. `exceptions.rematch_alias` re-matches every invoice whose current result used the alias; until then those results read as stale | `test_review_round2_db.py::test_alias_conversion_change_resets_approval_and_rematches` |
+
+Still open: no alias edit endpoint calls `rematch_alias` (alias screens are not built). No input change starts a run automatically; the reader sees `stale` until a run is requested.
+
+Documents changed in round 2: TRD.md sections 6.3, 8.5 (check 7) and 12 (invoices row); schema.md 9.1; AGENTS.md utilities index; this section.

@@ -72,6 +72,7 @@ Utilities index (B1). Search here before adding a helper:
 | Document and supplier-code normalisation; deterministic document order | `matching.normalise_number`, `normalise_code`, `normalise_uom`, `document_order_key` | `matching/normalise.py` |
 | Rule set v1; counting-receipt rule; coverage rule; whether an alias converts; input fingerprint; float refusal | `matching.evaluate`, `receipt_line_counts`, `is_covered`, `alias_converts` (in `engine.py`), `input_fingerprint`, `assert_no_floats` (in `fingerprint.py`) | `matching/engine.py`, `matching/fingerprint.py` |
 | Build match inputs from the database (no date filter); request and execute a match run (reuse only while current; per-tenant lock); store results with supersede | `exceptions.build_match_input`, `request_run`, `execute_run`, `store_result` | `exceptions/inputs.py`, `runs.py`, `store.py` |
+| Read-time staleness of a stored result; re-match everything that used an alias | `exceptions.stale_runs`, `exceptions.rematch_alias` | `exceptions/runs.py` |
 | Who may resolve which exception with which code | `exceptions.check_resolution_allowed` | `exceptions/permissions.py` |
 | Audit event inside the business transaction | `audit.write_audit` | `audit/__init__.py` |
 | Batch, file intake, lease, completion, batch summary, retry failed | `intake.add_file`, `take`, `complete`, `batch_summary`, `retry_failed` | `intake/service.py` |
