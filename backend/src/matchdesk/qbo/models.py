@@ -9,8 +9,7 @@ from decimal import Decimal
 from sqlalchemy import Boolean, CheckConstraint, Date, DateTime, Integer, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
-from matchdesk.tenancy.db import Base, TenantMixin, tenant_args, tfk
-from matchdesk.tenancy.types import MONEY, PRICE, QTY, UUIDT, enum_check
+from matchdesk.tenancy import MONEY, PRICE, QTY, UUIDT, Base, TenantMixin, enum_check, tenant_args, tfk
 
 
 class Vendor(TenantMixin, Base):

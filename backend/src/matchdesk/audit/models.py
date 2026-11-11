@@ -9,8 +9,7 @@ from sqlalchemy import CheckConstraint, DateTime, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from matchdesk.tenancy.db import Base, TenantMixin, tenant_args
-from matchdesk.tenancy.types import UUIDT, enum_check
+from matchdesk.tenancy import UUIDT, Base, TenantMixin, enum_check, tenant_args
 
 
 class AuditEvent(TenantMixin, Base):

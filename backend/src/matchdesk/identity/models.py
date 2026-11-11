@@ -18,8 +18,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import CITEXT
 from sqlalchemy.orm import Mapped, mapped_column
 
-from matchdesk.tenancy.db import Base, GlobalMixin, TenantMixin, tenant_args
-from matchdesk.tenancy.types import UUIDT, enum_check
+from matchdesk.tenancy import UUIDT, Base, GlobalMixin, TenantMixin, enum_check, tenant_args
 
 
 class Tenant(GlobalMixin, Base):

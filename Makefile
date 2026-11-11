@@ -20,10 +20,11 @@ test-unit:
 test-integration:
 	cd $(BACKEND) && .venv/bin/pytest -q tests/integration
 
-# Lint, format check, type check, import boundaries, float lint.
+# Lint, format check, type check, import boundaries, top-level import rule, float lint.
 check:
 	cd $(BACKEND) && .venv/bin/ruff check src tests migrations scripts \
 	  && .venv/bin/ruff format --check src tests migrations scripts \
 	  && .venv/bin/mypy \
 	  && .venv/bin/lint-imports \
+	  && .venv/bin/python scripts/check_imports.py \
 	  && .venv/bin/python scripts/check_no_float.py

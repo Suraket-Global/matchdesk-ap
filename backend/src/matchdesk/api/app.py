@@ -12,9 +12,12 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
+from fastapi.concurrency import run_in_threadpool
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select, text
+from sqlalchemy.exc import IntegrityError
 
 from matchdesk import blobstore
 from matchdesk.core import (
@@ -70,6 +73,18 @@ def create_app() -> FastAPI:
             corr = new_correlation_id()
         set_correlation_id(corr)
         started = time.monotonic()
+        if request.url.path.startswith("/api/"):
+            # Authenticate before the body is parsed or validated, so an anonymous caller gets
+            # 401 and learns nothing about the request shape (B1-010).
+            auth = request.headers.get("Authorization", "")
+            p = None
+            if auth.startswith("Bearer "):
+                p = await run_in_threadpool(resolve_session, engine(), auth.removeprefix("Bearer ").strip())
+            if p is None:
+                denied = problem(401, "Not signed in")
+                denied.headers["X-Correlation-Id"] = corr
+                return denied
+            request.state.principal = p
         response = await call_next(request)
         response.headers["X-Correlation-Id"] = corr
         response.headers["Cache-Control"] = "no-store"
@@ -92,13 +107,16 @@ def create_app() -> FastAPI:
     async def http_error(_r: Request, e: HTTPException) -> JSONResponse:
         return problem(e.status_code, str(e.detail))
 
-    def principal(authorization: Annotated[str | None, Header()] = None) -> Principal:
-        if not authorization or not authorization.startswith("Bearer "):
-            raise HTTPException(401, "Not signed in")
-        p = resolve_session(engine(), authorization.removeprefix("Bearer ").strip())
+    @app.exception_handler(RequestValidationError)
+    async def invalid(_r: Request, _e: RequestValidationError) -> JSONResponse:
+        # problem+json without echoing the submitted input (B1-010).
+        return problem(422, "Request is not valid")
+
+    def principal(request: Request) -> Principal:
+        p = getattr(request.state, "principal", None)
         if p is None:
             raise HTTPException(401, "Not signed in")
-        return p
+        return p  # type: ignore[no-any-return]
 
     Auth = Annotated[Principal, Depends(principal)]
 
@@ -137,19 +155,46 @@ def create_app() -> FastAPI:
         if p.role not in ("controller", "clerk"):
             raise HTTPException(403, "Forbidden")
         req_hash = str(sorted(str(i) for i in body.invoice_ids)).encode()
+        try:
+            return _create_match_run(p, body, req_hash, idempotency_key, response)
+        except IntegrityError:
+            # A concurrent request with the same key stored first: replay its result (B1-010).
+            if not idempotency_key:
+                raise
+            with session(p.tenant_id, engine()) as s:
+                replay = _replay(s, p, idempotency_key, req_hash)
+            if replay is None:
+                raise
+            return replay
+
+    def _replay(s: Any, p: Principal, key: str, req_hash: bytes) -> dict[str, Any] | None:
+        seen = s.scalar(
+            select(IdempotencyKey).where(IdempotencyKey.user_id == p.user_id, IdempotencyKey.key == key)
+        )
+        if seen is None:
+            return None
+        if seen.expires_at < datetime.now(UTC):
+            s.delete(seen)  # an expired key is not replayed (B1-010)
+            s.flush()
+            return None
+        if seen.request_hash != req_hash:
+            raise HTTPException(409, "Idempotency key reused with a different request")
+        run = s.get(MatchRun, seen.result_entity_id)
+        assert run is not None
+        return _run_body(run)
+
+    def _create_match_run(
+        p: Principal,
+        body: MatchRunRequest,
+        req_hash: bytes,
+        idempotency_key: str | None,
+        response: Response,
+    ) -> dict[str, Any]:
         with session(p.tenant_id, engine()) as s:
             if idempotency_key:
-                seen = s.scalar(
-                    select(IdempotencyKey).where(
-                        IdempotencyKey.user_id == p.user_id, IdempotencyKey.key == idempotency_key
-                    )
-                )
-                if seen is not None:
-                    if seen.request_hash != req_hash:
-                        raise HTTPException(409, "Idempotency key reused with a different request")
-                    run = s.get(MatchRun, seen.result_entity_id)
-                    assert run is not None
-                    return _run_body(run)
+                replay = _replay(s, p, idempotency_key, req_hash)
+                if replay is not None:
+                    return replay
             found = s.scalars(select(InvoiceRow.id).where(InvoiceRow.id.in_(body.invoice_ids))).all()
             if len(set(found)) != len(set(body.invoice_ids)):
                 raise NotFoundError("invoice")

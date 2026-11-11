@@ -19,8 +19,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
-from matchdesk.tenancy.db import Base, TenantMixin, tenant_args, tfk
-from matchdesk.tenancy.types import QTY, UUIDT, enum_check
+from matchdesk.tenancy import QTY, UUIDT, Base, TenantMixin, enum_check, tenant_args, tfk
 
 IMPORT_STATES = ("draft", "queued", "running", "succeeded", "failed", "voided")
 

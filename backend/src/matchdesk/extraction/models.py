@@ -9,8 +9,7 @@ from sqlalchemy import CheckConstraint, Index, Integer, LargeBinary, Numeric, Te
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from matchdesk.tenancy.db import Base, TenantMixin, tenant_args, tfk
-from matchdesk.tenancy.types import UUIDT, enum_check
+from matchdesk.tenancy import UUIDT, Base, TenantMixin, enum_check, tenant_args, tfk
 
 
 class ExtractionRunRow(TenantMixin, Base):
