@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import ipaddress
 import secrets
 import uuid
 from typing import Any
@@ -12,6 +11,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import Engine
 
 from matchdesk.api.common import BINDING_COOKIE, SESSION_COOKIE, Auth, Ctx, require
+from matchdesk.api.limits import client_address
 from matchdesk.core import Mailer, OutgoingMail, Settings, get_logger
 from matchdesk.identity import (
     LINK_TTL,
@@ -74,14 +74,13 @@ class MembershipPatch(BaseModel):
     status: str | None = Field(default=None, pattern="^(active|deactivated)$")
 
 
-def _ip(request: Request) -> str | None:
-    """The peer address. Behind the proxy (TRD 7) this must become the proxy's forwarded address."""
-    if request.client is None:
-        return None
-    try:
-        return str(ipaddress.ip_address(request.client.host))
-    except ValueError:
-        return None
+def _ip(request: Request, settings: Settings) -> str | None:
+    """The direct peer, or behind a trusted proxy the right-most untrusted X-Forwarded-For hop."""
+    return client_address(
+        request.client.host if request.client else None,
+        request.headers.getlist("x-forwarded-for"),
+        settings.trusted_proxies,
+    )
 
 
 def _send(mailer: Mailer, mail: OutgoingMail) -> None:
@@ -118,7 +117,7 @@ def register_auth_routes(app: FastAPI, settings: Settings, engine: Engine, maile
         if not (40 <= len(binding) <= 64):
             binding = secrets.token_urlsafe(32)
         try:
-            mail = request_login_link(engine, body.email, _ip(request), binding, settings)
+            mail = request_login_link(engine, body.email, _ip(request, settings), binding, settings)
         except AuthError as exc:
             raise HTTPException(*REFUSALS[exc.code]) from exc
         response.set_cookie(
@@ -141,7 +140,7 @@ def register_auth_routes(app: FastAPI, settings: Settings, engine: Engine, maile
                 engine,
                 body.token,
                 request.cookies.get(BINDING_COOKIE),
-                _ip(request),
+                _ip(request, settings),
                 body.totp_code,
                 settings,
             )
@@ -198,7 +197,7 @@ def register_auth_routes(app: FastAPI, settings: Settings, engine: Engine, maile
     @app.post("/api/v1/invitations/accept", status_code=201)
     def post_accept(body: InvitationAccept, request: Request, response: Response) -> dict[str, Any]:
         try:
-            issued = accept_invitation(engine, body.token, _ip(request), settings)
+            issued = accept_invitation(engine, body.token, _ip(request, settings), settings)
         except AuthError as exc:
             status, _title = REFUSALS[exc.code]
             title = "This invitation is not valid any more." if exc.code == "invalid" else _title

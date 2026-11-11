@@ -57,6 +57,8 @@ class Settings:
     migration_database_url: str = "postgresql+psycopg://zakria@localhost:5432/matchdesk_dev"
     api_host: str = "127.0.0.1"
     api_port: int = 8101
+    # Proxies whose X-Forwarded-For is believed (IP addresses or CIDR ranges); empty = none (B2).
+    trusted_proxies: tuple[str, ...] = ()
     log_level: str = "INFO"
     ruleset_code: str = "v1"
     tenant_currency_default: str = "CAD"
@@ -109,6 +111,9 @@ def load_settings() -> Settings:
         migration_database_url=env("MATCHDESK_MIGRATION_DATABASE_URL", Settings.migration_database_url),
         api_host=env("MATCHDESK_API_HOST", "127.0.0.1"),
         api_port=int(env("MATCHDESK_API_PORT", "8101")),
+        trusted_proxies=tuple(
+            p.strip() for p in env("MATCHDESK_TRUSTED_PROXIES", "").split(",") if p.strip()
+        ),
         log_level=env("MATCHDESK_LOG_LEVEL", "INFO"),
         ruleset_code=env("MATCHDESK_RULESET", "v1"),
         job_lease_seconds=int(env("MATCHDESK_JOB_LEASE_SECONDS", "300")),

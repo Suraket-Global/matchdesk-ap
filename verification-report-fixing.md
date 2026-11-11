@@ -490,13 +490,20 @@ Review: `_coordination/review/matchdesk-ap-b2-sec-round1.md` (19 attack cases, 7
 | B2-S08 | Tests that fail when each control is removed: 8.2.1 (M1, M2), 6.4.1 invitation expiry (M3), 7.2.4 (M4), 7.4.2 `users.deactivated_at` (M5), Origin check of 3.5.1 on all three public POSTs (M6) | `test_b2_m1_m2_...`, `test_b2_m3_...`, `test_b2_m4_...`, `test_b2_m5_...`, `test_b2_m6_...` (3 cases) |
 | Observation s15 | A code must be six ASCII digits; full-width digits give a clean 401 | `test_b2_s15_non_ascii_code_is_a_clean_refusal` |
 
-Not changed (observations of the review, still open): request-body limit before multipart spooling (proxy, TRD 7); client IP behind a proxy; the sealed TOTP seed is not bound to the user ID; the binding cookie value is accepted from the client; the future `/invite` page must ask for confirmation.
+Closed afterwards at the lead's request (also security fixes after B2 review, awaiting recheck):
+
+| Item | Fix | Test |
+|---|---|---|
+| Request-body limit before spooling | `api.limits.BodyLimitMiddleware`, the outermost application middleware: 413 when `Content-Length` exceeds the limit for the path, before a byte is read; without a length, 413 as soon as the streamed count passes it. Limits: upload path 20 MB per file (PDF, PNG, JPEG; `MAX_FILE_BYTES`, TRD 8.7) plus 64 KiB multipart overhead; every other request 1 MiB. The per-type file check stays in the handler | `integration/test_b2_files.py::test_oversize_upload_is_refused_before_anything_is_spooled_or_stored` (Content-Length case: no spool file created; chunked case: refused, spools closed; no document row, no MinIO object; a 1.2 MB JSON body refused; a small upload still accepted) |
+| Client address behind a proxy | `api.limits.client_address`: the direct TCP peer, unless it is in `MATCHDESK_TRUSTED_PROXIES` (addresses or CIDR ranges, empty by default); then the right-most `X-Forwarded-For` hop that is not a trusted proxy (a malformed hop counts the proxy itself). Uvicorn runs with `proxy_headers=False`, `forwarded_allow_ips=""` | `unit/test_b2_identity_units.py` (3 tests: untrusted peer ignores the header; right-most untrusted hop; uvicorn options), `integration/test_b2_sign_in.py::test_rate_limit_uses_the_peer_unless_it_is_a_trusted_proxy` (rotating header from an untrusted peer still 429 at 21; behind a trusted proxy each client has its own limit and a client-prepended hop is ignored) |
+
+Not changed (observations of the review, still open): the sealed TOTP seed is not bound to the user ID; the binding cookie value is accepted from the client; the future `/invite` page must ask for confirmation.
 
 Commands and results (from `matchdesk-ap/`, Mailpit and MinIO running):
 
 | Command | Result |
 |---|---|
-| `make test` (drops and re-migrates `matchdesk_test` 0001 to 0007) | 159 passed, 1 warning (httpx deprecation) |
+| `make test` (drops and re-migrates `matchdesk_test` 0001 to 0007) | 159 passed, 1 warning (httpx deprecation); after the two items above 164 passed, 1 warning |
 | `make check` | exit 0 (ruff, format, mypy, 5 contracts kept, import rule, float lint) |
 | Reviewer's script: `cd backend && .venv/bin/python -m pytest -q -p no:cacheprovider ../../_coordination/review/matchdesk-ap-b2-sec_attack.py` | 19 passed, 0 failed |
 | `... matchdesk-ap-b2-sec_attack.py mutate` | 7 of 7 mutations killed by the repository's own tests |

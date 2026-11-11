@@ -117,3 +117,99 @@ def test_blobstore_put_get_delete_round_trip(s3):  # type: ignore[no-untyped-def
     blobstore.delete(tenant, key, settings=settings)
     with pytest.raises(NotFoundError):
         blobstore.get(tenant, key, settings=settings)
+
+
+# ------------------------------------------------------------------ request-body limit (report 10.6 open item 1)
+
+
+def _doc_count(engine, tenant_id) -> int:  # type: ignore[no-untyped-def]
+    from sqlalchemy import text
+
+    from matchdesk.tenancy import session
+
+    with session(tenant_id, engine) as s:
+        return int(s.execute(text("select count(*) from documents")).scalar() or 0)
+
+
+def test_oversize_upload_is_refused_before_anything_is_spooled_or_stored(app_engine, s3, monkeypatch):  # type: ignore[no-untyped-def]
+    import starlette.formparsers as fp
+    from fastapi.testclient import TestClient
+
+    from matchdesk.api.app import create_app
+    from matchdesk.api.limits import MAX_UPLOAD_BODY_BYTES
+
+    settings, store, prefixes = s3
+    w = make_tenant(app_engine, "B2 oversize")
+    prefixes.append(f"t/{w.tenant_id}/")
+    spools: list[object] = []
+    real_spool = fp.SpooledTemporaryFile
+
+    def counting_spool(*args, **kwargs):  # type: ignore[no-untyped-def]
+        f = real_spool(*args, **kwargs)
+        spools.append(f)
+        return f
+
+    monkeypatch.setattr(fp, "SpooledTemporaryFile", counting_spool)
+    api = TestClient(create_app(), base_url=BASE_URL)
+    batch = api.post("/api/v1/intake/batches", headers=w.headers).json()["id"]
+    url = f"/api/v1/intake/batches/{batch}/files"
+    big = b"%PDF-1.7\n" + b"0" * (MAX_UPLOAD_BODY_BYTES + 1024)
+
+    # 1. Content-Length above the limit: 413 before the application reads the body.
+    r = api.post(
+        url,
+        files={"file": ("big.pdf", big, "application/pdf")},
+        headers={**w.headers, "Idempotency-Key": "big-1"},
+    )
+    assert r.status_code == 413 and r.json()["title"] == "Request body too large"
+    assert spools == []  # nothing spooled to memory or disk
+
+    # 2. No Content-Length (chunked): refused as soon as the streamed count passes the limit.
+    boundary = "b2boundary"
+    head = (
+        f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="big.pdf"\r\n'
+        "Content-Type: application/pdf\r\n\r\n"
+    ).encode()
+    sent = 0
+
+    def chunks():  # type: ignore[no-untyped-def]
+        nonlocal sent
+        yield head
+        piece = b"%PDF-1.7\n" + b"0" * (1024 * 1024)
+        while sent <= MAX_UPLOAD_BODY_BYTES + 4 * len(piece):
+            sent += len(piece)
+            yield piece
+        yield f"\r\n--{boundary}--\r\n".encode()
+
+    r2 = api.post(
+        url,
+        content=chunks(),
+        headers={
+            **w.headers,
+            "Idempotency-Key": "big-2",
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
+        },
+    )
+    assert r2.status_code == 413
+    # Spooled at most up to the limit, and every spool closed (Starlette deletes closed spools).
+    assert all(getattr(f, "closed", True) for f in spools)
+
+    # 3. Nothing reached the database or MinIO.
+    assert _doc_count(app_engine, w.tenant_id) == 0
+    assert not store.client.list_objects_v2(Bucket=settings.s3_bucket, Prefix=f"t/{w.tenant_id}/").get(
+        "Contents"
+    )  # type: ignore[attr-defined]
+
+    # 4. A JSON body above 1 MiB is refused too; a normal upload still works.
+    huge_json = api.post(
+        "/api/v1/match-runs",
+        content=b"[" + b"0," * 600_000 + b"0]",
+        headers={**w.headers, "Content-Type": "application/json"},
+    )
+    assert huge_json.status_code == 413
+    ok = api.post(
+        url,
+        files={"file": ("ok.pdf", b"%PDF-1.7\nsmall\n%%EOF\n", "application/pdf")},
+        headers={**w.headers, "Idempotency-Key": "small-1"},
+    )
+    assert ok.status_code == 201

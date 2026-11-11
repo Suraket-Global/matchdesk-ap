@@ -61,6 +61,7 @@ Utilities index (B1, B2). Search here before adding a helper:
 |---|---|---|
 | Decimal conversion refusing floats; half-up rounding to cents, price or quantity; line amount | `core.dec`, `core.round_cents`, `core.round_price`, `core.round_qty`, `core.line_amount` | `backend/src/matchdesk/core/money.py` |
 | Settings (one object for API and worker; reads the environment, then the gitignored `backend/.env`; `fingerprint()` for CI-02 leaves secrets out; `require_secrets()`) | `core.load_settings()` | `core/settings.py` |
+| Request-body limits (413 before reading); client address behind trusted proxies | `api.limits.BodyLimitMiddleware`, `api.limits.client_address`, `MAX_FILE_BYTES` | `api/limits.py` |
 | Outgoing mail (SMTP: Mailpit locally, a provider later; fake for tests) | `core.Mailer`, `core.SmtpMailer`, `core.RecordingMailer`, `core.mailer_from_settings` | `core/mail.py` |
 | JSON logging, correlation ID, field allow-list | `core.configure_logging`, `core.set_correlation_id`, `core.get_logger` | `core/logging.py` |
 | Clock | `core.SystemClock`, `core.FixedClock` | `core/clock.py` |

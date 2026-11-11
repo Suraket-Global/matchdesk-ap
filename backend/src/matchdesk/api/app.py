@@ -23,6 +23,7 @@ from sqlalchemy.exc import IntegrityError
 from matchdesk import blobstore
 from matchdesk.api.auth_routes import PUBLIC_API_PATHS, register_auth_routes
 from matchdesk.api.common import CSRF_HEADER, MUTATING, SESSION_COOKIE, Auth, problem, require
+from matchdesk.api.limits import MAX_FILE_BYTES, MAX_UPLOAD_FILE_BYTES, BodyLimitMiddleware
 from matchdesk.core import (
     ConflictError,
     ForbiddenError,
@@ -45,7 +46,6 @@ from matchdesk.tenancy.models import IdempotencyKey
 
 log = get_logger("matchdesk.api")
 
-MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # TRD 8.7
 EXTENSIONS = {"application/pdf": "pdf", "image/png": "png", "image/jpeg": "jpg"}
 
 
@@ -124,6 +124,8 @@ def create_app(mailer: Mailer | None = None) -> FastAPI:
         return response
 
     register_auth_routes(app, settings, engine(), out_mail)
+    # Outermost of the application's own middleware: refuses oversize bodies before anything reads them.
+    app.add_middleware(BodyLimitMiddleware)
 
     @app.exception_handler(NotFoundError)
     async def not_found(_r: Request, _e: NotFoundError) -> JSONResponse:
@@ -328,12 +330,13 @@ def create_app(mailer: Mailer | None = None) -> FastAPI:
         idempotency_key: Annotated[str, Header(min_length=1, max_length=200)],
     ) -> dict[str, Any]:
         require(p, "upload_and_receiving")
-        data = await file.read(MAX_UPLOAD_BYTES + 1)
-        if len(data) > MAX_UPLOAD_BYTES:
-            raise HTTPException(413, "File is larger than 20 MB")
+        # The body limit middleware has already refused any request above MAX_UPLOAD_BODY_BYTES.
+        data = await file.read(MAX_UPLOAD_FILE_BYTES + 1)
         mime = sniff(data)
         if mime is None:
             raise HTTPException(415, "Only PDF, PNG and JPEG invoices are accepted")
+        if len(data) > MAX_FILE_BYTES[mime]:
+            raise HTTPException(413, "File is larger than 20 MB")
         return await run_in_threadpool(_store_file, p, batch_id, idempotency_key, data, mime)
 
     def _store_file(p: Principal, batch_id: uuid.UUID, key: str, data: bytes, mime: str) -> dict[str, Any]:
@@ -419,9 +422,21 @@ def main() -> None:
     settings = load_settings()
     configure_logging(settings.log_level)
     log.info("api_start", extra={"settings_hash": settings.fingerprint(), "service": "api"})
-    uvicorn.run(
-        create_app(), host=settings.api_host, port=settings.api_port, log_config=None, access_log=False
-    )
+    uvicorn.run(create_app(), **uvicorn_options(settings))
+
+
+def uvicorn_options(settings: Any) -> dict[str, Any]:
+    """Server options. Uvicorn's proxy-header trust is off: it would otherwise rewrite the client
+    address from X-Forwarded-For for its default trusted host; ``api.limits.client_address`` decides."""
+    return {
+        "host": settings.api_host,
+        "port": settings.api_port,
+        "log_config": None,
+        "access_log": False,
+        "proxy_headers": False,
+        "forwarded_allow_ips": "",
+        "server_header": False,
+    }
 
 
 if __name__ == "__main__":

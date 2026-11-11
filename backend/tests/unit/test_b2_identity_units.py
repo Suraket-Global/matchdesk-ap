@@ -68,3 +68,35 @@ def test_recording_mailer_keeps_messages() -> None:
     m = RecordingMailer()
     m.send(OutgoingMail("a@example.invalid", "s", "b"))
     assert [x.to for x in m.sent] == ["a@example.invalid"]
+
+
+# Client address behind proxies (report 10.6 open item 2).
+
+from matchdesk.api.limits import client_address  # noqa: E402
+
+TRUSTED = ("10.0.0.0/8", "192.168.1.5")
+
+
+def test_direct_peer_is_used_and_its_forwarded_header_ignored() -> None:
+    assert client_address("203.0.113.7", ["198.51.100.1"], TRUSTED) == "203.0.113.7"
+    assert client_address("203.0.113.7", [], ()) == "203.0.113.7"
+    assert client_address("203.0.113.7", ["198.51.100.1"], ()) == "203.0.113.7"
+
+
+def test_trusted_proxy_gives_the_right_most_untrusted_hop() -> None:
+    # The client may prepend anything; only hops added by trusted proxies are skipped.
+    assert client_address("10.1.2.3", ["6.6.6.6, 198.51.100.9"], TRUSTED) == "198.51.100.9"
+    assert client_address("10.1.2.3", ["6.6.6.6, 198.51.100.9, 192.168.1.5"], TRUSTED) == "198.51.100.9"
+    assert client_address("10.1.2.3", ["6.6.6.6", "198.51.100.9, 10.9.9.9"], TRUSTED) == "198.51.100.9"
+    assert client_address("10.1.2.3", [], TRUSTED) == "10.1.2.3"
+    assert client_address("10.1.2.3", ["10.4.4.4"], TRUSTED) == "10.1.2.3"
+    assert client_address("10.1.2.3", ["198.51.100.9, not-an-ip"], TRUSTED) == "10.1.2.3"
+    assert client_address("not-an-ip", [], TRUSTED) is None
+
+
+def test_uvicorn_does_not_trust_proxy_headers() -> None:
+    from matchdesk.api.app import uvicorn_options
+    from matchdesk.core import load_settings
+
+    opts = uvicorn_options(load_settings())
+    assert opts["proxy_headers"] is False and opts["forwarded_allow_ips"] == ""

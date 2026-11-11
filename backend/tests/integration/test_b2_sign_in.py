@@ -751,3 +751,38 @@ def test_b2_m6_public_posts_refuse_a_foreign_origin(app_engine, path):  # type: 
     body = {"email": "a@example.invalid"} if path.endswith("login-links") else {"token": "x" * 43}
     r = _browser().post(path, json=body, headers={"Origin": "https://evil.example"})
     assert r.status_code == 403 and r.json()["title"] == "Cross-site request refused"
+
+
+def test_rate_limit_uses_the_peer_unless_it_is_a_trusted_proxy(app_engine, monkeypatch):  # type: ignore[no-untyped-def]
+    # Untrusted peer: rotating X-Forwarded-For does not escape the per-IP link limit.
+    direct = _browser(ip="198.51.100.40")
+    codes = [
+        direct.post(
+            "/api/v1/auth/login-links",
+            json={"email": f"d{i}@example.invalid"},
+            headers={"X-Forwarded-For": f"203.0.113.{i + 1}"},
+        ).status_code
+        for i in range(21)
+    ]
+    assert codes[:20] == [202] * 20 and codes[20] == 429
+    # Trusted proxy: each forwarded client has its own limit; the proxy itself is not limited.
+    monkeypatch.setenv("MATCHDESK_TRUSTED_PROXIES", "10.200.0.0/16")
+    proxy = _browser(ip="10.200.0.1")
+    results = []
+    for i in range(21):
+        r = proxy.post(
+            "/api/v1/auth/login-links",
+            json={"email": f"p{i}@example.invalid"},
+            headers={"X-Forwarded-For": f"6.6.6.6, 198.51.100.{100 + i}"},  # client-prepended hop ignored
+        )
+        results.append(r.status_code)
+    assert results == [202] * 21
+    same = [
+        proxy.post(
+            "/api/v1/auth/login-links",
+            json={"email": f"q{i}@example.invalid"},
+            headers={"X-Forwarded-For": f"{i}.{i}.{i}.{i}, 198.51.100.250"},
+        ).status_code
+        for i in range(1, 22)
+    ]
+    assert same[:20] == [202] * 20 and same[20] == 429
