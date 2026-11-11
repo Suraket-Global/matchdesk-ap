@@ -2,7 +2,7 @@
 
 Canonical instructions for any coding or documentation agent working in this repository. `CLAUDE.md` adds product-specific guidance and defers to this file.
 
-**State of the repository:** the ten planning documents at the root, plus build milestone B1 (2026-11-11, authorised by the owner before the Phase 0 gate) under `backend/`: the package layout, `core`, the pure `matching` engine, migrations with row-level security, match runs, a minimal API and a worker, with unit and integration tests; and build milestone B2 (2026-11-11): emailed sign-in links, cookie sessions with anti-forgery tokens, idle and absolute limits, rate limits, invitations, memberships, operator TOTP, mail over SMTP to the local Mailpit inbox and files over the S3 API to local MinIO. Nothing is deployed; QuickBooks and extraction exist only as interfaces with fakes; no real mail or storage provider is connected. What ran, and how, is in [verification-report-fixing.md sections 9](verification-report-fixing.md#9-build-milestone-b1-2026-11-11) and [10](verification-report-fixing.md#10-build-milestone-b2-sign-in-and-local-services-2026-11-11). Commands marked **exists** in section 12 work locally; all others are still **proposed**.
+**State of the repository:** the ten planning documents at the root, plus build milestone B1 (2026-11-11, authorised by the owner before the Phase 0 gate) under `backend/`: the package layout, `core`, the pure `matching` engine, migrations with row-level security, match runs, a minimal API and a worker, with unit and integration tests; and build milestone B2 (2026-11-11): emailed sign-in links, cookie sessions with anti-forgery tokens, idle and absolute limits, rate limits, invitations, memberships, operator TOTP, mail over SMTP to the local Mailpit inbox and files over the S3 API to local MinIO. Nothing is deployed; QuickBooks and extraction exist only as interfaces with fakes; no real mail or storage provider is connected. What ran, and how, is in [verification-report-fixing.md sections 9](verification-report-fixing.md#9-build-milestone-b1-2026-11-11) and [10](verification-report-fixing.md#10-build-milestone-b2-sign-in-and-local-services-2026-11-11). Commands marked **exists** in section 12 work locally; all others are still **proposed**. Round C2 (2026-11-11) added `compliance/self-check.md`: the business's own reading of the legal rules (not legal advice), with checklists, templates and red lines; by owner decision no lawyer is used for now and the gates that waited on one point to that file.
 
 ## 1. Reading order
 
@@ -130,6 +130,7 @@ Utilities index (B1, B2). Search here before adding a helper:
 | A source or a verified fact | `Decision.md` section 13 with date consulted, scope and restriction; remove "unverified" only where the source was actually read |
 | Stack or deployment | `TRD.md` sections 4 and 7; proposed commands in `execution-plan.md` section 6; this file's section 5 |
 | A risk's prevention or test | Only the row in `verification-report-fixing.md` section 5 |
+| A legal rule, compliance checklist, template or red line | `compliance/self-check.md` first (with source and date opened); then the gate text in `Decision.md` sections 11 and 12.4, `execution-plan.md` section 2 and Phase 0 tasks, and any screen or retention rule it changes (`App-flow.md`, `schema.md` section 8, `TRD.md`); new sources in `Decision.md` section 13 |
 
 ## 10. Git hygiene
 
@@ -138,7 +139,7 @@ Utilities index (B1, B2). Search here before adding a helper:
 - Commit messages name the task or requirement ID.
 - Never commit `.env` files, credentials, tokens, real documents or exports.
 - Coordination ledgers, briefs and review scratch files live outside this repository.
-- Do not add files to the repository root beyond the ten planning documents until implementation is authorised; then application code goes in subdirectories.
+- Do not add files to the repository root beyond the ten planning documents until implementation is authorised; then application code goes in subdirectories. The compliance self-check lives in `compliance/`.
 
 ## 11. Reporting completion accurately
 

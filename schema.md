@@ -407,6 +407,7 @@ Every index is declared both in a migration and in the ORM model; a CI check com
 | QuickBooks tokens | S3 | Until disconnect; then erased at once |
 | Sessions, login tokens | S3 | Deleted 7 days after expiry |
 | Invoices, credit notes, receiving files and their extracted rows | S2 | Life of the account; pilot that does not convert: deleted 30 days after the pilot ends |
+| Rows copied from QuickBooks (purchase orders, bills, vendor credits, vendors, items) | S2 | Until disconnect; after disconnect no sync or match run uses them, and they are deleted 30 days later or earlier on request (Intuit terms s. 12.2; [compliance/self-check.md section 6.4](compliance/self-check.md#64-software-change-disconnect-stops-processing-p); [P], Decision.md section 11 decision 12; not built) |
 | Raw inbound email payloads | S2 | 7 days |
 | Generated exports | S2 | 24 hours |
 | Draft receiving imports never committed | S2 | 7 days |

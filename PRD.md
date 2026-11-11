@@ -307,7 +307,7 @@ Second in cost: waiving a real exception. Waivers need a reason, are capped by t
 | Independent receiving data from the account | MH-03, MH-07 | The pilot question itself |
 | A document-extraction model reachable by API | MH-05 | Provider chosen in T-1.1.3 |
 | Inbound and outbound email service | MH-14, sign-in links | Chosen in TRD |
-| Written permission from the account to process its supplier documents, including by an extraction provider | All | T-0.2.1 |
+| Written permission from the account to process its supplier documents, including by an extraction provider | All | T-0.2.1; template in [compliance/self-check.md section 4.3](compliance/self-check.md#43-written-permission-to-process-documents-template---adapt) |
 | Founder's VPS and domain | Hosting | Stated in chat; location and size are missing inputs |
 
 ## 12. Constraints
@@ -316,7 +316,7 @@ Second in cost: waiving a real exception. Waivers need a reason, are capped by t
 - Sell before building; the first step must be doable by hand **[chat]**.
 - Development estimate 160 hours **[assumption]**; the plan's own estimate is higher ([execution-plan.md section 5](execution-plan.md#5-estimate-summary)).
 - Match decisions and all money arithmetic are deterministic. A model may read documents and suggest aliases; it never decides a match.
-- Personal information is limited to users' names and work emails and names appearing on supplier documents. Canadian private-sector privacy law applies to these (PIPEDA and BC's PIPA; named from the author's knowledge, **unverified, no source consulted**).
+- Personal information is limited to users' names and work emails and names appearing on supplier documents. Canadian private-sector privacy law applies to these (PIPEDA and BC's PIPA; read on 2026-11-11 [source: SRC-25, SRC-26]. Business contact information and, under PIPA, work-product information are excluded; MatchDesk processes distributor documents as the distributor's service provider. Rules, checklists and templates: [compliance/self-check.md](compliance/self-check.md) sections 3 to 6, not legal advice).
 - Synthetic data only in this repository and in test fixtures.
 
 ## 13. Success metrics

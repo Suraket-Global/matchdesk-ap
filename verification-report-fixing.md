@@ -204,8 +204,8 @@ Issues the author found and fixed while cross-checking the documents. These are 
 | Multi-factor sign-in for tenant users; secrets manager; malware scanning | Decisions before a sixth account, a cloud move, and email intake respectively | Accepted pilot gaps (F-011, F-012, F-013) |
 | Tier mix, churn, support cost, refund rate | Paying accounts | Unit economics |
 | VPS location and size | Founder | Data-residency wording; T-7.1.1 |
-| Legal reading of privacy and breach-notification duties | Counsel | Pilot agreement |
-| Whether the outreach of Decision.md section 12.4 complies with anti-spam law; the share of prospects whose address is published | Counsel; T-0.1.1 | T-0.2.2 first send; the funnel and list cost (F-028) |
+| Legal reading of privacy and breach-notification duties (original: "Counsel") | Answered by compliance/self-check.md sections 3 to 5, owner sign-off recorded 2026-11-11 (Decision.md section 11 decision 11) | Pilot agreement |
+| Whether the outreach of Decision.md section 12.4 complies with anti-spam law; the share of prospects whose address is published | Anti-spam: answered by compliance/self-check.md section 1, owner sign-off recorded 2026-11-11 (original: "Counsel"); share: T-0.1.1 | T-0.2.2 first send; the funnel and list cost (F-028) |
 
 ## 8. Outstanding items
 
@@ -221,12 +221,12 @@ Findings the independent reviewer marked "open by design" in round 2, followed b
 | F-012 Sign-in strength | No multi-factor authentication for tenant users (ASVS 5.0.0 item 6.3.3 as cited by the reviewer); no user-visible session list | A decision to add it, due before a sixth paying account or any write access to QuickBooks | Accepted pilot gap; founder decision at the trigger |
 | F-014 Reflow | Between 320 and 639 px of layout width, eight work screens lose their editing functions (WCAG 2.2 SC 1.4.10) | Design and build work to make those screens operable at 320 px, due before general release | Accepted pilot gap; developer after the pilot |
 | F-017 QuickBooks permission | Whether Intuit offers a read-only scope and what its consent screen says; until known, the "reads only" statement is conditional and the token is treated as write-capable | The T-1.1.1 fact sheet (scopes and consent wording) | T-1.1.1 |
-| F-028 Anti-spam law (closed by the reviewer; open by design) | Whether the consent bases in Decision.md section 12.4 hold, and how many prospects have a published, role-relevant address | A lawyer's confirmation or the founder's written acceptance of the risk; the emailable count | Counsel or founder (Decision.md section 11, item 8); T-0.1.1 |
+| F-028 Anti-spam law (closed by the reviewer; open by design) | Whether the consent bases in Decision.md section 12.4 hold, and how many prospects have a published, role-relevant address | Original: "A lawyer's confirmation or the founder's written acceptance of the risk". Answered by compliance/self-check.md section 1, owner sign-off recorded 2026-11-11 (Decision.md section 11 decision 11); residual risk medium. Still open: the emailable count | T-0.1.1 |
 | F-029 Stop rule on 300 prospects (closed by the reviewer; founder choice remains) | Whether a miss at day 60 stops the plan or extends it to day 86 | A recorded choice between (a) and (b) of Decision.md section 12.8 before day 1 | Founder decision (Decision.md section 11, item 1) |
 
 | F-030 Who builds, and the developer's cost | The reviewer's verdict was "closed, part open". The author then stated the developer cost beside the base ramp and both readings in Decision.md section 11 item 6; that edit was checked by the lead, not re-reviewed. Who builds is still undecided | The founder's choice of reading (a) or (b) | Founder decision (Decision.md section 11, item 6) |
 
-The first eight rows are findings the reviewer marked "open by design". The reviewer closed F-028 and F-029 in the go-to-market retest; their rows record what, by the reviewer's own residue notes, only a lawyer or the founder can settle.
+The first eight rows are findings the reviewer marked "open by design". The reviewer closed F-028 and F-029 in the go-to-market retest; their rows record what, by the reviewer's own residue notes, only a lawyer or the founder can settle. For F-028 the legal part was settled in round C2 by compliance/self-check.md section 1 and the owner's decision of 2026-11-11; only the emailable count remains.
 
 F-026 and F-027 were retested by the independent reviewer on 2026-11-10 and are closed. F-028 to F-032 were retested the same day: F-028, F-029, F-031 and F-032 closed; F-030 closed with a part open, since edited as described above. Nothing awaits retest.
 
@@ -536,3 +536,37 @@ Commands and results (from `matchdesk-ap/`, Mailpit and MinIO running):
 | `make check` | exit 0 (ruff, format, mypy, 5 contracts kept, import rule, float lint) |
 
 Not done: the author did not re-read the Statistics Canada cells or the Intuit program guide; which QuickBooks Online plans offer item receipts and which report exports their creator and creation time remain unverified until T-1.1.1.
+
+## 12. C2 compliance self-check 2026-11-11 (lead-checked, not legal advice)
+
+**Owner decision (2026-11-11, relayed in the lead's round C2 brief):** no lawyer for now. Legal questions are answered by the business's own reading of primary sources in `compliance/self-check.md`, which states at the top that it is not legal advice; the owner accepts the residual risk per question. Recorded as Decision.md section 11 decision 11.
+
+**What was read.** Sources SRC-13, SRC-14 (re-read in full) and SRC-22 to SRC-35, opened on 2026-11-11 by command-line fetch (Justice Laws, BC Laws, OPC, ISED, National DNCL) or in a browser (Intuit, script-rendered). **Not read:** every CRTC page tried (anti-spam FAQ and guide, bulletins 2012-548 and 2012-549, decision 2016-428, Unsolicited Telecommunications Rules) returned HTTP 403 or a "Security Check" page, which was not bypassed. Calling hours rest on a search-result summary only; the CRTC's view of conspicuous publication rests on the lead's C1 note of a law-firm summary.
+
+| # | Question | Self-check section | Residual risk | Gates changed (original text kept) |
+|---|---|---|---|---|
+| 1 | Cold and warm email (CASL ss. 6, 10(9)(b), 11, 13, 20; SOR/2013-221 s. 4; SOR/2012-36 ss. 2, 3) | 1 | Medium | Decision §11 item 8, §12.4 intro and "Penalty" row; execution-plan §2, M0.2 dependencies, T-0.2.2 acceptance and subtask (a); this file §7, §8 F-028 |
+| 2 | Telephone (Telecommunications Act s. 41.7; DNCL business-call exemption) | 2 | Low | Decision §12.4 "Telephone" row |
+| 3 | Prospect contact data (PIPEDA s. 4.01; PIPA s. 1) | 3 | Low | PRD §12 |
+| 4 | Processing distributor documents (PIPEDA Sch. 1 4.1.3; PIPA ss. 4(2), 34, 35) | 4 | Low to medium | execution-plan §2 letter row, T-0.2.1; PRD §11 |
+| 5 | Breach duties (PIPEDA ss. 10.1, 10.3; Intuit s. 13.4) | 5 | Low | TRD §7 incident steps; this file §7 |
+| 6 | Intuit developer terms (ss. 3.1, 12.2, 13.4, 20.4; Exhibit A s. 4.4) | 6 | Medium | App-flow S-04 disconnect dialog; schema.md §8 new row; execution-plan §2 Intuit row, T-3.1.1, IT-11; TRD operating cost |
+| 7 | Back-test refund terms (BPCPA s. 1; Competition Act ss. 52, 74.01) | 7 | Low | execution-plan T-0.2.1 |
+| 8 | "Audit" wording (BC CPA Act s. 47) | 8 | Low | None (new red line) |
+| 9 | Foreign rules | 9 | Not applicable while the red line holds | None |
+
+**Templates written (template - adapt):** email footer, referral opener and stop reply (1.3); call opening (2.3); written permission to process documents (4.3); QuickBooks data disclosure (6.3); one-page back-test terms (7.3); "not an audit" report footer (8).
+
+**No-lawyer operating model proposed, each an owner decision [P]:** warm introductions and phone first, cold email only on proven emailable rows (1.6); Phase 0 back-tests worked inside a folder the distributor owns, from reports the controller exports, so MatchDesk holds no QuickBooks login or copy (4.5; decision 12); self-serve upload once the application exists; no foreign outreach except through a local partner (9).
+
+**Facts that changed a design.** (a) Intuit s. 12.2 requires processing to stop when the user revokes consent; S-04 said matching continues on the last copy. Changed to a [P] proposal (decision 12) in App-flow S-04, schema.md section 8, T-3.1.1 and IT-11. No code change: the QuickBooks connection is not built (only `qbo.QboReader` and its fake exist). (b) Intuit s. 20.4 requires insurance; cost unknown (decision 13), noted in TRD operating cost and execution-plan section 2. No other rule changes software already built: sign-in links and invitations are not commercial electronic messages, and outreach is run from the funnel log outside the application.
+
+Commands and results (from `matchdesk-ap/`, Mailpit and MinIO running), after the C2 edits:
+
+| Command | Result |
+|---|---|
+| `make test` (drops and re-migrates `matchdesk_test` 0001 to 0008) | 177 passed, 1 warning, none skipped |
+| `make check` | exit 0 (ruff, format, mypy, 5 contracts kept, import rule, float lint) |
+
+Not done: no independent review of the self-check; CRTC pages unread (above); GST/PST treatment of the back-test not researched (self-check 7.2); the Intuit questionnaire and Data Stewardship and Responsible AI principles named in s. 12.2 were not opened.
+
