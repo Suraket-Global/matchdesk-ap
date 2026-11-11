@@ -11,7 +11,7 @@ Will a distributor pay for a historical three-way match and supply invoices, pur
 ## The buyer's workflow
 
 - **Account:** a Lower Mainland wholesale distributor on QuickBooks Online Plus or Advanced with purchase orders enabled.
-- **Clerk, daily:** receives supplier invoices, compares each with the purchase order and the packing slip, enters the bill, pays on the due date. In MatchDesk the clerk uploads invoices and the warehouse receiving file, confirms supplier-item aliases, fixes misread documents and resolves exceptions.
+- **Clerk, daily:** receives supplier invoices, compares each with the purchase order and the packing slip, enters the bill, pays on the due date. In MatchDesk the clerk uploads invoices and the warehouse receiving file (or the QuickBooks item-receipt export where the receiver enters item receipts), confirms supplier-item aliases, fixes misread documents and resolves exceptions.
 - **Controller, weekly:** approves unit conversions and larger waivers, sets tolerances, approves the back-test report, and uses its dollar findings with the owner and with suppliers.
 - **First sale:** a back-test of last month for CAD 500, refunded if nothing is found (stated in the chat). The CAD 500 covers a 30-day pilot: the back-test plus live checking; the controller signs and pays; before the application exists the founder delivers the back-test by hand. The refund is decided by an objective criterion on one governing report version. All of this is in [Decision.md section 5](Decision.md#5-offer-channel-and-pilot) and is partly proposal.
 
@@ -23,7 +23,7 @@ The ranking of all failures is in [Decision.md section 1](Decision.md#1-proposed
 
 1. Checking one month in isolation. An invoice billed in September and re-billed in October passes unless earlier invoices and receipts on the same purchase order are counted (MH-06, AD-13).
 2. Treating a missing receiving record as acceptable. `receipt_absent` is always an exception (MH-07). It may be a finding ("not received"); it is never a pass. It does not stop the price, ordered-quantity and duplicate checks, which need no receipt; skipping them would empty the report for exactly the accounts that lack receiving evidence.
-3. Counting something that is not independent receiving evidence: QuickBooks' "billed against PO" quantity, or a supplier's packing slip with no receiver marks (AD-05, MH-03). How QuickBooks produces its "Received" figure is still an assumption until T-1.1.1; the rule holds either way.
+3. Counting something that is not independent receiving evidence: QuickBooks' "billed against PO" quantity, a QuickBooks item receipt entered by accounts-payable staff or after the bill, or a supplier's packing slip with no receiver marks (AD-05, MH-03). QuickBooks Online does have item receipts (C1), but only as an export, not through the API. How QuickBooks produces its "Received" figure is still an assumption until T-1.1.1; the rule holds either way.
 4. A wrong unit conversion on an alias (1 CS = 24 EA instead of 12). Conversions other than 1 need controller approval; a change re-matches everything that used the alias (MH-10).
 5. Checking an invoice line alone instead of cumulatively across partial deliveries, earlier invoices and credit notes (MH-06, MH-09).
 6. Trusting extracted numbers that do not add up. Documents failing the arithmetic gates go to a person (MH-05).

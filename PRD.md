@@ -13,7 +13,7 @@ The first thing sold is a back-test: last month's invoices, checked after the fa
 ## 2. What the product does
 
 1. Reads purchase orders, vendors, items, bills and vendor credits from the account's QuickBooks Online company. It writes nothing to QuickBooks in this version.
-2. Imports receiving records from a warehouse spreadsheet or from scanned packing slips.
+2. Imports receiving records from a warehouse spreadsheet, a QuickBooks Online item-receipt export, or scanned packing slips.
 3. Takes supplier invoice and credit-note PDFs in batches and extracts their lines.
 4. Matches each invoice line on item, quantity and unit price, cumulatively across partial deliveries, net of credit notes, with tolerances per vendor.
 5. Raises an exception for every line that does not pass, including every line with no receiving record, and for suspected duplicate invoices.
@@ -43,7 +43,7 @@ Three facts make the comparison harder than it sounds and shape every requiremen
 - **Deliveries are partial.** One purchase-order line can arrive in three shipments and be billed on three invoices. A line-by-line check that ignores earlier receipts and invoices is wrong.
 - **Supplier item codes and units differ from the distributor's.** A supplier bills "5 CS" of its code where the purchase order says "60 EA" of the distributor's item.
 - **Purchase-order history crosses month ends.** A purchase order opened in August can be billed in September and again in October. Checking October alone misses the September invoice.
-- **QuickBooks Online appears to have no receiving record of its own.** Its "received" quantity seems to be produced by entering the bill ([Decision.md section 3](Decision.md#the-assumption-that-matters-most-quickbooks-online-receiving); forum and marketing pages only, to be confirmed in T-1.1.1). Receiving evidence has to come from the warehouse, and a supplier's own packing slip without receiver marks is not such evidence.
+- **QuickBooks Online's own receiving record is optional and not in its API.** Where only bills are entered, its "received" quantity seems to be produced by entering the bill (forum and marketing pages, to be confirmed in T-1.1.1). QuickBooks Online also offers item receipts against a purchase order before the bill (Intuit help, SRC-15), but the Accounting API has no item-receipt entity (SRC-16), so they arrive only as an export ([Decision.md section 3](Decision.md#the-assumption-that-matters-most-quickbooks-online-receiving), corrected in C1, 2026-11-11). Receiving evidence has to come from the people who receive the goods: a warehouse log, receiver-marked delivery documents, or item receipts the receiver entered before the bill. A supplier's own packing slip without receiver marks is not such evidence.
 
 ## 6. Buyer, users and roles
 
@@ -117,6 +117,7 @@ Priority P0 = needed to deliver a paid back-test. P1 = needed for the live part 
 *Acceptance.*
 - Each import is given one evidence class, defined in [Decision.md section 3](Decision.md#the-assumption-that-matters-most-quickbooks-online-receiving): A warehouse record; B receiver-attested delivery document; C supplier document only. Class C is stored and shown but never counts as a receipt.
 - A spreadsheet with purchase-order number, item, quantity and date can be loaded after the clerk maps its columns once; the mapping is remembered.
+- A QuickBooks Online item-receipt report or CSV export can be loaded as source type "QuickBooks item-receipt export" (no API path exists, SRC-16). It is always class A. Each row counts only if the export shows who created it and when, the creator is not one of the accounts-payable users the controller attested, the creator did not also enter the linked bill, and it was created before that bill. Every other row is listed as rejected with its reason (creator unknown, creation time unknown, entered by accounts-payable staff, entered by the bill's enterer, entered after the bill) and never counts (C1; test UT-32, IT-30).
 - Receiving rows are accepted for any date. A row is rejected only if it cannot be read or names an unknown purchase order or item; "date outside the test month" is not a reason.
 - For a class A import the clerk states the date range for which the log is complete. That range decides whether a purchase-order line with no receipt is "not received" or merely "unverified" (MH-07).
 - For class B, each document counts only after the clerk records that receiver marks (signature or counts, and date) are present and who signed.
@@ -229,6 +230,7 @@ Priority P0 = needed to deliver a paid back-test. P1 = needed for the live part 
 - A draft is marked DRAFT on every page and in every export. Approval is refused while extraction reviews or approvals are pending; open exceptions are allowed and are listed.
 - Approval records who and when and freezes the figures. Later changes produce a new draft version; the approved version stays retrievable.
 - The approved report exports to PDF and CSV. Each finding row carries document number, purchase-order number and line.
+- The report labels its dollar findings "flagged discrepancies". It does not call them overcharges or money recovered; controller confirmations and credits recovered are recorded later against it in the pilot record (MH-16) and shown as separate totals.
 
 ### MH-13 — Audit trail (P0, owner: controller)
 
@@ -265,6 +267,7 @@ Priority P0 = needed to deliver a paid back-test. P1 = needed for the live part 
 - Billable units per account per calendar month are counted as defined in [Decision.md section 6](Decision.md#6-one-paying-account-one-billable-unit) and can be listed per document.
 - The pilot record holds price, period, what the fee covers, who signed, how the back-test is delivered (by hand or in the application), the refund threshold, payment status entered by the operator, and outcome (converted, refunded, ended).
 - The refund criterion of [Decision.md section 5.1](Decision.md#51-refund-criterion-proposal) is evaluated from the governing report version, which the pilot record names. The qualifying-discrepancy total, the threshold and the result are shown to both controller and operator. A later report version does not change a recorded result.
+- The pilot record also holds, per flagged discrepancy of the governing report, whether the controller confirmed it as an overcharge (who, when, amount, not above the flagged amount) and any supplier credit or refund actually received against a confirmed overcharge (date, amount, credit document). It shows three totals separately: flagged, controller-confirmed, credit recovered (M-3a to M-3c). A recovery cannot be recorded against an unconfirmed discrepancy.
 - Example results: qualifying discrepancies CAD 1,912.40 against a CAD 500 threshold, no refund; CAD 0.00, refund; an account with no receiving evidence whose only discrepancy is a CAD 9.00 price variance, refund, with the unverified total printed beside it.
 
 ## 9. Non-goals and deferred items
@@ -298,7 +301,8 @@ Second in cost: waiving a real exception. Waivers need a reason, are capped by t
 
 | Dependency | Needed for | Status |
 |---|---|---|
-| QuickBooks Online API read access to purchase orders with line detail, bills, vendor credits, vendors, items | MH-02 | **Unverified, no source consulted**; confirm in T-1.1.1 |
+| QuickBooks Online API read access to purchase orders with line detail, bills, vendor credits, vendors, items | MH-02 | The entities exist in the API reference [source: SRC-16]; fields and scopes **unverified**, confirm in T-1.1.1. There is no item-receipt entity, so item receipts come by export (MH-03) |
+| Intuit App Partner Program: Builder tier (no fee, 500,000 CorePlus calls a month, blocked above); an approved app assessment questionnaire before production; security, technical and marketing reviews only for a marketplace listing | Production QuickBooks access | [source: SRC-17]; cost sensitivity in Decision.md section 7.3 |
 | The account's QuickBooks plan is Plus or Advanced | Purchase orders exist [source: SRC-06] | Qualification question |
 | Independent receiving data from the account | MH-03, MH-07 | The pilot question itself |
 | A document-extraction model reachable by API | MH-05 | Provider chosen in T-1.1.3 |
@@ -317,14 +321,16 @@ Second in cost: waiving a real exception. Waivers need a reason, are capped by t
 
 ## 13. Success metrics
 
-Baselines are unknown until pilots run. Targets are proposals **[assumption]**.
+Baselines are unknown until pilots run. Targets are proposals **[assumption]**. M-3a, M-3b and M-3c (C1, 2026-11-11) are three separate counts, each with its own dollar total; they are never added together or reported under one another's name, and only M-3a decides the refund and stop-rule clause 5. All three are measured against the governing report's flagged set, because a credit note received later nets the exception away when matching re-runs (calculation `reporting.measure_findings`, test UT-33). The 60- and 90-day windows are author proposals.
 
 | # | Kind | Metric | Method | Denominator | Window | Source | Baseline | Target |
 |---|---|---|---|---|---|---|---|---|
 | M-1a | Commercial | Paid back-tests, rule in force | Count of funnel-log rows with payment received | — | Day 1 to day 30 [chat] | Funnel log | 0 | 2 or more [chat] |
 | M-1b | Commercial | Paid back-tests, proposed rule | Same count, cold outreach only | — | Cohort day 1 to day 60 | Funnel log | 0 | 2 or more; false-stop risk about 40% (Decision.md section 9) |
 | M-2 | Commercial | Distributors with independent receiving evidence | In the Phase 0 census, the founder picks 20 purchase-order lines from last month and counts those for which the distributor can show class A or class B evidence; a distributor passes at 10 or more | Qualified distributors visited | First 8 visits | Census sheet (T-0.1.2) | Unknown | 5 of 8 |
-| M-3 | Commercial | Qualifying discrepancies per account-month | Qualifying-discrepancy total (Decision.md section 5.1) in the governing report, including "not received" | Per account | Back-test month | Approved report | Unknown | CAD 500 or more in at least 1 of the first 3 |
+| M-3 (M-3a) | Commercial | Flagged discrepancies per account-month | Count and qualifying-discrepancy total (Decision.md section 5.1) in the governing report, including "not received" | Per account | Back-test month | Approved report | Unknown | CAD 500 or more in at least 1 of the first 3 |
+| M-3b | Commercial | Controller-confirmed overcharges | Count and amount of flagged discrepancies the controller confirms are real overcharges, against the governing report | Per account | Back-test month, recorded up to 60 days after approval | Pilot record | Unknown | Recorded; no target until pilots run |
+| M-3c | Commercial | Actual credit recovered | Count and amount of supplier credits or refunds received against confirmed overcharges | Per account | Up to 90 days after report approval | Pilot record, with the credit document | Unknown | Recorded; no target until pilots run |
 | M-4 | Commercial | Back-test to subscription conversion | Subscriptions started | Paid back-tests completed | 30 days after report approval | Pilot records | Unknown | 50% |
 | M-5 | Workflow quality | Automatic pass rate | Item lines passing with no human action after aliases are confirmed | Purchase-order-backed item lines (charge lines excluded) | Back-test month | Match results | Unknown | 70% (the research record's week-3 gate) |
 | M-6 | Workflow quality | Extraction field accuracy | Fields equal to human-verified values | Fields in the evaluation fixture set | Each model or prompt change | Evaluation run | Unknown | 98% on quantity, unit price, amount |

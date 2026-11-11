@@ -35,7 +35,7 @@ If two files disagree, the authoritative file wins and the other is corrected in
 - The product reads from QuickBooks Online and never writes to it in this version.
 - Match decisions and every money calculation are deterministic code. A model reads documents into a fixed schema and nothing else.
 - A line with no independent receiving evidence is an exception of type `receipt_absent`. No setting, tolerance, bulk action or refactoring may let it be stored or shown as matched. It may be a finding ("not received") and is never left out of the refund calculation without being shown.
-- Independent receiving evidence means class A (warehouse record) or class B (receiver-attested delivery document), as defined in `Decision.md` section 3. The QuickBooks "billed against PO" quantity and a supplier's unmarked packing slip are context only and never a receipt.
+- Independent receiving evidence means class A (warehouse record, including a QuickBooks Online item receipt entered by the receiver before the bill, imported from an export) or class B (receiver-attested delivery document), as defined in `Decision.md` section 3. The QuickBooks "billed against PO" quantity, an item receipt entered by accounts-payable staff or after the bill, and a supplier's unmarked packing slip are context only and never a receipt. The QuickBooks Online API has no item-receipt entity; never add an API read for one.
 - Matching uses open-PO history: earlier invoices, bills, credits and receipts on any purchase order a test document names, with no date filter. Document order is date, normalised number, file hash; never upload time.
 - The failure ranking is in `Decision.md` section 1; do not restate a different "highest risk" elsewhere.
 - Scope is the must-haves in `PRD.md`. Items in PRD section 9 are out until the stated evidence exists. Do not add features, endpoints, tables or screens without a requirement ID (R-21).
@@ -82,6 +82,8 @@ Utilities index (B1, B2). Search here before adding a helper:
 | Extraction interface, fake, arithmetic gates | `extraction.Extractor`, `FakeExtractor`, `verification_gates` | `extraction/provider.py` |
 | QuickBooks read interface and fake (no write method) | `qbo.QboReader`, `qbo.FakeQboReader` | `qbo/client.py` |
 | Refund calculation over exceptions | `reporting.calculate_refund` | `reporting/refund.py` |
+| Pilot measurement in three separate counts: flagged discrepancy, controller-confirmed overcharge, credit recovered (C1) | `reporting.measure_findings`, `FindingOutcome` | `reporting/outcomes.py` |
+| Whether a QuickBooks Online item-receipt export row counts as class A (receiver, before the bill, not accounts-payable staff) (C1) | `receiving.item_receipt_rejection`, `QboItemReceiptRow`, `QBO_ITEM_RECEIPT_SOURCE` | `receiving/qbo_item_receipts.py` |
 | Sign-in links, session lookup and end, anti-forgery token, tenant switch, `/me` | `identity.request_login_link`, `exchange_login_token`, `load_session`, `resolve_session`, `issue_session` (fixtures), `end_session`, `csrf_for`, `csrf_matches`, `switch_tenant`, `describe_me` | `identity/auth.py` |
 | Invitations, users and memberships (last-controller guard is a trigger) | `identity.create_invitation`, `list_invitations`, `revoke_invitation`, `accept_invitation`, `list_users`, `update_membership` | `identity/auth.py` |
 | Operator TOTP (RFC 6238) and AES-256-GCM sealing with key id | `identity.enroll_operator`, `identity.totp.verify`, `identity.secrets_box.seal` / `unseal` | `identity/totp.py`, `identity/secrets_box.py` |
@@ -155,7 +157,7 @@ See `execution-plan.md` section 6 for purpose, inputs, outputs and failure behav
 | Command (proposed) | Purpose |
 |---|---|
 | `make up` / `make down` | Start or stop the local stack with health checks. **Exists**: starts API (port 8101) and worker directly, migrates `matchdesk_dev`, waits for `/readyz` (database, migrations, file store); needs `backend/.env` (copy `backend/.env.example`; session and token keys, MinIO settings); Mailpit (127.0.0.1:1025, UI 8025) and MinIO (127.0.0.1:9000) must be running; Compose is still proposed |
-| `make test` | Unit and integration suites. **Exists**: drops and re-migrates `matchdesk_test`, runs as `matchdesk_app`; the B2 tests use Mailpit and MinIO (they skip, and say so, when either is not running) |
+| `make test` | Unit and integration suites. **Exists**: drops and re-migrates `matchdesk_test` (migrations 0001 to 0008), runs as `matchdesk_app`; the B2 tests use Mailpit and MinIO (they skip, and say so, when either is not running) |
 | `make check` | **Exists** (added in B1): ruff, format check, mypy, import contracts, top-level import rule (`backend/scripts/check_imports.py`), float lint over the whole package (`backend/scripts/check_no_float.py`) |
 | `scripts/check_migrations` | Single head, ORM parity, manifest, lock rules. Proposed; head and parity are covered by `backend/tests/integration/test_migrations.py` |
 | `scripts/load_fixtures` | Two synthetic tenants and golden fixtures |

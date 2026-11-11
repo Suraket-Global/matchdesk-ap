@@ -22,6 +22,9 @@ from sqlalchemy.orm import Mapped, mapped_column
 from matchdesk.tenancy import QTY, UUIDT, Base, TenantMixin, enum_check, tenant_args, tfk
 
 IMPORT_STATES = ("draft", "queued", "running", "succeeded", "failed", "voided")
+# qbo_item_receipt_export: a QuickBooks Online item-receipt report or CSV export (no API entity
+# exists); always class A, each row tested by receiving.item_receipt_rejection (C1, migration 0008).
+SOURCE_TYPES = ("spreadsheet", "delivery_document", "qbo_item_receipt_export")
 
 
 class ReceivingImportRow(TenantMixin, Base):
@@ -29,7 +32,11 @@ class ReceivingImportRow(TenantMixin, Base):
     __table_args__ = tenant_args(
         tfk("document_id", "documents"),
         CheckConstraint(enum_check("evidence_class", ("A", "B", "C")), name="evidence_class"),
-        CheckConstraint(enum_check("source_type", ("spreadsheet", "delivery_document")), name="source_type"),
+        CheckConstraint(enum_check("source_type", SOURCE_TYPES), name="source_type"),
+        CheckConstraint(
+            "source_type <> 'qbo_item_receipt_export' or evidence_class = 'A'",
+            name="qbo_item_receipt_class_a",
+        ),
         CheckConstraint(enum_check("state", IMPORT_STATES), name="state"),
         CheckConstraint(
             "not declared_complete or (coverage_start is not null and coverage_end is not null)",

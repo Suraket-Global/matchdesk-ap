@@ -145,10 +145,12 @@ One word per thing, used in navigation, headings, buttons and emails.
 |---|---|
 | Invoice, credit note | Bill (reserved for the QuickBooks record: "QuickBooks bill") |
 | Purchase order, PO | Order |
-| Receiving record, receipt line | Item receipt (a QuickBooks Desktop term) |
+| Receiving record, receipt line; "QuickBooks item receipt" only for that QuickBooks Online transaction when imported from its export (C1: QuickBooks Online has item receipts, not only Desktop) | "Item receipt" for MatchDesk's own receipt lines |
 | Receipt absent | Missing, unmatched, no GRN |
 | Exception | Error, issue, mismatch (except in sales copy) |
-| Finding (a discrepancy the rules raised and no evidence removed; "confirmed" is a separate column) | Savings, recovery |
+| Finding, flagged discrepancy (a discrepancy the rules raised and no evidence removed; "confirmed" is a separate column) | Savings, recovery, overcharge |
+| Confirmed overcharge (a flagged discrepancy the controller confirmed) | Finding, savings |
+| Credit recovered (a supplier credit or refund actually received against a confirmed overcharge) | Savings (for a flagged or confirmed amount) |
 | Not received (the log covers the order and shows nothing) | Missing, lost |
 | Receiving evidence: warehouse record, signed delivery document | Proof of delivery (for a supplier's unmarked slip) |
 | Unverified | Unmatched, unknown |

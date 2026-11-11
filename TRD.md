@@ -115,7 +115,7 @@ One deployable codebase, two processes (web API and worker), one PostgreSQL data
 |---|---|---|
 | VPS, domain | Fixed, already owned | Inside the CAD 900 fixed cost [assumption] |
 | Offsite backup bucket, email service, error tracking, uptime check | Fixed | Not priced; must fit inside CAD 900 [assumption]. Missing input |
-| QuickBooks developer programme | Fixed | **Unverified.** Sensitivity of + CAD 414 per month in [Decision.md section 7.3](Decision.md#73-payback-lifetime-value-break-even-base-case) |
+| QuickBooks developer programme (Intuit App Partner Program) | Fixed | CAD 0 on the Builder tier, which caps CorePlus (metered) calls at 500,000 a month and blocks calls above it [source: SRC-17]. Silver in Canada is $425 a month (currency not printed) with 1,000,000 CorePlus calls; needed only above the cap or for a marketplace listing. Sensitivity: + CAD 425 or + CAD 586.50 per month in [Decision.md section 7.3](Decision.md#73-payback-lifetime-value-break-even-base-case). Production needs an approved app assessment questionnaire; a listing needs security, technical and marketing reviews (T-7.1.1) |
 | Extraction | Variable | CAD 0.03 per document, CAD 18 per account-month at 600 documents [assumption]; measured in T-1.1.3 |
 | Hosting, storage, messaging share | Variable | CAD 8, 2 and 2 per account-month [assumption] |
 
@@ -433,7 +433,9 @@ Evaluated by `matching.evaluate()`. Defaults are proposals **[assumption]**.
 
 A QuickBooks bill line is replaced by an uploaded invoice only when that invoice's line on the same PO line was resolved and counted; if the uploaded line stopped at check 4 or 5, the bill line counts instead. An earlier invoice on an in-scope PO with an item line that did not resolve, and no QuickBooks bill line standing in for it, makes every later line on that PO `history_incomplete` (B1-002). Whether QuickBooks exposes bill lines linked to purchase-order lines is unverified until T-1.1.1. If it does not, earlier invoices must be uploaded, and check 6 below catches the gap.
 
-**Counting receipt lines.** A receipt line counts when all hold: its import has evidence class A (warehouse record) or B (receiver-attested delivery document, with receiver marks recorded for that document); the import is committed and not voided; and, if the line was added after an exception was raised on its purchase-order line, the controller has approved it. Class C (supplier document only) and QuickBooks quantities never count. Negative lines are returns and reduce the cumulative received quantity.
+**Counting receipt lines.** A receipt line counts when all hold: its import has evidence class A (warehouse record, including a QuickBooks Online item-receipt export, below) or B (receiver-attested delivery document, with receiver marks recorded for that document); the import is committed and not voided; and, if the line was added after an exception was raised on its purchase-order line, the controller has approved it. Class C (supplier document only) and QuickBooks quantities never count. Negative lines are returns and reduce the cumulative received quantity.
+
+**QuickBooks Online item receipts (C1, 2026-11-11).** QuickBooks Online can record an item receipt against a purchase order before the bill [source: SRC-15], but the Accounting API has no item-receipt entity [source: SRC-16]; the QuickBooks reader (`qbo`) therefore never returns receipts. An account that uses item receipts uploads a report or CSV export as a receiving import with source type `qbo_item_receipt_export`, always class A (database check). At import, `receiving.item_receipt_rejection` tests each row: the row becomes a receipt line only if the export gives its creator and creation time, the creator is not one of the accounts-payable users the controller attested, the creator did not enter the linked bill, and it was created before that bill. Failing rows are rejected rows with the reason. Which QuickBooks report carries creator and creation time is unverified until T-1.1.1 (tests UT-32, IT-30).
 
 **Receiving coverage.** A purchase-order line is *covered* for an invoice when class A imports declared complete, taken together, span every day from the purchase-order date to 14 days after the invoice date.
 
@@ -512,7 +514,7 @@ Document downloads (`/documents/{id}/content`) add `Content-Security-Policy: san
 | AD-02 | PostgreSQL row-level security as the tenant boundary | Proposed | Every query path needs tenant context; tests must run as the application role |
 | AD-03 | Job queue in PostgreSQL | Proposed | Throughput limited by the database; adequate at pilot size |
 | AD-04 | Files on a local volume, served through the API | Proposed | Backups must include the volume; migration to object storage is a later change behind `blobstore` |
-| AD-05 | QuickBooks "received" quantity never counts as a receipt; neither does a supplier's unmarked packing slip. Only class A and class B evidence counts | Proposed. A design decision that holds whatever T-1.1.1 finds | Accounts without warehouse records get coverage 0% and exceptions only |
+| AD-05 | QuickBooks "received" quantity never counts as a receipt; neither does a supplier's unmarked packing slip. Only class A and class B evidence counts. A QuickBooks Online item receipt is class A only when the receiver entered it before the bill and is not accounts-payable staff; it arrives by export, since the API has no item-receipt entity (C1, section 8.5) | Proposed. A design decision that holds whatever T-1.1.1 finds | Accounts without warehouse records get coverage 0% and exceptions only |
 | AD-06 | AI used for extraction only; deterministic verification gates its output | Proposed | Some documents always need a person; that share is a metric (M-10) |
 | AD-07 | Read-only QuickBooks in this version | Proposed | No write path to secure or reverse; bill posting deferred |
 | AD-08 | Alias suggestions by exact code, then trigram similarity; no embeddings | Proposed | Lower suggestion quality on free-text descriptions; measured in pilots |
@@ -550,7 +552,7 @@ The 22 production risks, with tests and owning tasks, are in [verification-repor
 | Risk | Effect | Handling |
 |---|---|---|
 | QuickBooks API does not expose PO line billed quantity or bill lines linked to PO lines as assumed | Open-PO history cannot be taken from QuickBooks; the account must upload earlier invoices and check 6 loses its cross-check. No effect on the receipt rule (AD-05) | T-1.1.1 |
-| QuickBooks API call limits or programme fees are higher than assumed | Sync slower or fixed cost higher | T-1.1.1; sensitivity in Decision.md |
+| QuickBooks API call limits or programme fees are higher than assumed | Builder's 500,000 CorePlus calls a month are blocked above the cap, so a sync could stop mid-month; Silver adds $425 a month in Canada [source: SRC-17] | T-1.1.1 measures CorePlus calls per account; sensitivity in Decision.md section 7.3 |
 | Supplier item codes rarely equal internal items [assumption] | Alias work dominates the first weeks | MH-10; support cost assumption; measured in T-0.1.3 |
 | Extraction quality on scanned packing slips | Receipt import by scan unusable | Spreadsheet import is the primary path; scans need human confirmation of every line |
 | Single VPS | One failure stops everything | Backups, restore drill, stated pilot hours |
