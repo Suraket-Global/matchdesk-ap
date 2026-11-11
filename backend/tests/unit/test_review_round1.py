@@ -117,7 +117,7 @@ def test_b1_003_possible_duplicate_credit_is_not_netted_until_decided():
 
 
 @pytest.mark.parametrize("qtol", ["0", "10"])
-def test_b1_004_net_zero_receipts_are_receipt_absent_under_any_tolerance(qtol):
+def test_b1_004_net_zero_receipts_never_pass_and_keep_the_finding(qtol):
     res = evaluate(
         build(
             docs=(invoice("i1", "INV-1", OCT, "10"),),
@@ -127,7 +127,37 @@ def test_b1_004_net_zero_receipts_are_receipt_absent_under_any_tolerance(qtol):
         )
     )
     assert res.line("i1-l1").status == LineStatus.EXCEPTION
-    assert "receipt_absent" in types(res)
+    # B1-012: received and fully returned is evidence, not its absence: a qualifying finding.
+    [over] = [e for e in res.exceptions if e.type == T.QTY_OVER_RECEIVED]
+    assert over.sub_reason is not None and over.sub_reason.value == "returned_no_credit"
+    assert (over.variance_amount, over.reported_amount, over.qualifying) == (D("42.00"), D("42.00"), True)
+    assert "receipt_absent" not in types(res)
+    assert calculate_refund(res.exceptions).qualifying_total == D("42.00")
+
+
+@pytest.mark.parametrize("covered", [False, True])
+def test_b1_012_full_return_is_a_qualifying_finding_covered_or_not(covered):
+    imp = class_a(start=date(2026, 8, 1), end=date(2026, 12, 31), complete=True) if covered else class_a()
+    res = evaluate(
+        build(
+            docs=(invoice("i1", "INV-1", OCT, "10"),),
+            imports=(imp,),
+            receipts=(receipt("r1", "10", OCT), receipt("r2", "-10", date(2026, 10, 12))),
+        )
+    )
+    assert res.line("i1-l1").status == LineStatus.EXCEPTION
+    assert calculate_refund(res.exceptions).qualifying_total == D("42.00")
+    # A credit note for the returned quantity removes the finding, but the line still never passes.
+    cn = credit_note("cn", "CN-1", date(2026, 10, 14), qty="10", amount="42.00", references="INV-1")
+    credited = evaluate(
+        build(
+            docs=(invoice("i1", "INV-1", OCT, "10"), cn),
+            imports=(imp,),
+            receipts=(receipt("r1", "10", OCT), receipt("r2", "-10", date(2026, 10, 12))),
+        )
+    )
+    assert calculate_refund(credited.exceptions).qualifying_total == D("0.00")
+    assert credited.line("i1-l1").status != LineStatus.MATCHED
 
 
 def test_b1_005_freight_is_cumulative_against_the_po_amount():

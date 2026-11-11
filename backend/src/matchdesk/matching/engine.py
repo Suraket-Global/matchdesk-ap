@@ -856,9 +856,8 @@ def _evaluate_resolved(
     checks.append("7")
     inv_date = doc.doc_date or r.po.txn_date
     covered = is_covered(imports, r.po.txn_date, inv_date + timedelta(days=COVERAGE_DAYS_AFTER_INVOICE))
-    if counting_count == 0 or received <= 0:
-        # No counting receipt, or receipts that net to nothing kept: receipt_absent whatever the
-        # tolerance (B1-004).
+    if counting_count == 0:
+        # No counting receipt line: receipt_absent, whatever the tolerance.
         if line.id in inp.confirmed_not_received:
             _line_exception(
                 st,
@@ -895,12 +894,16 @@ def _evaluate_resolved(
             )
     else:
         # Check 8: cumulative invoiced (net of credits) <= cumulative received + tolerance.
+        # When the counting lines net to zero or less (delivered and returned), there is positive
+        # evidence that nothing was kept: no tolerance applies, the line can never pass, and the
+        # excess is a qualifying "returned, credit not yet received" finding (B1-004, B1-012).
         checks.append("8")
+        limit = received + dec(tol.qty_tolerance) if received > 0 else received
         _qty_check(
             st,
             r,
             ExceptionType.QTY_OVER_RECEIVED,
-            received + dec(tol.qty_tolerance),
+            limit,
             gross,
             net,
             applicable_credits,
