@@ -65,13 +65,13 @@ Utilities index (B1). Search here before adding a helper:
 | Clock | `core.SystemClock`, `core.FixedClock` | `core/clock.py` |
 | Errors (404-equivalent, 403, 409, missing tenant) | `core.NotFoundError`, `ForbiddenError`, `ConflictError`, `TenantContextError` | `core/errors.py` |
 | Tenant transaction; no-tenant transaction; operator transaction | `tenancy.session(tenant_id)`, `tenancy.global_session()`, `tenancy.operator_session()` | `tenancy/db.py` |
-| Tenant-owned table boilerplate; composite tenant foreign key; column types | `TenantMixin`, `tenant_args()`, `tfk()`; `MONEY`, `PRICE`, `QTY` | `tenancy/db.py`, `tenancy/types.py` |
+| Tenant-owned table boilerplate; composite tenant foreign key; column types | `tenancy.TenantMixin`, `tenant_args()`, `tfk()`; `MONEY`, `PRICE`, `QTY`, `enum_check` (exported from `tenancy`) | `tenancy/db.py`, `tenancy/types.py` |
 | Compare-and-set state transition (the shared transition helper) | `tenancy.transition()` | `tenancy/transitions.py` |
 | Enqueue in the business transaction; claim with lease; job wrapper that refuses no tenant | `tenancy.enqueue`, `tenancy.claim`, `tenancy.run_claimed` | `tenancy/jobs.py` |
 | File keys and tenant-checked file access | `blobstore.build_key`, `blobstore.put`, `blobstore.get` | `blobstore/__init__.py` |
 | Document and supplier-code normalisation; deterministic document order | `matching.normalise_number`, `normalise_code`, `normalise_uom`, `document_order_key` | `matching/normalise.py` |
-| Rule set v1; counting-receipt rule; coverage rule; input fingerprint | `matching.evaluate`, `receipt_line_counts`, `is_covered`, `input_fingerprint` | `matching/engine.py`, `matching/fingerprint.py` |
-| Build match inputs from the database (no date filter); request and execute a match run; store results with supersede | `exceptions.build_match_input`, `request_run`, `execute_run`, `store_result` | `exceptions/inputs.py`, `runs.py`, `store.py` |
+| Rule set v1; counting-receipt rule; coverage rule; whether an alias converts; input fingerprint; float refusal | `matching.evaluate`, `receipt_line_counts`, `is_covered`, `alias_converts` (in `engine.py`), `input_fingerprint`, `assert_no_floats` (in `fingerprint.py`) | `matching/engine.py`, `matching/fingerprint.py` |
+| Build match inputs from the database (no date filter); request and execute a match run (reuse only while current; per-tenant lock); store results with supersede | `exceptions.build_match_input`, `request_run`, `execute_run`, `store_result` | `exceptions/inputs.py`, `runs.py`, `store.py` |
 | Who may resolve which exception with which code | `exceptions.check_resolution_allowed` | `exceptions/permissions.py` |
 | Audit event inside the business transaction | `audit.write_audit` | `audit/__init__.py` |
 | Batch, file intake, lease, completion, batch summary, retry failed | `intake.add_file`, `take`, `complete`, `batch_summary`, `retry_failed` | `intake/service.py` |
@@ -150,7 +150,7 @@ See `execution-plan.md` section 6 for purpose, inputs, outputs and failure behav
 |---|---|
 | `make up` / `make down` | Start or stop the local stack with health checks. **Exists**: starts API (port 8101) and worker directly, migrates `matchdesk_dev`, waits for `/readyz`; Compose is still proposed |
 | `make test` | Unit and integration suites. **Exists**: drops and re-migrates `matchdesk_test`, runs as `matchdesk_app` |
-| `make check` | **Exists** (added in B1): ruff, format check, mypy, import contracts, float lint |
+| `make check` | **Exists** (added in B1): ruff, format check, mypy, import contracts, top-level import rule (`backend/scripts/check_imports.py`), float lint over the whole package (`backend/scripts/check_no_float.py`) |
 | `scripts/check_migrations` | Single head, ORM parity, manifest, lock rules. Proposed; head and parity are covered by `backend/tests/integration/test_migrations.py` |
 | `scripts/load_fixtures` | Two synthetic tenants and golden fixtures |
 | `scripts/eval_extraction` | Score an extraction provider on the fixture set |

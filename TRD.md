@@ -166,7 +166,7 @@ flowchart TB
 | `audit` | Append-only audit events | kernel |
 | `api`, `worker` | Wiring only | Any domain module through its public interface |
 
-Rules, enforced by an import-linter contract in CI (T-2.1.1; R-04): domain modules never import `api` or `worker`; `worker` never imports `api`; a module imports another only through names exported from that module's top level; `web` talks to the backend only over HTTP.
+Rules, enforced by import-linter contracts (T-2.1.1; R-04): domain modules never import `api` or `worker`; `worker` never imports `api`; `exceptions` imports no `identity`, `blobstore` or `reporting`. A module imports another only through names exported from that module's top level, except an ORM read model (`<module>.models`) for the importer and target pairs listed in `backend/scripts/check_imports.py` (`exceptions` reads `qbo`, `receiving`, `intake`; `intake` reads `extraction`, `tenancy`; `api` reads `exceptions`, `intake`, `tenancy`); that rule is enforced by `check_imports.py` in `make check`, since import-linter cannot express it (B1-009). `web` talks to the backend only over HTTP.
 
 ## 6. Runtime view
 
@@ -254,7 +254,7 @@ stateDiagram-v2
 - **Late valid completion.** If the first worker returns after its lease expired, it writes its result only if the row is still `running` for the same input hash; otherwise it discards the result. Either way exactly one result is stored and the row leaves `running`. A row stuck in `running` past twice its lease is swept back to `queued` by a reconciliation job every 5 minutes, which also raises an alert if the count is above zero for 30 minutes.
 - **Browser timeouts.** Every mutating request from the web app carries an `Idempotency-Key`. If the browser times out and retries, the server returns the stored result of the first attempt. The batch page always rebuilds from server state, so a response the browser never saw still shows up.
 - **Retries.** Transient errors (network, HTTP 429, 5xx) retry with exponential backoff and jitter: 30 s, 2 min, 10 min; then `failed` with the reason shown to the user. Permanent errors (unreadable file, password-protected PDF) fail at once.
-- **Idempotent effects.** QuickBooks records are upserted on (tenant, QuickBooks id). Receipt lines are unique on (import, row number) and imports are unique on file hash. Documents are unique on (tenant, file hash). Match runs are unique on input fingerprint.
+- **Idempotent effects.** QuickBooks records are upserted on (tenant, QuickBooks id). Receipt lines are unique on (import, row number) and imports are unique on file hash. Documents are unique on (tenant, file hash). A pending match run is unique on input fingerprint. A finished run is reused only while its inputs are identical and it is still the current result for every line in its scope; otherwise a new run is created, so a return to an earlier input state (a receipt removed, a credit voided) re-evaluates and supersedes the newer result (B1-001). Match runs of one tenant execute one at a time under an advisory lock and read their inputs after taking it (B1-011).
 
 ### 6.4 Timeouts
 
@@ -419,7 +419,7 @@ Evaluated by `matching.evaluate()`. Defaults are proposals **[assumption]**.
 - every QuickBooks bill line and vendor-credit line linked to that purchase-order line for which no uploaded document exists (matched by vendor and normalised number), so that an invoice billed before the test month still counts as invoiced;
 - QuickBooks' "billed against PO" quantity, as a cross-check on the invoiced side only.
 
-Whether QuickBooks exposes bill lines linked to purchase-order lines is unverified until T-1.1.1. If it does not, earlier invoices must be uploaded, and check 6 below catches the gap.
+A QuickBooks bill line is replaced by an uploaded invoice only when that invoice's line on the same PO line was resolved and counted; if the uploaded line stopped at check 4 or 5, the bill line counts instead. An earlier invoice on an in-scope PO with an item line that did not resolve, and no QuickBooks bill line standing in for it, makes every later line on that PO `history_incomplete` (B1-002). Whether QuickBooks exposes bill lines linked to purchase-order lines is unverified until T-1.1.1. If it does not, earlier invoices must be uploaded, and check 6 below catches the gap.
 
 **Counting receipt lines.** A receipt line counts when all hold: its import has evidence class A (warehouse record) or B (receiver-attested delivery document, with receiver marks recorded for that document); the import is committed and not voided; and, if the line was added after an exception was raised on its purchase-order line, the controller has approved it. Class C (supplier document only) and QuickBooks quantities never count. Negative lines are returns and reduce the cumulative received quantity.
 
@@ -431,13 +431,13 @@ Whether QuickBooks exposes bill lines linked to purchase-order lines is unverifi
 
 | # | Check | Exception type on failure | Value and class |
 |---|---|---|---|
-| 1 | Document passed extraction verification or was human-confirmed | `extraction_unverified` (stops) | None |
-| 2 | Document is not a duplicate under MH-08 | `duplicate` on the later document (stops: its lines are `not_evaluated` and excluded from every cumulative quantity). `possible_duplicate` does not stop | `duplicate`: document total, finding. `possible_duplicate`: document total, open until decided |
+| 1 | Document passed extraction verification or was human-confirmed, and its vendor is identified (a document with no identified vendor stops here, so a test document is never silently left out; B1-006) | `extraction_unverified` (stops) | None |
+| 2 | Document is not a duplicate under MH-08 | `duplicate` on the later document (stops: its lines are `not_evaluated` and excluded from every cumulative quantity). `possible_duplicate` does not stop | `duplicate`: document total, finding. `possible_duplicate`: document total, open until decided. A duplicate or possible duplicate **credit note** is value class none and is not netted; a possible duplicate credit nets only after a person clears it, so one credit is never netted twice or reported as a finding (B1-003) |
 | 3 | Document names a purchase order found for this vendor, searched by reference without a date limit | `no_po` (stops) | Line amount, unverified |
 | 4 | Supplier item resolves to one PO line through an active, approved alias | `alias_unconfirmed` (stops), or `po_line_not_found` if the alias points to an item absent from the PO (stops) | Line amount, unverified |
-| 5 | Units convert through the alias | `uom_unresolved` (stops) | Line amount, unverified |
+| 5 | Units convert through the alias. An invoice line with no unit is taken in PO units only when the alias does not convert; an alias converts when its factor is not 1 or its supplier and item units differ, and a converting alias needs approval (B1-008) | `uom_unresolved` (stops) | Line amount, unverified |
 | 6 | QuickBooks' billed quantity for the PO line does not exceed the invoiced quantity known from documents and bill lines | `history_incomplete` (does not stop; blocks `matched`) | Line amount, unverified |
-| 7 | At least one counting receipt line exists for the PO line. No setting disables this check | `receipt_absent` (does not stop; blocks `matched`; check 8 skipped). Sub-reason `not_received` if the line is covered, `supplier_slip_only` if only class C exists, otherwise `no_evidence` | Line amount. `not_received`: finding candidate. Others: unverified, unless the controller confirms non-delivery |
+| 7 | At least one counting receipt line exists for the PO line and the counting lines net to more than zero (a delivery fully returned is `receipt_absent`, whatever the tolerance; B1-004). No setting disables this check | `receipt_absent` (does not stop; blocks `matched`; check 8 skipped). Sub-reason `not_received` if the line is covered, `supplier_slip_only` if only class C exists, otherwise `no_evidence` | Line amount. `not_received`: finding candidate. Others: unverified, unless the controller confirms non-delivery |
 | 8 | Cumulative invoiced quantity (documents and bill lines up to and including this document, net of credits, in PO units) ≤ cumulative received quantity + quantity tolerance | `qty_over_received`, on the later document | Excess quantity × invoice unit price, finding candidate |
 | 9 | Cumulative invoiced quantity ≤ ordered quantity + quantity tolerance | `qty_over_ordered` | Excess quantity × invoice unit price, finding candidate. Where 8 and 9 both fail on one line, one amount is reported: the larger; on equal amounts, the `qty_over_received` exception carries it and `qty_over_ordered` reports 0.00 |
 | 10 | Absolute price difference ≤ max(absolute tolerance, percentage tolerance × PO price) | `price_variance` | (Invoice price − PO price) × invoice quantity, less any price credit, finding candidate. Negative differences are recorded as favourable and raise nothing |
@@ -449,7 +449,7 @@ Whether QuickBooks exposes bill lines linked to purchase-order lines is unverifi
 
 Example: no receiving evidence, PO price 4.20, invoice 60 at 4.35, line amount 261.00. Exceptions: `receipt_absent` (`no_evidence`) and `price_variance` 0.15 × 60 = 9.00. Reported: finding 9.00, unverified 261.00 − 9.00 = 252.00; together 261.00. If the line were `not_received` instead, the finding would be the line amount 261.00 and the price variance would report 0.00 beside it, still listed. Report totals, the refund criterion and metric M-3 use `reported_amount`.
 
-**Charge lines** (freight, fees, discounts) have no alias and no receipt. Check C1: the charge appears on the PO or is within the vendor's charge allowance. Pass is stored as `charge_ok`; failure raises `unmatched_charge` for the charge amount, finding candidate. Charge lines are outside the automatic-pass metric M-5.
+**Charge lines** (freight, fees, discounts) have no alias and no receipt. Check C1: the charge appears on the PO or is within the vendor's charge allowance. Pass is stored as `charge_ok`; failure raises `unmatched_charge` for the charge amount, finding candidate. Charge lines are outside the automatic-pass metric M-5. C1 is cumulative (B1-005): the charges of one kind on a PO's invoices, in document order, may total at most the PO's charge lines of that kind plus the vendor's charge allowance, applied once per PO; the excess on each line is its `unmatched_charge` amount. Discounts always pass.
 
 **Credit notes and vendor credits** are linked, not matched; checks 6 to 10 are not run on their lines.
 

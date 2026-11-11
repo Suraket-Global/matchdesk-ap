@@ -259,11 +259,11 @@ All commands run from the repository root on 2026-11-11, Python 3.12.16, Postgre
 
 | Command | Result |
 |---|---|
-| `make check` (ruff check, ruff format --check, mypy strict, lint-imports, float lint) | Pass: ruff no findings; 70 files formatted; mypy no issues in 48 source files; 4 contracts kept, 0 broken; float lint clean |
-| `cd backend && .venv/bin/pytest -q tests/unit` | 45 passed, 0 failed |
-| `cd backend && .venv/bin/pytest -q tests/integration` | 46 passed, 0 failed (23 of them are one parametrised zero-rows test per tenant-owned table) |
-| `make test` (both suites, clean test database) | 91 passed, 0 failed |
-| `make up`, then `curl localhost:8101/readyz`, then `make down` | Ready in 3 s; `{"status":"ready"}`; services stopped |
+| `make check` (ruff check, ruff format --check, mypy strict, lint-imports, top-level import check, float lint over the whole package) | Pass after review round 1: ruff no findings; 74 files formatted; mypy no issues in 48 source files; 5 contracts kept, 0 broken; `check_imports.py` and float lint clean |
+| `cd backend && .venv/bin/pytest -q tests/unit` | 58 passed, 0 failed (45 before review round 1) |
+| `cd backend && .venv/bin/pytest -q tests/integration` | 53 passed, 0 failed (46 before review round 1; 23 are one parametrised zero-rows test per tenant-owned table) |
+| `make test` (both suites, clean test database) | 111 passed, 0 failed (91 before review round 1) |
+| `make up`, then `curl localhost:8101/readyz`, then `make down` | Ready in 3 s (2 s after review round 1, migrating to 0003); `{"status":"ready"}`; services stopped |
 | `MATCHDESK_MIGRATION_DATABASE_URL=...localhost:5999... make up` | Exit 2 with "database not reachable (is PostgreSQL running? ...)" |
 
 ### 9.3 Test IDs that ran
@@ -307,3 +307,26 @@ Further B1 tests without a catalogue ID: forced RLS and exactly one policy on ev
 | State lines that said no code exists | AGENTS.md, CLAUDE.md |
 
 A defect found and fixed during B1: two check constraints on `exceptions` passed when `sub_reason` or `resolution_code` was null, because a null comparison makes a `CHECK` true. Both now use `coalesce`; IT-24 caught it.
+
+### 9.5 Review round 1 fixes (2026-11-11)
+
+Source: independent code review `_coordination/review/matchdesk-ap-b1-round1.md` (1 blocker, 5 major, 5 minor). The reviewer's scripts `matchdesk-ap-b1-core_adversarial.py`, `-db_adversarial.py`, `-db_aba_pass.py` and `-db_aba_receipt.py` were run from `backend` with `.venv/bin/python -I` before the fixes (AC-02, AC-03, AC-08 with tolerance 10, AC-09, AC-10, DB-01, DB-01b, DB-01c, DB-02 broken) and after them (every case holds; AC-05 now gives `alias_unconfirmed` and `uom_unresolved`). Each defect has a permanent regression test in `backend/tests/unit/test_review_round1.py` or `backend/tests/integration/test_review_round1_db.py`. These fixes are recorded by the author and have not been re-reviewed.
+
+| Finding | Fix | Regression test |
+|---|---|---|
+| B1-001 (blocker) | A finished run is reused only if its inputs are identical **and** it is still the current result for every line in its scope; pending runs stay idempotent. Migration 0003 replaces the unique fingerprint constraint with a partial unique index on pending runs. A return to an earlier input state now creates a new run that supersedes the newer result | `test_b1_001_receipts_removed_after_a_match_re_evaluate`, `test_b1_001_voided_vendor_credit_re_evaluates` (the stored result equals `evaluate()` on current inputs) |
+| B1-002 | A QuickBooks bill line is skipped only when an uploaded invoice line on the same PO line was counted; an earlier unresolved invoice line with no bill standing in makes later lines on that PO `history_incomplete` | `test_b1_002_unresolved_earlier_line_does_not_hide_its_qbo_bill` (both billed quantities), `test_b1_002_unresolved_earlier_line_without_bill_blocks_as_history_incomplete` |
+| B1-003 | Duplicate credit notes are value class none, not qualifying, not netted; a possible duplicate credit is not netted until cleared | `test_b1_003_credit_note_uploaded_twice_is_not_a_finding_and_nets_once`, `test_b1_003_possible_duplicate_credit_is_not_netted_until_decided` |
+| B1-004 | Counting receipts that net to zero or less are `receipt_absent` under any tolerance | `test_b1_004_net_zero_receipts_are_receipt_absent_under_any_tolerance` (tolerance 0 and 10) |
+| B1-005 | Check C1 is cumulative per PO and charge kind against the PO charge amount plus the allowance once per PO | `test_b1_005_freight_is_cumulative_against_the_po_amount` |
+| B1-006 | Test invoices are loaded even without a vendor; a vendor-less document stops at check 1 as `extraction_unverified` | `test_b1_006_vendor_less_test_invoice_is_an_exception` |
+| B1-007 | Fake extractor parses numbers as `Decimal`; raw output stored as strings; float lint covers the whole package; the engine refuses floats in any input | `test_b1_007_fake_extractor_reads_decimals_not_floats`, `test_floats_refused_at_the_engine_boundary` |
+| B1-008 | A line with no unit is taken in PO units only for a non-converting alias; a factor-1 alias with different units needs approval, in the engine and in the database check (migration 0003) | `test_b1_008_units_assumed_only_when_the_alias_does_not_convert`, `test_b1_008_database_refuses_unapproved_unit_changing_alias` |
+| B1-009 | `scripts/check_imports.py` enforces the top-level import rule with an explicit allow-list of model imports, run by `make check`; `tenancy` and `core` exports used instead of submodules; a fifth contract keeps `exceptions` away from `identity`, `blobstore` and `reporting`. TRD section 5 states the rule as enforced | `test_b1_009_top_level_import_rule_is_enforced` |
+| B1-010 | API authenticates before parsing the body (401 problem+json); 422 is problem+json without echoing input; expired idempotency keys are not replayed; a concurrent request with the same key replays the stored result | `test_b1_010_auth_before_validation_and_problem_json`, `test_b1_010_expired_key_not_replayed_and_concurrent_key_replays` |
+| B1-011 | Match runs of a tenant execute under a per-tenant advisory transaction lock and read inputs after taking it | `test_b1_011_out_of_order_runs_leave_current_inputs_result` (out-of-order execution; true parallel execution was not tested) |
+| Review note on the 8/9 tie | The tie is now an explicit priority, not alphabetical order | `test_tie_rule_is_explicit_priority` |
+
+Still open after round 1: there is no automatic trigger that starts a match run when a receipt is removed or a credit voided (T-4.1.6 triggers are not built). Until a run is requested, the stored result stays the earlier one; a run requested afterwards re-evaluates. AC-08 also changes meaning: a delivery fully returned with no credit is now `receipt_absent` (unverified unless covered), no longer a `qty_over_received` finding labelled "returned, credit not yet received". The label still applies when some quantity is kept.
+
+Documents changed in round 1: TRD.md sections 5, 6.3 and 8.5 (checks 1, 2, 5, 7, the history paragraph, C1); schema.md 3.5 (`match_runs`, `item_aliases`) and 9.1; this section.
