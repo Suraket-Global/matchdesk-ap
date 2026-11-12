@@ -1,5 +1,6 @@
 import { Component, useEffect, useId, useRef, useState, type ErrorInfo, type ReactNode } from "react";
-import { errorText } from "../api/client";
+import { Link } from "react-router-dom";
+import { ApiError, errorText } from "../api/client";
 
 /* ------------------------------------------------------------ page title and focus (App-flow 5) */
 
@@ -134,6 +135,16 @@ export function Empty({ title, children }: { title: string; children?: ReactNode
 }
 
 export function ErrorState({ error, retry }: { error: unknown; retry?: () => void }) {
+  // An unknown or foreign record is the not-found page (S-19), identical either way (review, minor).
+  if (error instanceof ApiError && error.status === 404)
+    return (
+      <>
+        <PageHead title="Not found" lede="This page or record does not exist, or you do not have access to it." />
+        <p>
+          <Link to="/exceptions">Go to the exception queue</Link>
+        </p>
+      </>
+    );
   return (
     <div className="banner error" role="alert">
       <p>{errorText(error)}</p>

@@ -14,7 +14,7 @@ from collections.abc import Iterable
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from matchdesk.core import round_cents
@@ -36,6 +36,15 @@ def qty(value: Decimal | None) -> str | None:
         return None
     text = format(value.normalize(), "f")
     return text
+
+
+def price_text(value: Decimal | None) -> str | None:
+    """A unit price with its cents kept (4.2000 -> 4.20, 0.0750 -> 0.075), never through a float."""
+    text = qty(value)
+    if text is None:
+        return None
+    whole, _, frac = text.partition(".")
+    return f"{whole}.{frac.ljust(2, '0')}"
 
 
 def vendor_names(s: Session) -> dict[uuid.UUID, str]:
@@ -103,7 +112,7 @@ def calculation(
     price = lm.po_unit_price
     if invoiced is not None and lm.receipt_line_count > 0 and invoiced > received and price is not None:
         excess = invoiced - received
-        parts.append(f"Excess {qty(excess)} × {qty(price)} = {round_cents(excess * price)}.")
+        parts.append(f"Excess {qty(excess)} × {price_text(price)} = {round_cents(excess * price)}.")
     if lm.qty_ordered is not None and invoiced is not None and invoiced > lm.qty_ordered:
         parts.append(
             f"Ordered {qty(lm.qty_ordered)}{unit}, so {qty(invoiced - lm.qty_ordered)} above the order."
@@ -116,11 +125,11 @@ def calculation(
         diff = lm.invoice_unit_price_po_uom - price
         sign = "above" if diff > 0 else "below"
         text = (
-            f"Invoice price {qty(lm.invoice_unit_price_po_uom)}, PO price {qty(price)}: "
-            f"{qty(abs(diff))} {sign} the PO"
+            f"Invoice price {price_text(lm.invoice_unit_price_po_uom)}, PO price {price_text(price)}: "
+            f"{price_text(abs(diff))} {sign} the PO"
         )
         if qty_po is not None and diff > 0:
-            text += f"; {qty(diff)} × {qty(qty_po)} = {round_cents(diff * qty_po)}"
+            text += f"; {price_text(diff)} × {qty(qty_po)} = {round_cents(diff * qty_po)}"
         parts.append(text + ".")
     parts.append(
         f"Quantity tolerance {tol.get('qty_tolerance')}; price tolerance {tol.get('price_tol_abs')} "
@@ -200,6 +209,17 @@ def line_evidence(
     }
     po_line_ids = [lm.po_line_id for lm in matches.values() if lm.po_line_id]
     po_lines = {pl.id: pl for pl in s.scalars(select(PoLineRow).where(PoLineRow.id.in_(po_line_ids)))}
+    # Quantity billed against each PO line in QuickBooks, shown greyed and never counted as a
+    # receipt (AD-05; App-flow S-09). Read from the synced bill lines when the PO line has no figure.
+    billed: dict[uuid.UUID, Decimal] = {}
+    for pl_id, q in s.execute(
+        select(QboBillLineRow.po_line_id, func.sum(QboBillLineRow.qty))
+        .join(QboBillRow, QboBillRow.id == QboBillLineRow.qbo_bill_id)
+        .where(QboBillLineRow.po_line_id.in_(po_line_ids), QboBillRow.txn_type == "bill")
+        .group_by(QboBillLineRow.po_line_id)
+    ).all():
+        if q is not None and pl_id is not None:
+            billed[pl_id] = q
     pos = {
         po.id: po
         for po in s.scalars(
@@ -323,7 +343,9 @@ def line_evidence(
                 "qty_ordered": qty(pl.qty_ordered),
                 "uom": pl.uom,
                 "unit_price": qty(pl.unit_price),
-                "qbo_billed_qty": qty(pl.qbo_billed_qty),
+                "qbo_billed_qty": qty(
+                    pl.qbo_billed_qty if pl.qbo_billed_qty is not None else billed.get(pl.id)
+                ),
             }
             if pl and po
             else None,

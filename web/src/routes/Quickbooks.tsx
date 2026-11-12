@@ -43,7 +43,9 @@ export function QuickbooksPage() {
     queryKey: ["sync-run", run?.id],
     queryFn: () => get<SyncRun>(`/api/v1/qbo/sync-runs/${run?.id}`),
     enabled: !!run,
-    refetchInterval: (q) => (q.state.data && ["succeeded", "failed"].includes(q.state.data.state) ? false : 2000),
+    // Stops on a finished run, and on an error so a failing request is not repeated forever (review, minor).
+    refetchInterval: (q) => (q.state.error || (q.state.data && ["succeeded", "failed"].includes(q.state.data.state)) ? false : 2000),
+    retry: 2,
   });
   if (conn.isLoading) return <Loading />;
   if (conn.error) return <ErrorState error={conn.error} retry={() => conn.refetch()} />;

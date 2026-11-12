@@ -7,8 +7,9 @@ with a unit conversion waiting for the controller). From B4 the seed no longer u
 invoices or imports the receiving file: it writes them to ``play-files/`` at the repository root
 so the owner does those steps in the web app (docs/PLAY.md). ``--preload`` restores the B3
 behaviour (everything loaded and processed by the worker). ``--tag NAME`` creates a separate
-tenant and addresses (``controller.NAME@example.invalid``) and writes the files to
-``play-files/NAME/``; the end-to-end test uses it so it never disturbs the owner's tenant.
+tenant and addresses (``controller.NAME@example.invalid``) and writes the files to a temporary
+folder outside the repository (``--files-dir`` chooses it); the end-to-end test uses it so it
+never disturbs the owner's tenant and never leaves folders in ``play-files/``.
 Sign in by requesting a link; Mailpit (http://127.0.0.1:8025) shows the mail. Refuses to run when
 ``MATCHDESK_ENV`` is ``production``. Idempotent: a second run finds the tenant and stops.
 """
@@ -19,11 +20,12 @@ import argparse
 import os
 import subprocess
 import sys
+import tempfile
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 
 from matchdesk.core import load_settings, text_pdf
 from matchdesk.exceptions import create_alias
@@ -217,6 +219,10 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--tag", help="separate tenant, addresses and play-files folder", default=None)
     ap.add_argument("--preload", action="store_true", help="also upload and process everything (B3)")
+    ap.add_argument(
+        "--files-dir",
+        help="where to write the play files (default: play-files/, or a temporary folder with --tag)",
+    )
     args = ap.parse_args()
     tag = args.tag
     if tag is not None and not tag.replace("-", "").isalnum():
@@ -225,7 +231,10 @@ def main() -> int:
     tenant_name = TENANT if tag is None else f"{TENANT} {tag}"
     controller = CONTROLLER if tag is None else f"controller.{tag}@example.invalid"
     clerk = CLERK if tag is None else f"clerk.{tag}@example.invalid"
-    folder = PLAY_DIR if tag is None else PLAY_DIR / tag
+    if args.files_dir:
+        folder = Path(args.files_dir)
+    else:
+        folder = PLAY_DIR if tag is None else Path(tempfile.gettempdir()) / f"matchdesk-play-{tag}"
     settings = load_settings()
     if settings.env == "production":
         print("seed-demo: refused, MATCHDESK_ENV is production", file=sys.stderr)
@@ -240,6 +249,12 @@ def main() -> int:
         capture_output=True,
     )
     engine = get_engine(settings.database_url)
+    if tag is not None:
+        # A tagged run is an automated test run from 127.0.0.1: it starts with the local sign-in
+        # counters empty, so earlier runs within the hour do not reach the per-address limit (the
+        # owner's untagged seed and production never do this; make demo-reset clears them too).
+        with global_session(engine) as s:
+            s.execute(text("delete from auth_rate_events"))
     with global_session(engine) as s:
         if s.scalar(select(Tenant).where(Tenant.name == tenant_name)) is not None:
             print(f"seed-demo: '{tenant_name}' already exists; nothing changed")

@@ -4,8 +4,8 @@ import { errorText, get, send } from "../api/client";
 import type { InvoiceDetail, InvoiceSummary, Page, PurchaseOrder } from "../api/types";
 import { useSession } from "../app/session";
 import { ErrorState, Loading, PageHead, toast, usePageTitle } from "../components/ui";
-import { money, qty } from "../lib/decimal";
-import { day } from "../lib/format";
+import { money, price, qty } from "../lib/decimal";
+import { day, plural } from "../lib/format";
 
 /** S-10: everything that happened on one purchase order. */
 export function PurchaseOrderPage() {
@@ -102,12 +102,12 @@ export function PurchaseOrderPage() {
                     {qty(l.qty_ordered)} {l.uom}
                   </td>
                   <td className="num">
-                    {qty(l.qty_received_counting)} <span className="muted small">({l.counting_receipt_lines} lines)</span>
+                    {qty(l.qty_received_counting)} <span className="muted small">({plural(l.counting_receipt_lines, "line")})</span>
                   </td>
                   <td className="num">{inv}</td>
                   <td className="num">{cr}</td>
                   <td className="num">{subQty(inv, cr)}</td>
-                  <td className="num">{qty(l.unit_price)}</td>
+                  <td className="num">{price(l.unit_price)}</td>
                   <td className="num">{openByLine.get(l.id) ?? 0}</td>
                 </tr>
               );

@@ -630,6 +630,7 @@ fieldset {
 
 /* ---------------------------------------------------------------- tables (DD-07) */
 .table-wrap {
+  position: relative; /* screen-reader-only labels in cells stay inside the scrolling pane */
   overflow-x: auto;
   background: var(--card);
   border: 1px solid var(--hairline);

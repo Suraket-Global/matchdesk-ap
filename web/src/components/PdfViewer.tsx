@@ -38,7 +38,10 @@ export default function PdfViewer({ documentId, label }: { documentId: string; l
   useEffect(() => {
     if (!pdf || !canvas.current) return;
     let task: { cancel: () => void } | null = null;
+    let cancelled = false;
     pdf.getPage(page).then((p) => {
+      // A page or zoom change before the page arrived: draw nothing for the old one (review, minor).
+      if (cancelled || !canvas.current) return;
       const viewport = p.getViewport({ scale: zoom * (window.devicePixelRatio || 1) });
       const c = canvas.current!;
       c.width = viewport.width;
@@ -50,7 +53,10 @@ export default function PdfViewer({ documentId, label }: { documentId: string; l
       task = r;
       r.promise.catch(() => undefined);
     });
-    return () => task?.cancel();
+    return () => {
+      cancelled = true;
+      task?.cancel();
+    };
   }, [pdf, page, zoom]);
   if (error)
     return (

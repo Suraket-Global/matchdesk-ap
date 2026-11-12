@@ -73,7 +73,7 @@ def test_match_view_evidence_and_calculation(app_engine, client):  # type: ignor
     # The QuickBooks billed quantity is shown as context and never counted as received.
     assert line["purchase_order"]["qbo_billed_qty"] == "100"
     assert "Received to date 60 EA." in m["calculation"]
-    assert "Excess 40 × 4.2 = 168.00." in m["calculation"]
+    assert "Excess 40 × 4.20 = 168.00." in m["calculation"]
     assert [r["source_row"] for r in line["receipts"]] == [218]
     assert line["receipts"][0]["counts"] is True and line["receipts"][0]["evidence_class"] == "A"
     exc = next(e for e in body["exceptions"] if e["type"] == "qty_over_received")
