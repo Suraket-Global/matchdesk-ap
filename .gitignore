@@ -21,3 +21,4 @@ backend/var/
 var/
 *.log
 *.pid
+.claude/

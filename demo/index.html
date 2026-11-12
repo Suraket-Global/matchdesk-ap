@@ -1,0 +1,400 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MatchDesk Demo</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--ink:#1c2430;--mute:#5d6878;--line:#dfe3e8;--brand:#1f5fbf;--ok:#1d7a46;--okbg:#e5f4ea;--bad:#b3261e;--badbg:#fbe9e7;--warn:#8a5a00;--warnbg:#fdf3dc}
+@media (prefers-color-scheme:dark){:root{--bg:#12161c;--card:#1b2129;--ink:#e6eaf0;--mute:#9aa6b5;--line:#2c3540;--brand:#6ea2ff;--ok:#5cc98a;--okbg:#17301f;--bad:#ff8a80;--badbg:#3a1d1b;--warn:#f2c46b;--warnbg:#3a2e14}}
+*{box-sizing:border-box}body{margin:0;font:15px/1.45 system-ui,-apple-system,Segoe UI,Arial,sans-serif;background:var(--bg);color:var(--ink)}
+header{background:var(--card);border-bottom:1px solid var(--line);padding:12px 16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+header b{font-size:18px}.tag{font-size:12px;padding:2px 8px;border-radius:99px;background:var(--warnbg);color:var(--warn)}
+nav{display:flex;gap:4px;flex-wrap:wrap;margin-left:auto}nav button{border:1px solid var(--line);background:var(--card);color:var(--ink);padding:6px 12px;border-radius:6px;cursor:pointer}
+nav button.on{background:var(--brand);color:#fff;border-color:var(--brand)}
+main{max-width:1100px;margin:0 auto;padding:16px}.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:16px}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px}.tile{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px}
+.tile .n{font-size:26px;font-weight:700}.tile .l{color:var(--mute);font-size:13px}
+table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:8px;border-bottom:1px solid var(--line);vertical-align:top}th{color:var(--mute);font-weight:600;font-size:13px}
+tr.click{cursor:pointer}tr.click:hover{background:var(--bg)}.num{text-align:right;font-variant-numeric:tabular-nums}
+.pill{display:inline-block;font-size:12px;padding:2px 8px;border-radius:99px;margin:1px 2px 1px 0}.p-ok{background:var(--okbg);color:var(--ok)}.p-bad{background:var(--badbg);color:var(--bad)}.p-warn{background:var(--warnbg);color:var(--warn)}
+.steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}.step{border:1px solid var(--line);border-radius:8px;padding:12px}.step i{font-style:normal;color:var(--brand);font-weight:700}
+.btn{border:0;background:var(--brand);color:#fff;padding:8px 14px;border-radius:6px;cursor:pointer;margin:4px 6px 0 0}.btn.sec{background:transparent;color:var(--brand);border:1px solid var(--brand)}
+.mute{color:var(--mute)}.cmp td:first-child{color:var(--mute)}.hl{color:var(--bad);font-weight:700}
+.wrap{overflow-x:auto}@media(max-width:600px){main{padding:12px}}
+</style>
+</head>
+<body>
+<header><b>MatchDesk</b><span class="tag">Demo: invented data, real matching rules</span>
+<nav id="nav"></nav></header>
+<main id="app"></main>
+<script>
+const DATA = {
+ "company": "Sample Distributor Ltd. (fictional)",
+ "month": "September 2026",
+ "ruleset": "v1",
+ "purchase_orders": 6,
+ "receipt_lines": 5,
+ "documents": [
+  {
+   "id": "d-1",
+   "vendor": "Northshore Fasteners (fictional)",
+   "number": "NF-1001",
+   "date": "2026-09-14",
+   "po": "5001",
+   "file": "nf-1001.pdf",
+   "total": "170.00",
+   "story": "Ordered 200, received 200, billed 200 at the PO price.",
+   "lines": [
+    {
+     "id": "d-1-l1",
+     "kind": "item",
+     "code": "NF-M12-50",
+     "description": "Hex bolt M12 x 50",
+     "qty": "200.00",
+     "uom": "EA",
+     "price": "0.85",
+     "amount": "170.00",
+     "status": "matched",
+     "po_qty": "200.00",
+     "po_price": "0.85",
+     "received": "200.00"
+    }
+   ],
+   "exceptions": []
+  },
+  {
+   "id": "d-2",
+   "vendor": "Northshore Fasteners (fictional)",
+   "number": "NF-1002",
+   "date": "2026-09-16",
+   "po": "5002",
+   "file": "nf-1002.pdf",
+   "total": "4620.00",
+   "story": "Billed for 120 fittings; the warehouse received 100.",
+   "lines": [
+    {
+     "id": "d-2-l1",
+     "kind": "item",
+     "code": "NF-BR34",
+     "description": "Brass fitting 3/4 in",
+     "qty": "120.00",
+     "uom": "EA",
+     "price": "38.50",
+     "amount": "4620.00",
+     "status": "exception",
+     "po_qty": "120.00",
+     "po_price": "38.50",
+     "received": "100.00"
+    }
+   ],
+   "exceptions": [
+    {
+     "type": "qty_over_received",
+     "line_id": "d-2-l1",
+     "value_class": "finding_candidate",
+     "amount": "770.00",
+     "variance_qty": "20.00",
+     "qualifying": true,
+     "explain": "Billed for more units than the warehouse received. Pay only for what arrived, or get a credit."
+    }
+   ]
+  },
+  {
+   "id": "d-3",
+   "vendor": "Coastline Pipe Supply (fictional)",
+   "number": "CP-2001",
+   "date": "2026-09-15",
+   "po": "6001",
+   "file": "cp-2001.pdf",
+   "total": "2025.00",
+   "story": "Quantity is right; the price is 6.75 instead of the PO's 6.40.",
+   "lines": [
+    {
+     "id": "d-3-l1",
+     "kind": "item",
+     "code": "CP-L-FT",
+     "description": "Copper pipe type L, per ft",
+     "qty": "300.00",
+     "uom": "FT",
+     "price": "6.75",
+     "amount": "2025.00",
+     "status": "exception",
+     "po_qty": "300.00",
+     "po_price": "6.40",
+     "received": "300.00"
+    }
+   ],
+   "exceptions": [
+    {
+     "type": "price_variance",
+     "line_id": "d-3-l1",
+     "value_class": "finding_candidate",
+     "amount": "105.00",
+     "variance_qty": null,
+     "qualifying": true,
+     "explain": "The unit price is above the PO price beyond the tolerance (0.5% or 0.01)."
+    }
+   ]
+  },
+  {
+   "id": "d-4",
+   "vendor": "Coastline Pipe Supply (fictional)",
+   "number": "CP-2002",
+   "date": "2026-09-19",
+   "po": "6002",
+   "file": "cp-2002.pdf",
+   "total": "410.00",
+   "story": "Elbows match, but a 95.00 freight line was added that the PO does not allow.",
+   "lines": [
+    {
+     "id": "d-4-l1",
+     "kind": "item",
+     "code": "CP-EL90",
+     "description": "Copper elbow 90 deg",
+     "qty": "150.00",
+     "uom": "EA",
+     "price": "2.10",
+     "amount": "315.00",
+     "status": "matched",
+     "po_qty": "150.00",
+     "po_price": "2.10",
+     "received": "150.00"
+    },
+    {
+     "id": "d-4-l2",
+     "kind": "freight",
+     "code": null,
+     "description": null,
+     "qty": null,
+     "uom": null,
+     "price": null,
+     "amount": "95.00",
+     "status": "exception",
+     "po_qty": null,
+     "po_price": null,
+     "received": null
+    }
+   ],
+   "exceptions": [
+    {
+     "type": "unmatched_charge",
+     "line_id": "d-4-l2",
+     "value_class": "finding_candidate",
+     "amount": "95.00",
+     "variance_qty": null,
+     "qualifying": true,
+     "explain": "A charge (freight or fee) that the PO does not include."
+    }
+   ]
+  },
+  {
+   "id": "d-5",
+   "vendor": "Fraser Valve Co. (fictional)",
+   "number": "FV-3001",
+   "date": "2026-09-17",
+   "po": "7001",
+   "file": "fv-3001.pdf",
+   "total": "4480.00",
+   "story": "Billed for 40 ball valves; no receipt exists for this PO.",
+   "lines": [
+    {
+     "id": "d-5-l1",
+     "kind": "item",
+     "code": "FV-BV2",
+     "description": "Ball valve 2 in",
+     "qty": "40.00",
+     "uom": "EA",
+     "price": "112.00",
+     "amount": "4480.00",
+     "status": "exception",
+     "po_qty": "40.00",
+     "po_price": "112.00",
+     "received": "0.00"
+    }
+   ],
+   "exceptions": [
+    {
+     "type": "receipt_absent",
+     "line_id": "d-5-l1",
+     "value_class": "unverified",
+     "amount": "4480.00",
+     "variance_qty": null,
+     "qualifying": false,
+     "explain": "Nothing has been received against this PO yet. Hold payment until it arrives."
+    }
+   ]
+  },
+  {
+   "id": "d-6",
+   "vendor": "Northshore Fasteners (fictional)",
+   "number": "NF-1001",
+   "date": "2026-09-22",
+   "po": "5001",
+   "file": "nf-1001-resent.pdf",
+   "total": "170.00",
+   "story": "The same invoice number from the same supplier, sent again as a new file.",
+   "lines": [
+    {
+     "id": "d-6-l1",
+     "kind": "item",
+     "code": "NF-M12-50",
+     "description": null,
+     "qty": "200.00",
+     "uom": "EA",
+     "price": "0.85",
+     "amount": "170.00",
+     "status": "not_evaluated",
+     "po_qty": null,
+     "po_price": null,
+     "received": null
+    }
+   ],
+   "exceptions": [
+    {
+     "type": "duplicate",
+     "line_id": null,
+     "value_class": "finding_candidate",
+     "amount": "170.00",
+     "variance_qty": null,
+     "qualifying": true,
+     "explain": "Same supplier and invoice number as one already checked. Paying it would pay twice."
+    }
+   ]
+  },
+  {
+   "id": "d-7",
+   "vendor": "Fraser Valve Co. (fictional)",
+   "number": "FV-3002",
+   "date": "2026-09-20",
+   "po": "7002",
+   "file": "fv-3002.pdf",
+   "total": "2400.00",
+   "story": "The supplier used a new item code; a person must approve what it maps to.",
+   "lines": [
+    {
+     "id": "d-7-l1",
+     "kind": "item",
+     "code": "FV-GV3-NEW",
+     "description": null,
+     "qty": "10.00",
+     "uom": "EA",
+     "price": "240.00",
+     "amount": "2400.00",
+     "status": "exception",
+     "po_qty": null,
+     "po_price": null,
+     "received": null
+    }
+   ],
+   "exceptions": [
+    {
+     "type": "alias_unconfirmed",
+     "line_id": "d-7-l1",
+     "value_class": "unverified",
+     "amount": "2400.00",
+     "variance_qty": null,
+     "qualifying": false,
+     "explain": "The supplier's item code is not yet approved, so the line was not checked."
+    }
+   ]
+  },
+  {
+   "id": "d-8",
+   "vendor": "Coastline Pipe Supply (fictional)",
+   "number": "CP-2003",
+   "date": "2026-09-23",
+   "po": null,
+   "file": "cp-2003.pdf",
+   "total": "42.00",
+   "story": "The invoice has no PO number, so it cannot be matched.",
+   "lines": [
+    {
+     "id": "d-8-l1",
+     "kind": "item",
+     "code": "CP-EL90",
+     "description": null,
+     "qty": "20.00",
+     "uom": "EA",
+     "price": "2.10",
+     "amount": "42.00",
+     "status": "exception",
+     "po_qty": null,
+     "po_price": null,
+     "received": null
+    }
+   ],
+   "exceptions": [
+    {
+     "type": "no_po",
+     "line_id": "d-8-l1",
+     "value_class": "unverified",
+     "amount": "42.00",
+     "variance_qty": null,
+     "qualifying": false,
+     "explain": "No purchase order number on the invoice, so there is nothing to match against."
+    }
+   ]
+  }
+ ]
+};
+const NAMES={qty_over_received:"Billed more than received",price_variance:"Price above PO",unmatched_charge:"Charge not on PO",receipt_absent:"Receipt absent",duplicate:"Duplicate invoice",possible_duplicate:"Possible duplicate",alias_unconfirmed:"Item code not approved",no_po:"No PO number",history_incomplete:"History incomplete",po_line_not_found:"PO line not found",uom_unresolved:"Unit not convertible",qty_over_ordered:"Billed more than ordered",credit_unlinked:"Credit not linked",extraction_unverified:"Misread document"};
+const resolved={};let tab="steps",openId=null;
+const m=v=>v==null?"–":Number(v).toLocaleString("en-CA",{minimumFractionDigits:2,maximumFractionDigits:2});
+const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const allExc=()=>DATA.documents.flatMap(d=>d.exceptions.map((e,i)=>({...e,doc:d,key:d.id+":"+i})));
+const findings=()=>allExc().filter(e=>e.qualifying);
+const cents=v=>Math.round(Number(v||0)*100);
+function nav(){const t=[["steps","How it works"],["dash","Dashboard"],["inv","Invoices"],["exc","Exceptions"],["rep","Report"]];
+document.getElementById("nav").innerHTML=t.map(([k,l])=>`<button class="${tab===k?"on":""}" onclick="go('${k}')">${l}</button>`).join("");}
+function go(t,id){tab=t;openId=id??null;render();scrollTo(0,0)}
+function pills(d){if(!d.exceptions.length)return`<span class="pill p-ok">Matched</span>`;return d.exceptions.map(e=>`<span class="pill ${e.qualifying?"p-bad":"p-warn"}">${esc(NAMES[e.type]||e.type)}</span>`).join("")}
+function steps(){return`<div class="card"><h2>Three-way match for ${esc(DATA.company)}, ${esc(DATA.month)}</h2>
+<p class="mute">MatchDesk compares each supplier invoice with the purchase order and with what the warehouse actually received, and shows where the distributor would overpay.</p>
+<div class="steps">
+<div class="step"><i>1</i> <b>Connect QuickBooks</b><br><span class="mute">Read-only. Purchase orders and bills. Here: ${DATA.purchase_orders} sample POs.</span></div>
+<div class="step"><i>2</i> <b>Import receiving</b><br><span class="mute">Warehouse file or item-receipt export. Here: ${DATA.receipt_lines} receipt lines.</span></div>
+<div class="step"><i>3</i> <b>Upload invoices</b><br><span class="mute">Supplier PDFs. Here: ${DATA.documents.length} invoices.</span></div>
+<div class="step"><i>4</i> <b>Review exceptions</b><br><span class="mute">The clerk confirms or resolves each one.</span></div>
+<div class="step"><i>5</i> <b>Report</b><br><span class="mute">The controller approves the dollar findings.</span></div></div>
+<button class="btn" onclick="go('dash')">Run the September check</button></div>`}
+function dash(){const ds=DATA.documents,f=findings(),open=allExc().filter(e=>!e.qualifying);
+const total=f.reduce((s,e)=>s+cents(e.amount),0),done=f.filter(e=>resolved[e.key]).length;
+return`<div class="tiles">
+<div class="tile"><div class="n">${ds.length}</div><div class="l">Invoices checked</div></div>
+<div class="tile"><div class="n">${ds.filter(d=>!d.exceptions.length).length}</div><div class="l">Fully matched</div></div>
+<div class="tile"><div class="n">${allExc().length}</div><div class="l">Exceptions</div></div>
+<div class="tile"><div class="n" style="color:var(--bad)">$${m(total/100)}</div><div class="l">Possible overpayment (findings)</div></div>
+<div class="tile"><div class="n">${done} / ${f.length}</div><div class="l">Findings resolved</div></div></div>
+<div class="card" style="margin-top:16px"><h3>Where the money is</h3>${excTable(f)}
+${open.length?`<h3>Needs a person first (not counted in dollars)</h3>${excTable(open)}`:""}</div>`}
+function excTable(list){return`<div class="wrap"><table><tr><th>Invoice</th><th>Supplier</th><th>Exception</th><th class="num">Amount</th><th>Status</th></tr>
+${list.map(e=>`<tr class="click" onclick="go('inv','${e.doc.id}')"><td>${esc(e.doc.number)}</td><td>${esc(e.doc.vendor)}</td><td>${esc(NAMES[e.type]||e.type)}</td><td class="num">${e.qualifying?"$"+m(e.amount):"–"}</td><td>${resolved[e.key]?`<span class="pill p-ok">${esc(resolved[e.key])}</span>`:`<span class="pill p-warn">Open</span>`}</td></tr>`).join("")}</table></div>`}
+function inv(){if(openId)return detail(DATA.documents.find(d=>d.id===openId));
+return`<div class="card"><h3>Invoices, ${esc(DATA.month)}</h3><div class="wrap"><table><tr><th>Invoice</th><th>Supplier</th><th>PO</th><th>Date</th><th class="num">Total</th><th>Result</th></tr>
+${DATA.documents.map(d=>`<tr class="click" onclick="go('inv','${d.id}')"><td>${esc(d.number)}</td><td>${esc(d.vendor)}</td><td>${esc(d.po||"none")}</td><td>${esc(d.date)}</td><td class="num">$${m(d.total)}</td><td>${pills(d)}</td></tr>`).join("")}</table></div></div>`}
+function detail(d){const ex=d.exceptions.map((e,i)=>({...e,key:d.id+":"+i}));
+return`<button class="btn sec" onclick="go('inv')">← All invoices</button>
+<div class="card"><h3>${esc(d.number)} · ${esc(d.vendor)}</h3><p class="mute">${esc(d.story)}</p>
+<p>PO ${esc(d.po||"none")} · ${esc(d.date)} · file ${esc(d.file)} · total $${m(d.total)}</p>
+<div class="wrap"><table class="cmp"><tr><th>Line</th><th class="num">Ordered (PO)</th><th class="num">Received</th><th class="num">Invoiced</th><th class="num">PO price</th><th class="num">Invoice price</th><th class="num">Amount</th><th>Line result</th></tr>
+${d.lines.map(l=>{const overQ=l.received!=null&&l.qty!=null&&Number(l.qty)>Number(l.received),overP=l.po_price!=null&&l.price!=null&&Number(l.price)>Number(l.po_price);
+return`<tr><td>${esc(l.description||l.code||l.kind)}<br><span class="mute">${esc(l.kind)}${l.code?" · "+esc(l.code):""}</span></td><td class="num">${l.po_qty??"–"}</td><td class="num ${overQ?"hl":""}">${l.received??"–"}</td><td class="num ${overQ?"hl":""}">${l.qty??"–"} ${esc(l.uom||"")}</td><td class="num">${l.po_price??"–"}</td><td class="num ${overP?"hl":""}">${l.price??"–"}</td><td class="num">$${m(l.amount)}</td><td>${l.status==="matched"||l.status==="charge_ok"?'<span class="pill p-ok">'+l.status+'</span>':'<span class="pill p-warn">'+esc(l.status)+'</span>'}</td></tr>`}).join("")}</table></div></div>
+${ex.length?ex.map(e=>`<div class="card"><h3><span class="pill ${e.qualifying?"p-bad":"p-warn"}">${e.qualifying?"Finding":"Open, not counted"}</span> ${esc(NAMES[e.type]||e.type)} ${e.qualifying?"· $"+m(e.amount):""}</h3>
+<p>${esc(e.explain)}</p>${e.variance_qty?`<p class="mute">Quantity difference: ${e.variance_qty}</p>`:""}
+${resolved[e.key]?`<p><span class="pill p-ok">${esc(resolved[e.key])}</span> <button class="btn sec" onclick="res('${e.key}',null)">Undo</button></p>`:
+`<button class="btn" onclick="res('${e.key}','Supplier asked for credit')">Ask supplier for credit</button><button class="btn sec" onclick="res('${e.key}','Confirmed with warehouse')">Confirm with warehouse</button><button class="btn sec" onclick="res('${e.key}','Approved by controller')">Approve anyway</button>`}</div>`).join(""):`<div class="card"><span class="pill p-ok">Matched</span> Every line agrees with the PO and the receiving record. Safe to pay.</div>`}`}
+function res(k,v){if(v)resolved[k]=v;else delete resolved[k];render()}
+function exc(){return`<div class="card"><h3>All exceptions</h3>${excTable(allExc())}</div>`}
+function rep(){const f=findings(),by={};f.forEach(e=>{by[e.doc.vendor]=(by[e.doc.vendor]||0)+cents(e.amount)});const total=f.reduce((s,e)=>s+cents(e.amount),0);
+return`<div class="card"><h2>Back-test report · ${esc(DATA.month)}</h2><p class="mute">${esc(DATA.company)} · rule set ${esc(DATA.ruleset)} · DRAFT until the controller approves</p>
+<div class="tiles"><div class="tile"><div class="n" style="color:var(--bad)">$${m(total/100)}</div><div class="l">Total findings</div></div><div class="tile"><div class="n">${f.length}</div><div class="l">Findings</div></div><div class="tile"><div class="n">${allExc().length-f.length}</div><div class="l">Open items not counted</div></div></div>
+<h3>By supplier</h3><table>${Object.entries(by).map(([v,c])=>`<tr><td>${esc(v)}</td><td class="num">$${m(c/100)}</td></tr>`).join("")}</table>
+<h3>Findings</h3>${excTable(f)}
+<p class="mute">This is not an audit. Findings are what the rules raised from the records supplied; a person confirms each one with the supplier.</p>
+<button class="btn" onclick="print()">Print / save as PDF</button></div>`}
+function render(){nav();document.getElementById("app").innerHTML={steps,dash,inv,exc,rep}[tab]()}
+render();
+</script>
+</body>
+</html>
