@@ -3231,6 +3231,16 @@ details.fold > summary {
   }
   .match-head .pager .btn {
     flex: 1;
+    min-width: 0;
+  }
+  /* The word stays for screen readers; the arrow and "Previous" or "Next" fit a phone. */
+  .match-head .pager-word {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
   }
 }
 

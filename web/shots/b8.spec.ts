@@ -81,7 +81,7 @@ async function clerk(browser: Browser, size: Size, dark = false): Promise<void> 
   await shot(page, `01-queue${suffix}`, size);
   if (size === 375 && !dark) {
     // The first actionable case: its link to the match view, measured in the initial viewport.
-    const first = page.locator('main a[href*="/invoices/"][href*="exc="]').first();
+    const first = page.locator('main a[href*="/invoices/"][href*="exc="]').filter({ visible: true }).first();
     const box = await first.boundingBox();
     const inView = box ? box.y >= 0 && box.y + box.height <= SIZES[375].height : false;
     measured.first_mobile_case = { top_px: box ? Math.round(box.y) : null, height_px: box ? Math.round(box.height) : null, visible_without_scrolling: inView, text: (await first.textContent())?.trim() };
@@ -92,6 +92,15 @@ async function clerk(browser: Browser, size: Size, dark = false): Promise<void> 
   if (size === 1440 && !dark) {
     const receipt = page.locator('main a[href*="/receiving/imports/"]').first();
     measured.ff1003_receipt_link = { text: (await receipt.textContent())?.trim(), top_px: Math.round((await receipt.boundingBox())?.y ?? -1) };
+  }
+  if (!dark && (PHASE === "after" || size === 1440)) {
+    // Dark theme in the same session (one sign-in per width keeps within the sign-in rate limit).
+    await page.emulateMedia({ colorScheme: "dark" });
+    await page.goto("/exceptions");
+    await shot(page, "01-queue-dark", size);
+    await page.goto(`/invoices/${ff.invoice_id}?line=${ff.invoice_line_id ?? ""}&exc=${ff.id}&from=${encodeURIComponent("/exceptions")}`);
+    await page.waitForTimeout(1500);
+    await shot(page, "02-ff1003-dark", size);
   }
   await ctx.close();
 }
@@ -111,7 +120,7 @@ async function controller(browser: Browser, size: Size): Promise<void> {
     const row = page.locator("main tbody tr", { hasText: "Fictional Fasteners Ltd" });
     await row.locator('a[href^="/exceptions"]').first().click();
     await settle(page);
-    const rows = await page.locator('main a[href*="/invoices/"][href*="exc="]').count();
+    const rows = await page.locator('main a[href*="/invoices/"][href*="exc="]').filter({ visible: true }).count();
     measured.weekly_drilldown = {
       report: { supplier: ff?.vendor_name, open_count: ff?.open_count, open_value: ff?.open_value },
       queue_url: new URL(page.url()).pathname + new URL(page.url()).search,
@@ -131,7 +140,6 @@ for (const size of [1440, 1024, 375] as Size[]) {
   test(`clerk screens at ${size}`, async ({ browser }) => clerk(browser, size));
   test(`controller screens at ${size}`, async ({ browser }) => controller(browser, size));
 }
-test("clerk screens in dark theme at 1440", async ({ browser }) => clerk(browser, 1440, true));
 
 test("operator: console and account", async ({ browser }) => {
   const ctx = await browser.newContext({ viewport: SIZES[1440] });

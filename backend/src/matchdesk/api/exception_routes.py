@@ -37,6 +37,7 @@ from matchdesk.exceptions import (
     decide,
     describe_alias,
     describe_tolerance,
+    invoices_for_alias_code,
     invoices_on_po_lines,
     preview_tolerance,
     related_invoices,
@@ -58,7 +59,6 @@ from matchdesk.exceptions.models import (
     LineMatch,
     ToleranceRule,
 )
-from matchdesk.exceptions.rules_admin import invoices_for_alias_code
 from matchdesk.identity import Membership, Principal, Tenant
 from matchdesk.intake.models import InvoiceLineRow, InvoiceRow
 from matchdesk.matching import normalise_code

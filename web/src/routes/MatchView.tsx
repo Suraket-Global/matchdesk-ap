@@ -318,13 +318,13 @@ export function MatchViewPage() {
             <span className="pager" role="group" aria-label="Move through the queue">
               <button className="btn" disabled={!near.data?.previous} onClick={() => go(near.data?.previous)}>
                 <ChevronLeft size={16} aria-hidden="true" />
-                Previous exception
+                Previous<span className="pager-word"> exception</span>
               </button>
               <span className="pos small muted" aria-live="polite">
                 {near.data?.position ? `${near.data.position} of ${near.data.total}` : near.data ? `${near.data.total} left` : ""}
               </span>
               <button className="btn" disabled={!near.data?.next} onClick={() => go(near.data?.next)}>
-                Next exception
+                Next<span className="pager-word"> exception</span>
                 <ChevronRight size={16} aria-hidden="true" />
               </button>
             </span>
