@@ -23,7 +23,10 @@
         "value": "11"
        },
        "Qty": 500,
-       "UnitPrice": 0.42
+       "UnitPrice": 0.42,
+       "UOMRef": {
+        "value": "EA"
+       }
       }
      },
      {
@@ -36,7 +39,10 @@
         "value": "12"
        },
        "Qty": 500,
-       "UnitPrice": 0.08
+       "UnitPrice": 0.08,
+       "UOMRef": {
+        "value": "EA"
+       }
       }
      }
     ]
@@ -62,7 +68,10 @@
         "value": "11"
        },
        "Qty": 100,
-       "UnitPrice": 4.2
+       "UnitPrice": 4.2,
+       "UOMRef": {
+        "value": "EA"
+       }
       }
      }
     ]
@@ -88,7 +97,10 @@
         "value": "13"
        },
        "Qty": 40,
-       "UnitPrice": 18.5
+       "UnitPrice": 18.5,
+       "UOMRef": {
+        "value": "EA"
+       }
       }
      },
      {
@@ -126,7 +138,10 @@
         "value": "15"
        },
        "Qty": 1000,
-       "UnitPrice": 0.05
+       "UnitPrice": 0.05,
+       "UOMRef": {
+        "value": "EA"
+       }
       }
      }
     ]
@@ -152,7 +167,10 @@
         "value": "14"
        },
        "Qty": 200,
-       "UnitPrice": 1.1
+       "UnitPrice": 1.1,
+       "UOMRef": {
+        "value": "EA"
+       }
       }
      }
     ]
@@ -178,7 +196,10 @@
         "value": "14"
        },
        "Qty": 100,
-       "UnitPrice": 1.1
+       "UnitPrice": 1.1,
+       "UOMRef": {
+        "value": "EA"
+       }
       }
      }
     ]
@@ -204,7 +225,10 @@
         "value": "12"
        },
        "Qty": 1000,
-       "UnitPrice": 0.08
+       "UnitPrice": 0.08,
+       "UOMRef": {
+        "value": "EA"
+       }
       }
      }
     ]

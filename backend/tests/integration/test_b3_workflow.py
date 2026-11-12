@@ -369,3 +369,24 @@ def test_tolerance_versions_preview_and_rematch_and_suggestions(app_engine, clie
         headers=w.headers,
     ).json()["items"]
     assert sug[0]["basis"] == "earlier_alias" and sug[0]["item_id"] == str(w.item_id)
+
+
+def test_trigger_scope_covers_the_vendor_so_no_invoice_stays_stale(app_engine, client):  # type: ignore[no-untyped-def]
+    """Regression found with the demo data: an invoice naming an unknown PO stayed stale after a
+    document of the same vendor arrived, because the trigger scope was by PO, not by vendor."""
+    from matchdesk.exceptions import handle_match_request
+
+    w = make_tenant(app_engine, "Fictional Distributor W6")
+    first = add_invoice(app_engine, w, "nopo", "INV-N1", date(2026, 10, 2), "5")
+    with session(w.tenant_id, app_engine) as s:
+        s.execute(text("update invoices set po_number_read = '9999' where id = :i"), {"i": str(first)})
+    match(client, app_engine, w.headers, [first])
+    assert client.get(f"/api/v1/invoices/{first}", headers=w.headers).json()["stale"] is False
+    second = add_invoice(app_engine, w, "po", "INV-N2", date(2026, 10, 3), "5")
+    assert client.get(f"/api/v1/invoices/{first}", headers=w.headers).json()["stale"] is True
+    with session(w.tenant_id, app_engine) as s:  # what intake enqueues for a new document
+        handle_match_request(
+            s, {"tenant_id": str(w.tenant_id), "invoice_ids": [str(second)], "trigger": "document_ready"}
+        )
+    drain(app_engine)
+    assert client.get(f"/api/v1/invoices/{first}", headers=w.headers).json()["stale"] is False

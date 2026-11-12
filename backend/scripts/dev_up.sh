@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# OPS-04: one local start command. Starts api (port 8101) and worker directly (no Docker on this
+# OPS-04: one local start command. Checks PostgreSQL and Redis, migrates, starts api (port 8101) and worker directly (no Docker on this
 # machine; the Compose stack of TRD section 7 stays proposed). Exits non-zero naming the failed check.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -26,6 +26,18 @@ except Exception as exc:
     sys.exit(1)
 PYEOF
 echo "database: reachable"
+"$PY" - <<'PYEOF' || fail "Redis not reachable at ${MATCHDESK_REDIS_HOST:-127.0.0.1}:${MATCHDESK_REDIS_PORT:-6379} (start it: brew services run redis)"
+import os, socket, sys
+host, port = os.environ.get("MATCHDESK_REDIS_HOST", "127.0.0.1"), int(os.environ.get("MATCHDESK_REDIS_PORT", "6379"))
+try:
+    with socket.create_connection((host, port), timeout=3) as c:
+        c.sendall(b"PING\r\n")
+        ok = c.recv(16).startswith(b"+PONG")
+except OSError:
+    ok = False
+sys.exit(0 if ok else 1)
+PYEOF
+echo "redis: reachable (not used by the application yet; checked as part of the local stack)"
 "$PY" -m alembic upgrade head >"$LOG/migrate.log" 2>&1 || fail "migrations (see backend/$LOG/migrate.log)"
 echo "migrations: at head"
 

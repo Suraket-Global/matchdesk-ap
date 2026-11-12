@@ -1,14 +1,18 @@
-# Local commands for build milestone B1 (AGENTS.md section 12). Run from the repository root.
+# Local commands for build milestones B1 to B3 (AGENTS.md section 12). Run from the repository root.
 BACKEND := backend
 VENV := $(BACKEND)/.venv/bin
 
-.PHONY: up down test test-unit test-integration check reset-test-db
+.PHONY: up down seed-demo test test-unit test-integration check reset-test-db
 
 up:
 	$(BACKEND)/scripts/dev_up.sh
 
 down:
 	$(BACKEND)/scripts/dev_down.sh
+
+# One invented tenant (controller, clerk, suppliers, POs, receiving file, 12 text PDFs) in matchdesk_dev.
+seed-demo:
+	cd $(BACKEND) && .venv/bin/python scripts/seed_demo.py
 
 # Unit and integration suites. Integration tests drop and re-migrate matchdesk_test first.
 test:
