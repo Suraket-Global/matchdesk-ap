@@ -2,16 +2,17 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { errorText, get, send } from "../api/client";
-import type { Coverage, ExceptionItem, ExceptionPage, Page, Vendor } from "../api/types";
+import type { Coverage, ExceptionItem, ExceptionPage, Member, Page, Vendor } from "../api/types";
+import { FIGURE_STATES } from "../api/types";
 import { useSession } from "../app/session";
 import { usePeriod } from "../app/period";
 import { useKeys } from "../app/shortcuts";
 import { CheckCircle2, ChevronRight, FileBarChart, Inbox, Info, SlidersHorizontal, Upload, X } from "lucide-react";
-import { Dialog, Empty, ErrorState, PageHead, StatusChip, usePageTitle } from "../components/ui";
+import { Dialog, Empty, ErrorState, PageHead, StatusChip, toast, usePageTitle } from "../components/ui";
 import { TableSkeleton } from "../components/States";
 import { cad, cadCents, formatCents, money, qty, sumCents, toCents } from "../lib/decimal";
 import { ageText, monthName, plural } from "../lib/format";
-import { apiQuery, dateRangeWords, DEFAULT_STATUS, readScope, rememberQueue, scopeDates, STATUS_WORDS } from "../lib/queue";
+import { apiQuery, assigneeWords, dateRangeWords, DEFAULT_STATUS, readScope, rememberQueue, scopeDates, STATUS_WORDS } from "../lib/queue";
 import { EXCEPTION_STATUS, RESOLUTION_CODES, RESOLUTION_HINTS, SUB_REASONS, typeWord, zeroCounted } from "../lib/words";
 
 export function chipFor(e: ExceptionItem) {
@@ -64,6 +65,7 @@ export function ExceptionsPage() {
     refetchInterval: 15_000,
   });
   const vendors = useQuery({ queryKey: ["vendors"], queryFn: () => get<Page<Vendor>>("/api/v1/vendors") });
+  const members = useQuery({ queryKey: ["members"], queryFn: () => get<{ items: Member[]; me: string }>("/api/v1/members") });
   const period = `period_start=${dates.start}&period_end=${dates.end}`;
   // Live coverage for the same dates, from the current results; secondary to the work list.
   const coverage = useQuery({ queryKey: ["coverage", dates.start, dates.end], queryFn: () => get<Coverage>(`/api/v1/coverage?${period}`), refetchInterval: 15_000 });
@@ -75,6 +77,7 @@ export function ExceptionsPage() {
   const first = list.data?.pages[0];
   const counters = first?.type_counters ?? {};
   const vendorName = (vendors.data?.items ?? []).find((v) => v.id === scope.vendor)?.name;
+  const assigneeName = (members.data?.items ?? []).find((m) => m.user_id === scope.assignee)?.name;
   const set = (patch: Record<string, string>) => {
     const p = new URLSearchParams(params);
     for (const [k, v] of Object.entries(patch)) {
@@ -138,7 +141,8 @@ export function ExceptionsPage() {
   const chosenTypes = new Set(chosen.map((c) => c.type));
 
   const cov = coverage.data;
-  const measured = cov?.state === "measured" || (cov && cov.state === undefined && cov.item_lines > 0);
+  const measured = (cov?.state && FIGURE_STATES.includes(cov.state)) || (cov && cov.state === undefined && cov.item_lines > 0);
+  const declared = cov?.state === "no_receiving_records" ? cov.no_receiving_declaration : null;
   const pctText = (v: string | null | undefined) => (v ? `${money(v).replace(/\.00$/, "")}%` : "Not measured");
   const viaA = measured && cov ? formatCents((toCents(cov.receipt_coverage_pct) ?? 0n) - (toCents(cov.coverage_class_b_pct) ?? 0n)) : "0";
   const stateWords: Record<string, string> = {
@@ -147,7 +151,7 @@ export function ExceptionsPage() {
     awaiting_receiving: "Not measured: no receiving file has been imported, so every line is receipt absent.",
     unavailable: "Not measured: no invoice line could be compared with a purchase-order line.",
   };
-  const filtered = !!(scope.type || scope.vendor || scope.min || scope.max || dates.exact || scope.status !== DEFAULT_STATUS);
+  const filtered = !!(scope.type || scope.vendor || scope.min || scope.max || scope.assignee || dates.exact || scope.status !== DEFAULT_STATUS);
   const clearAll = () => setParams(new URLSearchParams());
   const total = first?.total_count ?? rows.length;
   const colCount = can("resolve") ? 8 : 7;
@@ -203,6 +207,14 @@ export function ExceptionsPage() {
             </button>
           )}
         </span>
+        {scope.assignee && (
+          <span className="scope-chip">
+            <span className="k">Assignee</span> {assigneeWords(scope.assignee, assigneeName).replace(/^Assigned to /, "")}
+            <button type="button" className="chip-x" aria-label="Remove the assignee filter" onClick={() => set({ assignee: "" })}>
+              <X size={14} aria-hidden="true" />
+            </button>
+          </span>
+        )}
         {(scope.min || scope.max) && (
           <span className="scope-chip">
             <span className="k">Value</span> {scope.min ? cad(scope.min) : "any"} to {scope.max ? cad(scope.max) : "any"}
@@ -243,6 +255,21 @@ export function ExceptionsPage() {
               </option>
             ))}
             <option value="none">Supplier not identified</option>
+          </select>
+        </div>
+        <div className="field">
+          <label htmlFor="f-assignee">Assigned to</label>
+          <select id="f-assignee" value={scope.assignee} onChange={(e) => set({ assignee: e.target.value })}>
+            <option value="">Everyone</option>
+            <option value="me">Me</option>
+            <option value="none">Nobody (unassigned)</option>
+            {(members.data?.items ?? [])
+              .filter((m) => m.user_id !== members.data?.me)
+              .map((m) => (
+                <option key={m.user_id} value={m.user_id}>
+                  {m.name ?? "Member"}
+                </option>
+              ))}
           </select>
         </div>
         <div className="field">
@@ -301,6 +328,7 @@ export function ExceptionsPage() {
           <button type="button" className="btn ghost" onClick={() => setSelected(new Set())}>
             Clear selection
           </button>
+          {can("assign_exception") && <BulkAssign chosen={chosen} members={members.data?.items ?? []} me={members.data?.me ?? ""} onDone={() => setSelected(new Set())} />}
           {chosenTypes.size > 1 && <span className="note">Bulk resolve works on one type at a time.</span>}
         </div>
       )}
@@ -311,7 +339,7 @@ export function ExceptionsPage() {
       {list.error && <ErrorState error={list.error} retry={() => list.refetch()} />}
       {list.data && rows.length === 0 && (
         <div className="panel">
-          {!filtered && cov?.state && cov.state !== "measured" && cov.state !== "unavailable" ? (
+          {!filtered && cov?.state && !FIGURE_STATES.includes(cov.state) && cov.state !== "unavailable" ? (
             <Empty
               title={
                 cov.state === "awaiting_invoices"
@@ -379,6 +407,7 @@ export function ExceptionsPage() {
                   {e.vendor_name ?? "Supplier not identified"}
                   {e.po_number ? ` · PO ${e.po_number}` : ""}
                 </div>
+                {e.assigned_to && <div className="case-sup">Assigned to {e.assigned_to === members.data?.me ? "you" : e.assigned_to_name ?? "a member"}</div>}
                 <div className="case-foot">
                   {statusNote(e) ?? <span className="muted small">{ageText(e.raised_at)}</span>}
                   <Link className="btn small primary" to={hrefFor(e)} onClick={(ev) => { ev.preventDefault(); open(e); }} aria-label={`Review ${e.doc_number ?? "document"} ${typeWord(e.type)}`}>
@@ -449,6 +478,7 @@ export function ExceptionsPage() {
                         {e.line_no ? <span className="muted"> · line {e.line_no}</span> : null}
                       </span>
                       <span className="cell-sub wrap-name">{e.vendor_name ?? "Supplier not identified"}</span>
+                      {e.assigned_to && <span className="cell-sub assignee">Assigned to {e.assigned_to === members.data?.me ? "you" : e.assigned_to_name ?? "a member"}</span>}
                     </td>
                     <td>
                       <span className="cell-main">{typeWord(e.type)}</span>
@@ -529,6 +559,13 @@ export function ExceptionsPage() {
             </span>
           )}
         </summary>
+        {declared && (
+          <p className="declared-note" data-testid="queue-no-receiving">
+            No warehouse receiving records: declared by {declared.declared_by_name ?? "the controller"}. Every line is receipt
+            absent with no receiving evidence (unverified); price, ordered-quantity and duplicate checks
+            still run. The report is a two-way match.
+          </p>
+        )}
         {!measured ? (
           <p className="muted">{stateWords[cov?.state ?? ""] ?? "Not measured yet."}</p>
         ) : (
@@ -670,5 +707,47 @@ export function BulkDialog({ items: chosenNow, onClose }: { items: ExceptionItem
         </>
       )}
     </Dialog>
+  );
+}
+
+/** B9: assign the selected cases to a member, or unassign them; who works on it, never a status. */
+function BulkAssign({ chosen, members, me, onDone }: { chosen: ExceptionItem[]; members: Member[]; me: string; onDone: () => void }) {
+  const qc = useQueryClient();
+  const assign = useMutation({
+    mutationFn: async (to: string) => {
+      let changed = 0;
+      for (const e of chosen) {
+        await send("PUT", `/api/v1/exceptions/${e.id}/assignment`, { user_id: to === "none" ? null : to }, { ifMatch: e.version });
+        changed += 1;
+      }
+      return { changed, to };
+    },
+    onSuccess: ({ changed, to }) => {
+      qc.invalidateQueries({ queryKey: ["exceptions"] });
+      const who = to === "none" ? "nobody" : to === me ? "you" : members.find((m) => m.user_id === to)?.name ?? "a member";
+      toast(`${plural(changed, "exception")} assigned to ${who}.`);
+      onDone();
+    },
+    onError: (err) => {
+      qc.invalidateQueries({ queryKey: ["exceptions"] });
+      toast(`Not all were assigned: ${errorText(err)}`);
+    },
+  });
+  return (
+    <label className="bulk-assign">
+      <span className="sr-only">Assign the selected exceptions</span>
+      <select value="" disabled={assign.isPending} onChange={(e) => e.target.value && assign.mutate(e.target.value)}>
+        <option value="">Assign to…</option>
+        <option value={me}>Me</option>
+        {members
+          .filter((m) => m.user_id !== me)
+          .map((m) => (
+            <option key={m.user_id} value={m.user_id}>
+              {m.name ?? "Member"}
+            </option>
+          ))}
+        <option value="none">Nobody (unassign)</option>
+      </select>
+    </label>
   );
 }

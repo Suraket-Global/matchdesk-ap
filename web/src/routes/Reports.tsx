@@ -12,6 +12,7 @@ import { day, monthName, monthRange, plural, when } from "../lib/format";
 import { typeWord, zeroCounted } from "../lib/words";
 import { PilotSection, usePilot } from "./Pilot";
 import { queueLink } from "../lib/queue";
+import { OutcomesSection, useOutcomes } from "./ReportOutcomes";
 
 type Finding = NonNullable<Report["findings"]>[number];
 
@@ -236,6 +237,7 @@ export function ReportPage() {
     queryFn: () => get<Refund>(`/api/v1/reports/backtest/${reportId}/refund-evaluation`),
     enabled: r?.status === "approved",
   });
+  const outcomes = useOutcomes(reportId, !!r && pilot.data?.governing?.report_id === r.id);
   const [approveOpen, setApproveOpen] = useState(false);
   const [reviewed, setReviewed] = useState(false);
   const [exporting, setExporting] = useState<string | null>(null);
@@ -294,6 +296,9 @@ export function ReportPage() {
   }
   const newer = (list.data?.items ?? []).find((o) => o.period_start === r.period_start && o.version_no > r.version_no);
   const isGoverning = pilot.data?.governing?.report_id === r.id;
+  const counts = isGoverning ? outcomes.data?.totals : undefined;
+  const declaration = (r.totals.no_receiving_declaration ?? null) as { declared_by_name: string | null; declared_at: string } | null;
+  const inconsistent = (r.totals.inconsistent_documents ?? []) as { invoice_id: string; doc_number: string | null; vendor_name: string | null; note: string | null }[];
   const ALL_STATUSES = "open,pending_approval,resolved,waived";
   const blocking = r.blocking ?? [];
   return (
@@ -409,12 +414,29 @@ export function ReportPage() {
         <div>
           <dt>Confirmed by the controller</dt>
           <dd>
-            <span className="num">{cadCents(sumCents(confirmed.map((c) => c.amount)))}</span> <span className="muted small">{plural(confirmed.length, "item")}</span>
+            {counts ? (
+              <>
+                <span className="num">{cad(counts.controller_confirmed.amount)}</span>{" "}
+                <span className="muted small">{plural(counts.controller_confirmed.count, "item")} recorded</span>
+              </>
+            ) : (
+              <>
+                <span className="num">{cadCents(sumCents(confirmed.map((c) => c.amount)))}</span>{" "}
+                <span className="muted small">{plural(confirmed.length, "item")} resolved as confirmed</span>
+              </>
+            )}
           </dd>
         </div>
         <div>
           <dt>Credit recovered</dt>
-          <dd className="muted">Not recorded yet</dd>
+          {counts ? (
+            <dd data-testid="credit-recovered">
+              <span className="num">{cad(counts.credit_recovered.amount)}</span>{" "}
+              <span className="muted small">{plural(counts.credit_recovered.count, "item")} recorded</span>
+            </dd>
+          ) : (
+            <dd className="muted">Recorded on the governing version</dd>
+          )}
         </div>
       </dl>
       <p className="small muted three-note">
@@ -519,6 +541,14 @@ export function ReportPage() {
           <dt>Purchase-order history read from</dt>
           <dd>{day(r.history_read_from) || "Not recorded"}</dd>
         </dl>
+        {declaration && (
+          <Banner tone="warn">
+            <p>
+              <strong>No warehouse receiving records</strong>, declared by {declaration.declared_by_name ?? "the controller"} on {day(declaration.declared_at)}.
+              Every invoiced line is receipt absent and unverified; price, ordered-quantity and duplicate checks ran. This report is a two-way match only.
+            </p>
+          </Banner>
+        )}
         <p className="small" style={{ marginTop: 8 }}>
           A missing receiving record is never treated as received. Where the receiving log covers the order and shows nothing, the line is "not received";
           otherwise it is unverified and is not counted as a finding.
@@ -540,6 +570,18 @@ export function ReportPage() {
       </section>
       <section>
         <h2>6. Documents with self-inconsistent totals and duplicates</h2>
+        {!("inconsistent_documents" in r.totals) ? null : inconsistent.length > 0 ? (
+          <ul className="plain-list panel panel-body" aria-label="Confirmed although they do not add up">
+            {inconsistent.map((d) => (
+              <li key={d.invoice_id}>
+                <Link to={`/invoices/${d.invoice_id}`}>{d.doc_number ?? "No number"}</Link>
+                {d.vendor_name ? ` (${d.vendor_name})` : ""}: confirmed although the document does not add up. Note: <q>{d.note ?? "none"}</q>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="small muted">No document was confirmed with figures that do not add up.</p>
+        )}
         <FindingsTable rows={f.filter((x) => x.type === "duplicate" || x.type === "possible_duplicate" || (x.snapshot as Record<string, unknown>).label === "inconsistent_total")} caption="Inconsistent or duplicate documents" showPaid={false} period={{ start: r.period_start, end: r.period_end }} />
       </section>
       <section>
@@ -560,6 +602,7 @@ export function ReportPage() {
         )}
         <PilotSection r={r} />
       </section>
+      <OutcomesSection report={r} flagged={[...findings, ...notReceived]} />
 
       <Dialog
         open={approveOpen}

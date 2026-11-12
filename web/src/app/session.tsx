@@ -24,6 +24,11 @@ const PERMISSIONS: Record<string, string[]> = {
   edit_intake_settings: ["controller"],
   release_held_email: ["controller", "clerk"],
   send_weekly_summary: ["controller"],
+  // B9 (schema.md 4.1 rows added with the server's table)
+  assign_exception: ["controller", "clerk"],
+  decide_duplicate_or_credit: ["controller"],
+  record_finding_outcome: ["controller"],
+  request_deletion_or_archive: ["controller"],
 };
 
 interface SessionValue {

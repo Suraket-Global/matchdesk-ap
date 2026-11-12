@@ -113,6 +113,27 @@ function DecisionCard({ a, importName, onDecide }: { a: Approval; importName?: R
             <span className="muted small">{EVIDENCE_CLASSES[importName?.evidence_class ?? ""]?.name}</span>
           </p>
         )}
+        {a.subject_type === "late_receipt" && (
+          <div className="would-clear">
+            <h3 className="d-label">Exceptions open on those lines now</h3>
+            {(a.would_clear ?? []).length === 0 ? (
+              <p className="muted small">None is open now.</p>
+            ) : (
+              <ul className="plain-list small">
+                {(a.would_clear ?? []).map((x) => (
+                  <li key={x.id}>
+                    <Link to={`/invoices/${x.invoice_id}?line=${x.invoice_line_id ?? ""}&exc=${x.id}`}>
+                      {x.doc_number ?? "Document"}
+                      {x.line_no ? ` line ${x.line_no}` : ""}
+                    </Link>
+                    : {typeWord(x.type)}, {cad(x.value)}
+                  </li>
+                ))}
+              </ul>
+            )}
+            <p className="muted small">The re-match after approval decides which of them clear; nothing clears by approval alone.</p>
+          </div>
+        )}
       </div>
       <div className="d-consequence">
         <h3 className="d-label">If you approve</h3>

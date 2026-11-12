@@ -5,10 +5,11 @@ import { errorText, get, send } from "../api/client";
 import type { Invitation, Page, SupportGrant, Tolerance, UserRow, Vendor } from "../api/types";
 import { useSession } from "../app/session";
 import { SETTINGS_NAV } from "../app/routes";
-import { Banner, Dialog, ErrorState, Field, Loading, NarrowNote, PageHead, StatusChip, toast, usePageTitle } from "../components/ui";
+import { Banner, Dialog, ErrorState, Field, Loading, PageHead, StatusChip, toast, usePageTitle } from "../components/ui";
 import { isDecimal, compareDecimal } from "../lib/decimal";
 import { plural, when } from "../lib/format";
 import { ROLES } from "../lib/words";
+import { AccountDataPanel } from "./AccountData";
 
 export function SettingsPage() {
   usePageTitle("Settings");
@@ -95,7 +96,6 @@ export function TolerancesPage() {
   return (
     <>
       <PageHead title="Tolerances" crumbs={<Link to="/settings">Settings</Link>} lede={editable ? "Each save creates a new version; earlier results keep the version they used." : "Read only for your role."} />
-      <NarrowNote />
       <Banner tone="warn">
         <p>{d.receipt_note}</p>
       </Banner>
@@ -375,6 +375,7 @@ export function UsersPage() {
           </table>
         </div>
         <SupportAccessPanel />
+        <AccountDataPanel />
       </div>
       <Dialog
         open={!!change}

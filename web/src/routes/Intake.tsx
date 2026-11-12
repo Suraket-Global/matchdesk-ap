@@ -7,7 +7,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, errorText, get, newKey, send, upload } from "../api/client";
 import type { Batch, BatchFile, BatchTotals, IntakeEmail, Page } from "../api/types";
 import { useSession } from "../app/session";
-import { Banner, Dialog, Empty, ErrorState, Loading, NarrowNote, PageHead, StatusChip, ThrottledStatus, toast, usePageTitle } from "../components/ui";
+import { Banner, Dialog, Empty, ErrorState, Loading, PageHead, StatusChip, ThrottledStatus, toast, usePageTitle } from "../components/ui";
 import { FAILURE_CODES } from "../lib/words";
 import { plural, when } from "../lib/format";
 
@@ -110,7 +110,6 @@ function useUploader(onDone: (batchId: string) => void) {
 function DropZone({ onFiles, disabled }: { onFiles: (f: File[]) => void; disabled: boolean }) {
   return (
     <FileDropzone
-      className="wide-only"
       title="Drop invoice and credit-note files here"
       hint="PDF, PNG or JPEG, up to 20 MB each and 500 per batch. The same file twice becomes one document."
       accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg"
@@ -175,7 +174,6 @@ export function IntakeListPage() {
   return (
     <>
       <PageHead title="Invoice intake" lede="Upload a month of invoices and credit notes and see what happened to each file." />
-      <NarrowNote />
       {can("upload") && <DropZone onFiles={(f) => start(f)} disabled={busy} />}
       <PendingList pending={pending} />
       <section aria-labelledby="batches-h">

@@ -3505,3 +3505,96 @@ details.fold {
   color: var(--review-fg);
   font-weight: 600;
 }
+
+/* ================================================================ B9: remaining pieces */
+.danger-text {
+  color: var(--danger-fg);
+}
+.le-head .danger-text {
+  margin-left: auto;
+}
+.removed-lines {
+  margin: 0 var(--s-4) var(--s-3);
+  font-size: 13px;
+}
+.removed-lines summary {
+  cursor: pointer;
+  color: var(--text-2);
+}
+.declaration {
+  display: grid;
+  gap: var(--s-2);
+  margin-top: var(--s-2);
+  justify-items: start;
+}
+.declared-note {
+  margin: 0 0 var(--s-3);
+  font-size: 13px;
+  color: var(--text-2);
+}
+.ctl-decision {
+  display: grid;
+  gap: var(--s-3);
+  min-width: 0;
+}
+.decision-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+}
+.decision-buttons .btn {
+  flex: 1 1 auto;
+}
+.assignee-field {
+  margin: 0;
+}
+.cell-sub.assignee {
+  color: var(--text-2);
+}
+.bulk-assign select {
+  min-height: 32px;
+}
+.saved-mapping {
+  max-width: 320px;
+}
+.po-changes p {
+  margin: 0 0 var(--s-1);
+}
+.po-changes ul {
+  margin: 0;
+}
+.data-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-3) var(--s-6);
+  justify-content: space-between;
+  align-items: flex-start;
+  padding-bottom: var(--s-4);
+  border-bottom: 1px solid var(--border);
+}
+.data-row:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+.data-row > div:first-child {
+  flex: 1 1 320px;
+  min-width: 0;
+}
+.data-row h3 {
+  margin: 0 0 var(--s-1);
+  font-size: 14px;
+}
+.data-row p {
+  margin: 0 0 var(--s-2);
+}
+.outcomes-table .btn {
+  white-space: nowrap;
+}
+@media (max-width: 639px) {
+  .le-head {
+    flex-wrap: wrap;
+  }
+  .data-row .actions {
+    width: 100%;
+  }
+}

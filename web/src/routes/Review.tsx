@@ -3,11 +3,11 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, errorText, get, send } from "../api/client";
 import type { FieldSource, InvoiceDetail, InvoiceSummary, Page, Review, Vendor } from "../api/types";
-import { Banner, Dialog, ErrorState, Loading, NarrowNote, PageHead, StatusChip, toast, usePageTitle } from "../components/ui";
+import { Banner, Dialog, ErrorState, Loading, PageHead, StatusChip, toast, usePageTitle } from "../components/ui";
 import { failedChecks, type LineValues } from "../lib/checks";
 import { formatCents, sumCents, toCents } from "../lib/decimal";
 import { qty } from "../lib/decimal";
-import { time } from "../lib/format";
+import { time, when } from "../lib/format";
 
 const PdfViewer = lazy(() => import("../components/PdfViewer"));
 
@@ -115,6 +115,9 @@ export function ReviewPage() {
   const [version, setVersion] = useState(0);
   const [dirty, setDirty] = useState(false);
   const [accept, setAccept] = useState(false);
+  const [note, setNote] = useState("");
+  const [removing, setRemoving] = useState<{ id: string; line_no: number } | null>(null);
+  const [removeReason, setRemoveReason] = useState("");
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [conflict, setConflict] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -224,6 +227,11 @@ export function ReviewPage() {
       summary.current?.focus();
       return;
     }
+    if (arithmetic.length && accept && !note.trim()) {
+      setError("Say in the note why the document itself does not add up.");
+      document.getElementById("inconsistent-note")?.focus();
+      return;
+    }
     setBusy(true);
     try {
       let v = version;
@@ -231,7 +239,12 @@ export function ReviewPage() {
         const r = await send<Review>("PATCH", `/api/v1/invoices/${invoiceId}/extraction`, payload(false), { ifMatch: v });
         v = r.version;
       }
-      await send("POST", `/api/v1/invoices/${invoiceId}/confirm-extraction`, { accept_inconsistent: accept }, { ifMatch: v });
+      await send(
+        "POST",
+        `/api/v1/invoices/${invoiceId}/confirm-extraction`,
+        arithmetic.length && accept ? { accept_inconsistent: true, note: note.trim() } : { accept_inconsistent: false },
+        { ifMatch: v },
+      );
       setDirty(false);
       qc.invalidateQueries({ queryKey: ["invoice", invoiceId] });
       qc.invalidateQueries({ queryKey: ["invoices"] });
@@ -242,6 +255,42 @@ export function ReviewPage() {
     } catch (err) {
       if (!onConflict(err)) setError(errorText(err));
       summary.current?.focus();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // B9: a line removed in review is kept in its history; the gates run again on the remaining lines.
+  async function removeLine() {
+    if (!removing) return;
+    setBusy(true);
+    setError(null);
+    try {
+      let v = version;
+      if (dirty || (q.data?.review.review_draft ?? null)) {
+        const kept = payload(false);
+        kept.lines = kept.lines.filter((l) => l.line_no !== removing.line_no);
+        const saved = await send<Review>("PATCH", `/api/v1/invoices/${invoiceId}/extraction`, kept, { ifMatch: v });
+        v = saved.version;
+      }
+      const after = await send<Review & { gates: Record<string, boolean> }>(
+        "POST",
+        `/api/v1/invoices/${invoiceId}/lines/${removing.id}/removal`,
+        { reason: removeReason.trim() || null },
+        { ifMatch: v },
+      );
+      setLines((ls) => ls.filter((l) => l.line_no !== removing.line_no));
+      setVersion(after.version);
+      setDirty(false);
+      loadedFor.current = null;
+      setRemoving(null);
+      setRemoveReason("");
+      qc.invalidateQueries({ queryKey: ["invoice", invoiceId] });
+      const ok = Object.values(after.gates ?? {}).every(Boolean);
+      toast(`Line ${removing.line_no} removed. ${ok ? "The checks pass on the remaining lines." : "The checks were run again on the remaining lines."}`);
+    } catch (err) {
+      if (!onConflict(err)) setError(errorText(err));
+      setRemoving(null);
     } finally {
       setBusy(false);
     }
@@ -269,6 +318,7 @@ export function ReviewPage() {
   // supplier, number, date or line has to be filled in (review, minor).
   const arithmetic = checks.filter((c) => /^Line \d+:|^Lines /.test(c));
   const next = (queue.data?.items ?? []).find((i) => i.id !== invoiceId);
+  const confirmed = (r.verification_status ?? "").startsWith("human_confirmed");
   return (
     <>
       <PageHead
@@ -281,7 +331,6 @@ export function ReviewPage() {
         lede={r.vendor_name_read ? `Supplier name read from the document: ${r.vendor_name_read}` : "No supplier name could be read."}
         actions={<StatusChip status={r.document_state === "needs_review" ? "needs_review" : r.verification_status === "passed" || r.verification_status?.startsWith("human") ? "ready" : "needs_review"} />}
       />
-      <NarrowNote />
       {conflict && (
         <Banner tone="warn" role="alert">
           <p>{conflict}</p>
@@ -382,7 +431,7 @@ export function ReviewPage() {
                 onClick={() => {
                   setLines((ls) => [
                     ...ls,
-                    { line_no: Math.max(0, ...ls.map((l) => l.line_no)) + 1, supplier_item_code: "", description: "", qty: "", uom: "", unit_price: "", amount: "", line_kind: "item" },
+                    { line_no: Math.max(r.next_line_no ?? 1, Math.max(0, ...ls.map((l) => l.line_no)) + 1), supplier_item_code: "", description: "", qty: "", uom: "", unit_price: "", amount: "", line_kind: "item" },
                   ]);
                   setDirty(true);
                 }}
@@ -422,6 +471,7 @@ export function ReviewPage() {
                     )}
                   </div>
                 );
+                const stored = r.line_fields.find((x) => x.line_no === l.line_no);
                 return (
                   <li key={l.line_no} className="le-line">
                     <div className="le-head">
@@ -432,6 +482,22 @@ export function ReviewPage() {
                         <option value="fee">Fee</option>
                         <option value="discount">Discount</option>
                       </select>
+                      {confirmed ? null : stored ? (
+                        <button type="button" className="btn small ghost danger-text" onClick={() => setRemoving({ id: stored.id, line_no: l.line_no })}>
+                          Remove line {l.line_no}
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="btn small ghost"
+                          onClick={() => {
+                            setLines((ls) => ls.filter((_x, j) => j !== i));
+                            setDirty(true);
+                          }}
+                        >
+                          Discard new line
+                        </button>
+                      )}
                     </div>
                     <div className="le-what">{field("supplier_item_code")}{field("description")}</div>
                     <div className="le-sum">{field("qty")}{field("uom")}{field("unit_price")}{field("amount")}</div>
@@ -440,8 +506,23 @@ export function ReviewPage() {
               })}
             </ol>
             <p className="muted small" style={{ padding: "0 16px 12px" }}>
-              Lines cannot be removed here. Correct a misread line's values instead.
+              {confirmed
+                ? "This document is confirmed: its lines stay. Correct a misread value instead."
+                : "Remove a line the reader invented or read twice. It stays in this document's history; the checks run again."}
             </p>
+            {(r.removed_lines ?? []).length > 0 && (
+              <details className="removed-lines">
+                <summary>{(r.removed_lines ?? []).length === 1 ? "1 removed line" : `${(r.removed_lines ?? []).length} removed lines`}</summary>
+                <ul className="plain-list">
+                  {(r.removed_lines ?? []).map((x) => (
+                    <li key={x.id}>
+                      Line {x.line_no}: {x.supplier_item_code ?? "no code"}, {qty(x.qty) || "no quantity"} {x.uom ?? ""} at {x.unit_price ?? "no price"} = {x.amount ?? "no amount"}. Removed {when(x.removed_at)}
+                      {x.removed_reason ? `: ${x.removed_reason}` : "."}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
           </div>
           {arithmetic.length > 0 && (
             <div className="panel panel-body">
@@ -449,7 +530,28 @@ export function ReviewPage() {
                 <input type="checkbox" checked={accept} onChange={(e) => setAccept(e.target.checked)} />
                 <span>The document itself does not add up. It is confirmed as read and the report flags it.</span>
               </label>
+              {accept && (
+                <div className="field" style={{ marginTop: 8 }}>
+                  <label htmlFor="inconsistent-note">Note (required): why the document does not add up</label>
+                  <textarea
+                    id="inconsistent-note"
+                    rows={2}
+                    maxLength={2000}
+                    value={note}
+                    onChange={(e) => setNote(e.target.value)}
+                    placeholder="For example: the printed total leaves out the eco fee on line 3"
+                  />
+                  <span className="hint">Kept with the document, in its history and in the report.</span>
+                </div>
+              )}
             </div>
+          )}
+          {r.inconsistent_note && (
+            <Banner tone="warn">
+              <p>
+                Confirmed as not adding up: <q>{r.inconsistent_note}</q>
+              </p>
+            </Banner>
           )}
           <div className="actions">
             <button className="btn primary" onClick={confirmAndMatch} disabled={busy}>
@@ -466,6 +568,28 @@ export function ReviewPage() {
           </div>
         </section>
       </div>
+      <Dialog
+        open={!!removing}
+        title={`Remove line ${removing?.line_no ?? ""}`}
+        description="The line stays in this document's history with your name and reason. The checks run again on the remaining lines."
+        onClose={() => setRemoving(null)}
+        footer={
+          <>
+            <button className="btn" data-safe onClick={() => setRemoving(null)}>
+              Keep the line
+            </button>
+            <button className="btn danger" disabled={busy} onClick={() => void removeLine()}>
+              Remove line {removing?.line_no}
+            </button>
+          </>
+        }
+      >
+        <div className="field">
+          <label htmlFor="remove-reason">Reason</label>
+          <input id="remove-reason" value={removeReason} maxLength={1000} onChange={(e) => setRemoveReason(e.target.value)} placeholder="For example: printed twice" />
+        </div>
+        {dirty && <p className="muted small">Your other changes are saved first.</p>}
+      </Dialog>
       <Dialog
         open={!!history}
         title={`History: ${history?.label ?? ""}`}

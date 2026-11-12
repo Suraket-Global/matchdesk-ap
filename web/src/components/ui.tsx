@@ -101,15 +101,6 @@ export function ThrottledStatus({ text, final }: { text: string; final?: boolean
   );
 }
 
-export function NarrowNote() {
-  return (
-    <div className="narrow-note banner warn">
-      <AlertTriangle size={18} aria-hidden="true" />
-      <p>Open in a wider window to work on this.</p>
-    </div>
-  );
-}
-
 /* ------------------------------------------------------------ error boundary */
 
 

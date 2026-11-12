@@ -81,7 +81,7 @@ export function WeeklyPage() {
       </div>
       {q.isLoading && <Loading />}
       {q.error && <ErrorState error={q.error} retry={() => q.refetch()} />}
-      {w && w.state && w.state !== "measured" && w.state !== "unavailable" && (
+      {w && w.state && w.state !== "measured" && w.state !== "no_receiving_records" && w.state !== "unavailable" && (
         <div className="panel">
           <Empty title={w.state === "awaiting_invoices" ? "Nothing checked for this week" : w.state === "processing" ? "This week is still being read and matched" : "Waiting for receiving evidence"}>
             <p>
@@ -94,7 +94,7 @@ export function WeeklyPage() {
           </Empty>
         </div>
       )}
-      {w && (!w.state || w.state === "measured" || w.state === "unavailable") && (
+      {w && (!w.state || w.state === "measured" || w.state === "no_receiving_records" || w.state === "unavailable") && (
         <>
           <div className="cards">
             <div>

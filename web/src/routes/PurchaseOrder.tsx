@@ -3,15 +3,20 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { errorText, get, send } from "../api/client";
 import type { InvoiceDetail, InvoiceSummary, Page, PurchaseOrder } from "../api/types";
 import { useSession } from "../app/session";
-import { ErrorState, Loading, PageHead, toast, usePageTitle } from "../components/ui";
+import { Banner, ErrorState, Loading, PageHead, toast, usePageTitle } from "../components/ui";
 import { money, price, qty } from "../lib/decimal";
-import { day, plural } from "../lib/format";
+import { day, plural, when } from "../lib/format";
 
 /** S-10: everything that happened on one purchase order. */
 export function PurchaseOrderPage() {
   const { poId } = useParams();
   const { can } = useSession();
-  const q = useQuery({ queryKey: ["purchase-order", poId], queryFn: () => get<PurchaseOrder>(`/api/v1/purchase-orders/${poId}`) });
+  const q = useQuery({
+    queryKey: ["purchase-order", poId],
+    queryFn: () => get<PurchaseOrder>(`/api/v1/purchase-orders/${poId}`),
+    // While the affected lines are being matched again, the banner updates by itself.
+    refetchInterval: (query) => (query.state.data?.changed_in_quickbooks && !query.state.data.changed_in_quickbooks.rematched_at ? 3000 : false),
+  });
   usePageTitle("Purchase order", q.data ? `PO ${q.data.po_number}` : null);
   const invoices = useQuery({
     queryKey: ["invoices", "po", q.data?.vendor_id],
@@ -75,6 +80,7 @@ export function PurchaseOrderPage() {
         }
       />
       {reread.error && <p className="error-text">{errorText(reread.error)}</p>}
+      {po.changed_in_quickbooks && <ChangedInQuickBooks change={po.changed_in_quickbooks} />}
       <div className="table-wrap">
         <table className="stack-sm">
           <thead>
@@ -97,7 +103,10 @@ export function PurchaseOrderPage() {
               return (
                 <tr key={l.id}>
                   <td data-label="Line" className="num">{l.line_no}</td>
-                  <td data-label="Item">{l.description ?? l.charge_kind ?? ""}</td>
+                  <td data-label="Item">
+                    {l.description ?? l.charge_kind ?? ""}
+                    {l.removed_at && <div className="muted small">No longer returned by QuickBooks (last copy shown)</div>}
+                  </td>
                   <td data-label="Ordered" className="num">
                     {qty(l.qty_ordered)} {l.uom}
                   </td>
@@ -158,4 +167,34 @@ function fmt(n: bigint, scale: number): string {
   const s = (neg ? -n : n).toString().padStart(scale + 1, "0");
   const out = `${s.slice(0, -scale)}.${s.slice(-scale)}`.replace(/\.?0+$/, "");
   return (neg ? "-" : "") + out;
+}
+
+const FIELD_WORDS: Record<string, string> = { qty_ordered: "Ordered", unit_price: "Unit price", uom: "Unit", item_id: "Item", description: "Description", line_no: "Line number" };
+
+/** S-10 (B9): a QuickBooks read changed or removed lines that had already been matched. */
+function ChangedInQuickBooks({ change }: { change: NonNullable<PurchaseOrder["changed_in_quickbooks"]> }) {
+  const show = (k: string, v: unknown) => (v === null || v === undefined || v === "" ? "none" : k === "unit_price" ? price(String(v)) : k === "qty_ordered" ? qty(String(v)) : k === "item_id" ? "another item" : String(v));
+  return (
+    <Banner tone="warn" role="status">
+      <div className="po-changes" data-testid="changed-in-quickbooks">
+        <p>
+          <strong>Changed in QuickBooks</strong> since these lines were matched: read {when(change.detected_at)}.{" "}
+          {change.rematched_at ? `The affected lines were matched again ${when(change.rematched_at)}.` : "The affected lines are being matched again…"}
+        </p>
+        <ul className="plain-list">
+          {change.changes.map((c) => (
+            <li key={c.po_line_id}>
+              Line {c.line_no ?? "?"}:{" "}
+              {c.change === "removed"
+                ? `deleted in QuickBooks (was ${show("qty_ordered", c.before.qty_ordered)} ${c.before.uom ?? ""} at ${show("unit_price", c.before.unit_price)}). Shown as "No longer returned by QuickBooks".`
+                : Object.keys(c.before)
+                    .filter((k) => String(c.before[k] ?? "") !== String(c.after?.[k] ?? ""))
+                    .map((k) => `${FIELD_WORDS[k] ?? k} ${show(k, c.before[k])} → ${show(k, c.after?.[k])}`)
+                    .join("; ")}
+            </li>
+          ))}
+        </ul>
+      </div>
+    </Banner>
+  );
 }

@@ -55,6 +55,10 @@ export interface ExceptionItem {
   possibly_credited: boolean;
   label: string | null;
   allowed_codes: string[];
+  assigned_to?: string | null;
+  assigned_to_name?: string | null;
+  credit_decision?: "credited" | "not_credited" | null;
+  credit_bill?: { doc_number: string | null; txn_date: string | null; total: string | null } | null;
   stale: boolean | null;
   version: number;
   vendor_id?: string | null;
@@ -95,7 +99,18 @@ export interface Neighbours {
 }
 
 /** B8: why a period's figures can or cannot be read (empty versus zero). */
-export type MeasurementState = "awaiting_invoices" | "awaiting_receiving" | "processing" | "measured" | "unavailable";
+export type MeasurementState = "awaiting_invoices" | "awaiting_receiving" | "no_receiving_records" | "processing" | "measured" | "unavailable";
+
+/** States whose coverage figures are measured values (B9: with the declaration 0 % is measured). */
+export const FIGURE_STATES: MeasurementState[] = ["measured", "no_receiving_records"];
+
+export interface NoReceivingDeclaration {
+  id: string;
+  statement: string;
+  declared_by: string;
+  declared_by_name: string | null;
+  declared_at: string;
+}
 
 export interface InvoiceSummary {
   id: string;
@@ -234,6 +249,9 @@ export interface Review {
   confirmed_by: string | null;
   confirmed_at: string | null;
   line_fields: ReviewLine[];
+  removed_lines?: (ReviewLine & { removed_by: string | null; removed_at: string | null; removed_reason: string | null })[];
+  next_line_no?: number;
+  inconsistent_note?: string | null;
   version: number;
   failed_checks?: string[];
   [k: string]: unknown;
@@ -313,7 +331,9 @@ export interface ReceivingImport {
   counts_as_evidence: boolean;
   file_name?: string | null;
   created_at?: string;
-  preview?: { headers: string[]; sample_rows: (string | null)[][]; rows_total: number };
+  preview?: { headers: string[]; sample_rows: (string | null)[][]; rows_total: number; applied_mapping?: SavedMapping | null };
+  mapping_id?: string | null;
+  expires_at?: string | null;
   validation?: { rows_total: number; rows_valid: number; rows_rejected: number; rejected_rows: { row: number; reason: string; value?: unknown }[] };
   receipts?: {
     id: string;
@@ -328,6 +348,13 @@ export interface ReceivingImport {
   }[];
   late_lines?: number;
   match_run_id?: string | null;
+}
+
+export interface SavedMapping {
+  id: string;
+  name: string;
+  columns: Record<string, string>;
+  created_at: string;
 }
 
 export interface Alias {
@@ -374,6 +401,8 @@ export interface Approval {
   alias?: Alias;
   /** B8: the invoice lines a conversion re-matches. */
   affected?: AffectedLine[];
+  /** B9: late receiving evidence: the exceptions open now on its purchase-order lines. */
+  would_clear?: { id: string; invoice_id: string; invoice_line_id: string | null; type: string; doc_number: string | null; line_no: number | null; value: string }[];
 }
 
 export interface AffectedLine {
@@ -500,7 +529,19 @@ export interface PurchaseOrder {
     charge_kind: string | null;
     qty_received_counting: string;
     counting_receipt_lines: number;
+    removed_at?: string | null;
   }[];
+  changed_in_quickbooks?: null | {
+    detected_at: string;
+    rematched_at: string | null;
+    changes: {
+      po_line_id: string;
+      line_no: number | null;
+      change: "changed" | "removed";
+      before: Record<string, string | number | null>;
+      after: Record<string, string | number | null> | null;
+    }[];
+  };
 }
 
 export interface Vendor {
@@ -526,6 +567,62 @@ export interface Coverage {
   receipt_coverage_pct: string | null;
   coverage_class_a_pct: string | null;
   coverage_class_b_pct: string | null;
+  no_receiving_declaration?: NoReceivingDeclaration | null;
+}
+
+// ---------------------------------------------------------------- B9
+export interface Member {
+  user_id: string;
+  name: string | null;
+  role: string;
+}
+
+export interface OutcomeRecord {
+  amount: string;
+  recorded_by: string;
+  recorded_by_name: string | null;
+  recorded_at: string;
+  credit_document_id: string | null;
+  credit_reference: string | null;
+  note: string | null;
+}
+
+export interface OutcomeCounts {
+  flagged: ReportSection;
+  controller_confirmed: ReportSection;
+  credit_recovered: ReportSection;
+}
+
+export interface Outcomes {
+  is_governing: boolean;
+  totals: OutcomeCounts;
+  by_finding: Record<string, { controller_confirmed?: OutcomeRecord; credit_recovered?: OutcomeRecord }>;
+}
+
+export interface ArchiveExport {
+  id: string;
+  status: "queued" | "running" | "ready" | "failed" | "expired";
+  requested_at: string;
+  finished_at: string | null;
+  expires_at: string | null;
+  file_count: number | null;
+  byte_size: number | null;
+  downloadable: boolean;
+}
+
+export interface DeletionRequest {
+  id: string;
+  tenant_id: string;
+  tenant_name?: string | null;
+  status: "requested" | "scheduled" | "declined" | "cancelled" | "executed";
+  reason: string | null;
+  requested_by: string;
+  requested_by_name?: string | null;
+  requested_at: string;
+  decided_at: string | null;
+  decision_note: string | null;
+  delete_after: string | null;
+  version: number;
 }
 
 // ---------------------------------------------------------------- B7

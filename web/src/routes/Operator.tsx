@@ -3,9 +3,9 @@ import { Link, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Building2, Eye, Plus } from "lucide-react";
 import { ApiError, errorText, get, send } from "../api/client";
-import type { Me, OperatorTenant, Page, Pilot } from "../api/types";
+import type { DeletionRequest, Me, OperatorTenant, Page, Pilot } from "../api/types";
 import { useSession } from "../app/session";
-import { Banner, Empty, ErrorState, Field, Loading, PageHead, StatusChip, toast, usePageTitle } from "../components/ui";
+import { Banner, Dialog, Empty, ErrorState, Field, Loading, PageHead, StatusChip, toast, usePageTitle } from "../components/ui";
 import { cad } from "../lib/decimal";
 import { day, plural, when } from "../lib/format";
 import { OUTCOME_WORDS, PAYMENT_WORDS } from "./Pilot";
@@ -58,6 +58,7 @@ function TenantList() {
         </button>
         {create.error && <span className="error-text">{errorText(create.error)}</span>}
       </form>
+      <DeletionRequests />
       {list.isLoading && <Loading />}
       {list.error && <ErrorState error={list.error} retry={() => list.refetch()} />}
       {list.data && list.data.items.length === 0 && (
@@ -420,5 +421,83 @@ function TenantDetail() {
         </div>
       </div>
     </>
+  );
+}
+
+/** B9, S-18: account deletion requests from controllers. Scheduling gives 30 days' notice; the
+ * deletion then runs by itself and leaves only a ledger record. */
+function DeletionRequests() {
+  const qc = useQueryClient();
+  const q = useQuery({ queryKey: ["operator", "deletions"], queryFn: () => get<{ items: DeletionRequest[] }>("/api/v1/operator/deletion-requests") });
+  const [pick, setPick] = useState<{ r: DeletionRequest; decision: "schedule" | "decline" } | null>(null);
+  const [note, setNote] = useState("");
+  const decide = useMutation({
+    mutationFn: () => send<{ request: DeletionRequest }>("POST", `/api/v1/operator/deletion-requests/${pick!.r.id}/decision`, { decision: pick!.decision, note: note.trim() || null }, { ifMatch: pick!.r.version }),
+    onSuccess: (x) => {
+      qc.invalidateQueries({ queryKey: ["operator"] });
+      toast(x.request.status === "scheduled" ? `Deletion scheduled for ${day(x.request.delete_after)}.` : "Deletion request declined.");
+      setPick(null);
+      setNote("");
+    },
+  });
+  const items = q.data?.items ?? [];
+  const open = items.filter((r) => r.status === "requested" || r.status === "scheduled");
+  if (!items.length) return null;
+  return (
+    <section className="panel" aria-labelledby="del-h" style={{ marginBottom: 16 }}>
+      <div className="panel-head">
+        <h2 id="del-h">Account deletion requests</h2>
+        <span className="muted small">{plural(open.length, "open request")}</span>
+      </div>
+      <div className="panel-body stack">
+        {items.slice(0, 10).map((r) => (
+          <div key={r.id} className="grant-row">
+            <div>
+              <StatusChip status={r.status === "scheduled" ? "pending_approval" : r.status === "requested" ? "queued" : "auto_closed"} word={{ requested: "Requested", scheduled: "Scheduled", declined: "Declined", cancelled: "Cancelled", executed: "Deleted" }[r.status]} />{" "}
+              <strong>{r.tenant_name ?? "Account"}</strong>: asked {when(r.requested_at)}
+              {r.reason ? `. Reason: ${r.reason}` : ""}.
+              {r.status === "scheduled" && <div className="small muted">Deletes on {day(r.delete_after)} unless the controller cancels.</div>}
+              {r.decision_note && <div className="small muted">Note: {r.decision_note}</div>}
+            </div>
+            {r.status === "requested" && (
+              <div className="actions">
+                <button className="btn small" onClick={() => setPick({ r, decision: "decline" })}>
+                  Decline
+                </button>
+                <button className="btn small danger" onClick={() => setPick({ r, decision: "schedule" })}>
+                  Schedule deletion
+                </button>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+      <Dialog
+        open={!!pick}
+        title={pick?.decision === "schedule" ? `Schedule deletion of ${pick?.r.tenant_name ?? "this account"}` : "Decline the deletion request"}
+        description={
+          pick?.decision === "schedule"
+            ? "In 30 days every file and row of the account is deleted, approved reports and the audit log with them; only a ledger record stays. The controller can cancel until then."
+            : "The account stays as it is. Say why; the controller sees the note."
+        }
+        onClose={() => setPick(null)}
+        footer={
+          <>
+            <button className="btn" data-safe onClick={() => setPick(null)}>
+              Cancel
+            </button>
+            <button className={`btn ${pick?.decision === "schedule" ? "danger" : "primary"}`} disabled={decide.isPending} onClick={() => decide.mutate()}>
+              {pick?.decision === "schedule" ? "Schedule deletion" : "Decline"}
+            </button>
+          </>
+        }
+      >
+        <div className="field">
+          <label htmlFor="del-note">Note{pick?.decision === "decline" ? "" : " (optional)"}</label>
+          <textarea id="del-note" rows={2} value={note} maxLength={2000} onChange={(e) => setNote(e.target.value)} />
+        </div>
+        {decide.error && <p className="error-text">{errorText(decide.error)}</p>}
+      </Dialog>
+    </section>
   );
 }

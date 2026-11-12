@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { errorText, get, send } from "../api/client";
 import type { Alias, ExceptionPage, Item, Page, Vendor } from "../api/types";
 import { useSession } from "../app/session";
-import { Banner, Dialog, Empty, ErrorState, Field, Loading, NarrowNote, PageHead, StatusChip, toast, usePageTitle } from "../components/ui";
+import { Banner, Dialog, Empty, ErrorState, Field, Loading, PageHead, StatusChip, toast, usePageTitle } from "../components/ui";
 import { divide, isDecimal, multiply, qty } from "../lib/decimal";
 import { plural, when } from "../lib/format";
 
@@ -140,7 +140,6 @@ export function AliasesPage() {
   return (
     <>
       <PageHead title="Alias and unit map" lede="A supplier's item code mapped once to our item and unit. Conversions other than 1 need the controller." />
-      <NarrowNote />
       {unconfirmedCodes.length > 0 && (
         <Banner tone="draft">
           <p>
@@ -164,7 +163,7 @@ export function AliasesPage() {
         </Banner>
       )}
       {can("edit_alias") && (
-        <section className="panel wide-only" aria-labelledby="new-h" style={{ marginBottom: 16 }}>
+        <section className="panel" aria-labelledby="new-h" style={{ marginBottom: 16 }}>
           <div className="panel-head">
             <h2 id="new-h">Confirm an alias</h2>
           </div>

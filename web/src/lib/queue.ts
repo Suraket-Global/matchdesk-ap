@@ -28,9 +28,11 @@ export interface QueueScope {
   sort: string;
   /** Where the scope came from ("weekly"), for the words on the scope bar. */
   src: string;
+  /** B9: "me", "none" (unassigned) or a member's id; empty means everyone. */
+  assignee: string;
 }
 
-const KEYS = ["status", "type", "vendor", "from", "to", "min", "max", "sort", "src"] as const;
+const KEYS = ["status", "type", "vendor", "from", "to", "min", "max", "sort", "src", "assignee"] as const;
 
 export function readScope(p: URLSearchParams): QueueScope {
   const get = (k: string) => p.get(k) ?? "";
@@ -44,6 +46,7 @@ export function readScope(p: URLSearchParams): QueueScope {
     max: get("max"),
     sort: get("sort") || "value",
     src: get("src"),
+    assignee: get("assignee"),
   };
 }
 
@@ -61,6 +64,7 @@ export function apiQuery(s: QueueScope, month: string): URLSearchParams {
   if (s.vendor) q.set("vendor_id", s.vendor);
   if (s.min) q.set("min_value", s.min);
   if (s.max) q.set("max_value", s.max);
+  if (s.assignee) q.set("assignee", s.assignee);
   return q;
 }
 
@@ -104,21 +108,63 @@ export function dateRangeWords(start: string, end: string): string {
 }
 
 /** One line naming the queue, for crumbs and the match view: "Fictional Fasteners Ltd, 5 to 11 Oct 2026". */
-export function describeScope(s: QueueScope, month: string, vendorName?: string | null): string {
+export function describeScope(s: QueueScope, month: string, vendorName?: string | null, assigneeName?: string | null): string {
   const d = scopeDates(s, month);
   const parts = [dateRangeWords(d.start, d.end)];
   if (s.vendor) parts.unshift(s.vendor === "none" ? "Supplier not identified" : vendorName ?? "One supplier");
   if (s.type) parts.push(EXCEPTION_TYPES[s.type] ?? s.type);
+  if (s.assignee) parts.push(assigneeWords(s.assignee, assigneeName));
   if (s.status !== DEFAULT_STATUS) parts.push(STATUS_WORDS[s.status] ?? s.status);
   return parts.join(", ");
 }
 
-// The last queue the person opened in this tab, so "Exceptions" in the sidebar returns to it with its
-// filters (B8: the navigation keeps the task's entry point). In memory only, never browser storage.
-let lastQueue = "/exceptions";
-export function rememberQueue(url: string): void {
-  if (url.startsWith("/exceptions")) lastQueue = url;
+export function assigneeWords(a: string, name?: string | null): string {
+  if (a === "me") return "Assigned to me";
+  if (a === "none") return "Unassigned";
+  return name ? `Assigned to ${name}` : "Assigned to one person";
 }
+
+// The last queue the person opened in this tab, so "Exceptions" in the sidebar returns to it with its
+// filters (B8: the navigation keeps the task's entry point). B9: kept in sessionStorage too, so it
+// survives a reload of the tab. Only the queue path and its scope keys are kept (dates, codes,
+// identifiers, value bounds): never a document, a name, a price or a note. Storage may be refused
+// (private mode, blocked site data); then it lives in memory as before.
+const STORE_KEY = "md.lastQueue";
+let lastQueue = "/exceptions";
+
+/** The queue address reduced to its scope keys, or null when it is not a queue address. */
+export function cleanQueueUrl(url: string): string | null {
+  if (!url.startsWith("/exceptions")) return null;
+  const [path, query = ""] = url.split("?", 2);
+  if (path !== "/exceptions") return null;
+  const kept = new URLSearchParams();
+  const given = new URLSearchParams(query);
+  for (const k of KEYS) {
+    const v = given.get(k);
+    if (v && /^[\w.,:-]{1,80}$/.test(v)) kept.set(k, v);
+  }
+  const q = kept.toString();
+  return q ? `/exceptions?${q}` : "/exceptions";
+}
+
+export function rememberQueue(url: string): void {
+  const clean = cleanQueueUrl(url);
+  if (!clean) return;
+  lastQueue = clean;
+  try {
+    window.sessionStorage.setItem(STORE_KEY, clean);
+  } catch {
+    /* storage refused: memory only */
+  }
+}
+
 export function lastQueueUrl(): string {
+  try {
+    const stored = window.sessionStorage.getItem(STORE_KEY);
+    const clean = stored ? cleanQueueUrl(stored) : null;
+    if (clean) return clean;
+  } catch {
+    /* storage refused: memory only */
+  }
   return lastQueue;
 }

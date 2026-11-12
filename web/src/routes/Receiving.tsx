@@ -2,11 +2,13 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, errorText, get, send, upload } from "../api/client";
-import type { Page, ReceivingImport } from "../api/types";
+import type { Coverage, Page, ReceivingImport, SavedMapping } from "../api/types";
+import { FIGURE_STATES } from "../api/types";
+import { usePeriod } from "../app/period";
 import { useSession } from "../app/session";
-import { Banner, Dialog, Empty, ErrorState, Field, Loading, NarrowNote, PageHead, StatusChip, toast, usePageTitle } from "../components/ui";
+import { Banner, Dialog, Empty, ErrorState, Field, Loading, PageHead, StatusChip, toast, usePageTitle } from "../components/ui";
 import { EVIDENCE_CLASSES } from "../lib/words";
-import { day, plural, safePath, when } from "../lib/format";
+import { day, monthName, monthRange, plural, safePath, when } from "../lib/format";
 
 const REJECT_WORDS: Record<string, string> = {
   po_not_found: "Unknown PO number",
@@ -54,6 +56,7 @@ export function ReceivingListPage() {
         title="Receiving imports"
         lede="Warehouse receiving logs and receiver-signed delivery documents. Each receipt line shows the file, the row and the kind of evidence."
       />
+      <CoverageSummary />
       {can("upload") && <UploadForm />}
       <section style={{ marginTop: 16 }} aria-labelledby="imports-h">
         <h2 id="imports-h" style={{ marginBottom: 8 }}>
@@ -109,6 +112,7 @@ export function ReceivingListPage() {
                     <td data-label="Waiting for approval" className="num">{i.late_lines_waiting ? <Link to="/approvals">{i.late_lines_waiting}</Link> : i.state === "succeeded" ? 0 : ""}</td>
                     <td data-label="Status">
                       <StatusChip status={status(i)} word={i.state === "draft" ? "Draft, not imported" : undefined} />
+                      {i.state === "draft" && i.expires_at && <div className="muted small">Removed on {day(i.expires_at)} if not imported</div>}
                     </td>
                   </tr>
                 ))}
@@ -243,6 +247,12 @@ export function ReceivingImportPage() {
   const imp = q.data;
   const headers = imp?.preview?.headers ?? [];
   const [map, setMap] = useState<Record<string, string>>({});
+  const [saveAs, setSaveAs] = useState("Warehouse log");
+  const saved = useQuery({
+    queryKey: ["receiving", "mappings"],
+    queryFn: () => get<{ items: SavedMapping[] }>("/api/v1/receiving/mappings"),
+    enabled: can("upload"),
+  });
   const [mapErr, setMapErr] = useState<string | null>(null);
   const [validation, setValidation] = useState<ReceivingImport | null>(null);
   const [complete, setComplete] = useState(true);
@@ -272,13 +282,14 @@ export function ReceivingImportPage() {
   const saveMapping = useMutation({
     mutationFn: () => {
       const cols = Object.fromEntries(Object.entries(map).filter(([, v]) => v));
-      return send<ReceivingImport>("PUT", `/api/v1/receiving/imports/${importId}/mapping`, { columns: cols, save_as: "Warehouse log" });
+      return send<ReceivingImport>("PUT", `/api/v1/receiving/imports/${importId}/mapping`, { columns: cols, save_as: saveAs.trim() || null });
     },
     onSuccess: (r) => {
       // The validation counts are in `validation`; the import fields beside it predate the check.
       const merged = { ...r, ...(r.validation as Partial<ReceivingImport>) };
       setValidation(merged);
       qc.setQueryData(key, { ...imp, ...merged, preview: imp?.preview });
+      qc.invalidateQueries({ queryKey: ["receiving", "mappings"] });
       window.setTimeout(() => summaryRef.current?.focus(), 0);
     },
     onError: (e) => {
@@ -326,7 +337,10 @@ export function ReceivingImportPage() {
   if (q.error) return <ErrorState error={q.error} retry={() => q.refetch()} />;
   if (!imp) return null;
   const draft = imp.state === "draft";
-  const v = validation ?? (imp.column_map ? imp : null);
+  // A pre-applied saved mapping is only a proposal: the rows are checked once the clerk asks (B9).
+  const v = validation ?? (imp.column_map && imp.rows_valid !== null ? imp : null);
+  const applied = (saved.data?.items ?? []).find((m) => m.id === imp.mapping_id) ?? imp.preview?.applied_mapping ?? null;
+  const fits = (m: SavedMapping) => Object.values(m.columns).every((c) => headers.includes(c));
   const mappingPanel = (
           <section className="panel" aria-labelledby="map-h">
             <div className="panel-head">
@@ -334,7 +348,40 @@ export function ReceivingImportPage() {
               <span className="muted">{plural(imp.preview?.rows_total ?? imp.rows_total ?? 0, "row")} in the file</span>
             </div>
             <div className="panel-body">
-              <div className="inline-form">
+              {applied && !validation && (
+                <Banner tone="info">
+                  <p>
+                    The saved mapping <strong>{applied.name}</strong> fits this file and is filled in. Check each column, then
+                    check the rows.
+                  </p>
+                </Banner>
+              )}
+              {(saved.data?.items ?? []).length > 0 && (
+                <div className="field saved-mapping">
+                  <label htmlFor="saved-map">Use a saved mapping</label>
+                  <select
+                    id="saved-map"
+                    value=""
+                    onChange={(e) => {
+                      const m = saved.data?.items.find((x) => x.id === e.target.value);
+                      if (m) {
+                        setMap({ ...m.columns });
+                        setSaveAs(m.name);
+                        toast(`Mapping "${m.name}" filled in. Check the columns.`);
+                      }
+                    }}
+                  >
+                    <option value="">Choose…</option>
+                    {(saved.data?.items ?? []).map((m) => (
+                      <option key={m.id} value={m.id} disabled={!fits(m)}>
+                        {m.name}
+                        {fits(m) ? "" : " (columns not in this file)"}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              <div className="inline-form map-form">
                 {TARGETS.map((t) => (
                   <div className="field" key={t.key}>
                     <label htmlFor={`map-${t.key}`}>
@@ -379,6 +426,11 @@ export function ReceivingImportPage() {
                   </table>
                 </div>
               )}
+              <div className="field" style={{ marginTop: 12, maxWidth: 320 }}>
+                <label htmlFor="save-as">Save this mapping as</label>
+                <input id="save-as" value={saveAs} maxLength={80} onChange={(e) => setSaveAs(e.target.value)} />
+                <span className="hint">The next file with these columns starts from it.</span>
+              </div>
               <div className="actions" style={{ marginTop: 12 }}>
                 <button
                   className="btn"
@@ -412,7 +464,6 @@ export function ReceivingImportPage() {
           </>
         }
       />
-      <NarrowNote />
       {imp.evidence_class === "C" && (
         <Banner tone="warn">Supplier documents only. Accepted and shown as context, labelled "Supplier's packing slip. Not counted as a receipt."</Banner>
       )}
@@ -431,7 +482,7 @@ export function ReceivingImportPage() {
       {imp.state === "voided" && <Banner tone="warn">Voided: {imp.void_reason}. Its receipt lines no longer count.</Banner>}
 
       {draft && can("upload") && (
-        <div className="stack wide-only">
+        <div className="stack">
           {!v && mappingPanel}
           <section className="panel" aria-labelledby="val-h">
             <div className="panel-head">
@@ -672,5 +723,30 @@ function ReceiptsTable({ imp }: { imp: ReceivingImport }) {
         </div>
       )}
     </section>
+  );
+}
+
+/** S-05 coverage summary (B9): invoiced PO item lines of the test month with a counting receipt, by
+ * class, the same figures and denominator as the queue strip and the report draft. */
+function CoverageSummary() {
+  const { month } = usePeriod();
+  const { start, end } = monthRange(month);
+  const cov = useQuery({
+    queryKey: ["coverage", start, end],
+    queryFn: () => get<Coverage>(`/api/v1/coverage?period_start=${start}&period_end=${end}`),
+  });
+  const c = cov.data;
+  if (!c) return null;
+  const measured = c.state ? FIGURE_STATES.includes(c.state) : c.item_lines > 0;
+  const pct = (v: string | null) => (v ? `${v.replace(/\.00$/, "")}%` : "not measured");
+  return (
+    <p className="coverage-line" data-testid="receiving-coverage">
+      <strong>Receipt coverage, {monthName(month)}:</strong>{" "}
+      {c.state === "no_receiving_records"
+        ? "0%: the controller declared that no warehouse receiving records exist."
+        : measured
+          ? `${pct(c.receipt_coverage_pct)} of ${plural(c.item_lines, "invoiced PO line")} have a counting receipt (signed delivery documents ${pct(c.coverage_class_b_pct)}); ${pct(c.coverage_class_a_pct)} are inside a warehouse log declared complete.`
+          : "not measured yet: it needs invoices for the month and their match results."}
+    </p>
   );
 }

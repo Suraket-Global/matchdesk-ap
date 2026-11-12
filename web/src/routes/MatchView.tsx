@@ -11,6 +11,7 @@ import { cad, money, price, qty, subtract, toCents } from "../lib/decimal";
 import { day, safePath } from "../lib/format";
 import { CONTROLLER_ONLY_CODES, RESOLUTION_CODES, RESOLUTION_HINTS, SUB_REASONS, typeWord, zeroCounted } from "../lib/words";
 import { chipFor } from "./Exceptions";
+import { Assignee, ControllerDecision, decidedByController, useExceptionDetail } from "./MatchDecisions";
 import { ArrowLeft, ChevronLeft, ChevronRight, ClipboardList, Paperclip, PenLine } from "lucide-react";
 
 const PdfViewer = lazy(() => import("../components/PdfViewer"));
@@ -172,6 +173,7 @@ export function MatchViewPage() {
     lineExcs[0] ??
     docExcs.find((e) => e.status === "open");
 
+  const detail = useExceptionDetail(current?.id);
   // B8: previous and next come from the server, over the same scope and order as the queue opened.
   const { month } = usePeriod();
   const fromQueue = fromUrl.startsWith("/exceptions");
@@ -394,7 +396,9 @@ export function MatchViewPage() {
                   <span key={e.id} className="muted">
                     {typeWord(e.type)}{" "}
                     {e.status === "resolved" && e.resolution_code === "resolved_by_credit"
-                      ? `(by ${qty(e.variance_qty)}, cleared by ${e.label ? "a QuickBooks vendor credit" : "a credit note"})`
+                      ? e.label?.includes("decided by the controller")
+                        ? `(${e.label})`
+                        : `(by ${qty(e.variance_qty)}, cleared by ${e.label ? "a QuickBooks vendor credit" : "a credit note"})`
                       : e.status === "resolved" || e.status === "waived"
                         ? `(${chipWord(e)})`
                         : zeroCounted(e)
@@ -565,7 +569,11 @@ export function MatchViewPage() {
                     {msg.text}
                   </p>
                 )}
-                {current.status === "open" && can("resolve") && (
+                {(current.status === "open" || current.status === "pending_approval") && (
+                  <Assignee exc={current} detail={detail.data} />
+                )}
+                {decidedByController(current) && <ControllerDecision exc={current} detail={detail.data} onDone={() => void q.refetch()} />}
+                {current.status === "open" && can("resolve") && !decidedByController(current) && (
                   <>
                     <div className="field">
                       <label htmlFor="res-code">Resolve as</label>
@@ -595,7 +603,7 @@ export function MatchViewPage() {
                     {!code && <span className="small muted">Choose how to resolve to continue.</span>}
                   </>
                 )}
-                {current.status === "open" && !can("resolve") && <p className="muted small">Your role can read this exception but not resolve it.</p>}
+                {current.status === "open" && !can("resolve") && !decidedByController(current) && <p className="muted small">Your role can read this exception but not resolve it.</p>}
                 {current.status === "pending_approval" && (
                   <>
                     <p style={{ margin: 0 }}>Waiting for controller.</p>
@@ -612,6 +620,7 @@ export function MatchViewPage() {
                       {current.status === "waived" ? "Waived" : `Resolved as ${RESOLUTION_CODES[current.resolution_code ?? ""] ?? current.resolution_code}`}
                       {current.resolution_note ? `: "${current.resolution_note}"` : ""}
                     </p>
+                    {current.label && current.resolution_code === "resolved_by_credit" && <p className="muted small" style={{ margin: 0 }}>{current.label}</p>}
                     {can("reopen") && (
                       <button className="btn" disabled={busy} onClick={() => act("reopen")}>
                         Reopen
@@ -621,6 +630,13 @@ export function MatchViewPage() {
                 )}
               </div>
             </section>
+          )}
+          {inv.review?.inconsistent_note && (
+            <Banner tone="warn">
+              <p>
+                Confirmed as not adding up: <q>{inv.review.inconsistent_note}</q>
+              </p>
+            </Banner>
           )}
           <section className="panel" aria-labelledby="po-h">
             <div className="panel-head">
