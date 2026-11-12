@@ -150,7 +150,21 @@ def create_import(
         entity_id=imp.id,
         after={"source_type": source_type, "evidence_class": evidence_class, "rows": len(rows)},
     )
-    return imp, {"headers": header, "sample_rows": rows[:10], "rows_total": len(rows)}
+    return imp, {"headers": header, "sample_rows": rows[:PREVIEW_ROWS], "rows_total": len(rows)}
+
+
+PREVIEW_ROWS = 20  # S-05: "preview first 20 rows"
+
+
+def file_preview(s: Session, imp: ReceivingImportRow) -> dict[str, Any]:
+    """Headers and the first rows of a stored receiving file, for the mapping step (B4, S-05)."""
+    from matchdesk.intake.models import DocumentRow  # the documents table is shared (schema.md 3.4)
+
+    doc = s.get(DocumentRow, imp.document_id)
+    if doc is None:
+        return {"headers": [], "sample_rows": [], "rows_total": 0}
+    header, rows = read_table(blobstore.get(imp.tenant_id, doc.blob_key), doc.mime_type)
+    return {"headers": header, "sample_rows": rows[:PREVIEW_ROWS], "rows_total": len(rows)}
 
 
 def set_declaration(

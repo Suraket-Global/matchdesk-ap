@@ -221,6 +221,8 @@ def register_receiving_routes(app: FastAPI, engine: Engine) -> None:
                 by_receipt.setdefault(ln.receipt_id, []).append(ln)
             body = receiving.describe_import(imp)
             body["file_name"] = _file_names(s, [imp]).get(imp.document_id)
+            if imp.state == "draft":
+                body["preview"] = receiving.file_preview(s, imp)
             body["created_at"] = imp.created_at.isoformat()
             po_numbers = dict(
                 s.execute(

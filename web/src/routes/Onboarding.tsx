@@ -1,0 +1,200 @@
+import { Link, useSearchParams } from "react-router-dom";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { errorText, get, send } from "../api/client";
+import type { Batch, InvoiceSummary, Page, PurchaseOrder, QboConnection, ReceivingImport, SyncRun } from "../api/types";
+import { useSession } from "../app/session";
+import { Banner, ErrorState, Loading, PageHead, StatusChip, toast, usePageTitle } from "../components/ui";
+import { lastMonth, monthName, monthRange, plural, when } from "../lib/format";
+import { useState } from "react";
+
+export function useOnboarding() {
+  const qbo = useQuery({ queryKey: ["qbo", "connection"], queryFn: () => get<QboConnection>("/api/v1/qbo/connection") });
+  const imports = useQuery({
+    queryKey: ["receiving", "imports"],
+    queryFn: () => get<Page<ReceivingImport>>("/api/v1/receiving/imports?limit=200"),
+  });
+  const batches = useQuery({ queryKey: ["batches"], queryFn: () => get<Page<Batch>>("/api/v1/intake/batches?limit=200") });
+  const committed = (imports.data?.items ?? []).filter((i) => i.state === "succeeded");
+  const processed = (batches.data?.items ?? []).reduce((n, b) => n + b.totals.ready + b.totals["needs review"], 0);
+  const files = (batches.data?.items ?? []).reduce((n, b) => n + b.totals.file_count, 0);
+  const connected = qbo.data?.status === "connected";
+  return {
+    loading: qbo.isLoading || imports.isLoading || batches.isLoading,
+    error: qbo.error ?? imports.error ?? batches.error,
+    qbo: qbo.data,
+    connected,
+    committed,
+    processed,
+    files,
+    complete: connected && committed.length > 0 && processed > 0,
+  };
+}
+
+/** S-03: the four things MatchDesk needs, which are done, and where to do the rest. */
+export function OnboardingPage() {
+  usePageTitle("Onboarding checklist");
+  const [params, setParams] = useSearchParams();
+  const month = params.get("month") ?? lastMonth();
+  const { can } = useSession();
+  const qc = useQueryClient();
+  const ob = useOnboarding();
+  const pos = useQuery({
+    queryKey: ["purchase-orders"],
+    queryFn: () => get<Page<PurchaseOrder>>("/api/v1/purchase-orders?limit=200"),
+  });
+  const invoices = useQuery({
+    queryKey: ["invoices", "all"],
+    queryFn: () => get<Page<InvoiceSummary>>("/api/v1/invoices?limit=200"),
+  });
+  const [run, setRun] = useState<SyncRun | null>(null);
+  const sync = useMutation({
+    mutationFn: () => {
+      const { start, end } = monthRange(month);
+      const refs = [
+        ...new Set(
+          (invoices.data?.items ?? [])
+            .filter((i) => i.doc_date && i.doc_date >= start && i.doc_date <= end && i.po_number)
+            .map((i) => i.po_number as string),
+        ),
+      ];
+      const body = refs.length
+        ? { mode: "po_references", po_references: refs }
+        : { mode: "date_range", range_start: start, range_end: end };
+      return send<SyncRun>("POST", "/api/v1/qbo/sync-runs", body);
+    },
+    onSuccess: (r) => {
+      setRun(r);
+      toast("Reading from QuickBooks started.");
+      qc.invalidateQueries({ queryKey: ["purchase-orders"] });
+    },
+  });
+  const syncStatus = useQuery({
+    queryKey: ["sync-run", run?.id],
+    queryFn: () => get<SyncRun>(`/api/v1/qbo/sync-runs/${run?.id}`),
+    enabled: !!run,
+    refetchInterval: (q) => (q.state.data && ["succeeded", "failed"].includes(q.state.data.state) ? false : 2000),
+  });
+  if (ob.loading) return <Loading />;
+  if (ob.error) return <ErrorState error={ob.error} />;
+  const lines = ob.committed.reduce((n, i) => n + (i.rows_valid ?? 0), 0);
+  const poCount = pos.data?.items.length ?? 0;
+  return (
+    <>
+      <PageHead
+        title="Onboarding checklist"
+        lede="Four things MatchDesk needs for a back-test. Steps 3 and 4 can be done in either order."
+        actions={
+          ob.processed > 0 ? (
+            <Link className="btn primary" to="/exceptions">
+              Go to exceptions
+            </Link>
+          ) : undefined
+        }
+      />
+      <Banner tone="info">
+        <p>
+          <strong>Pilot terms.</strong> The CAD 500 pilot covers 30 days: the back-test of one month and live checking.
+          The signed terms and refund threshold are kept in the pilot record; showing that record here is not built yet.
+        </p>
+      </Banner>
+      <ol className="steps panel">
+        <li className={ob.connected ? "done" : ""}>
+          <div>
+            <h2>Connect QuickBooks Online</h2>
+            <p className="muted">
+              {ob.connected
+                ? `${ob.qbo?.company_name ?? "Company"} connected. Last successful read: ${when(ob.qbo?.last_success_at) || "not yet"}`
+                : "MatchDesk only reads. It never creates or changes anything in QuickBooks."}
+            </p>
+          </div>
+          <div className="step-action">
+            <StatusChip status={ob.connected ? "connected" : "disconnected"} />
+          </div>
+          <div style={{ gridColumn: "2 / -1" }}>
+            <Link to="/settings/quickbooks">{ob.connected ? "View the connection" : "Connect QuickBooks"}</Link>
+          </div>
+        </li>
+        <li className={ob.connected && poCount > 0 ? "done" : ""}>
+          <div>
+            <h2>Choose the test month</h2>
+            <p className="muted">
+              MatchDesk reads every purchase order named on that month's invoices, whatever its date, with all bills and
+              credits on those purchase orders.
+            </p>
+          </div>
+          <div className="step-action muted">{plural(poCount, "purchase order")}</div>
+          <div style={{ gridColumn: "2 / -1" }} className="inline-form">
+            <div className="field">
+              <label htmlFor="month">Test month</label>
+              <input
+                id="month"
+                type="month"
+                value={month}
+                onChange={(e) => e.target.value && setParams({ month: e.target.value }, { replace: true })}
+              />
+            </div>
+            {can("start_sync") && (
+              <button className="btn" onClick={() => sync.mutate()} disabled={!ob.connected || sync.isPending || syncStatus.data?.state === "running"}>
+                Read from QuickBooks
+              </button>
+            )}
+            <div role="status" aria-live="polite" className="muted">
+              {syncStatus.data &&
+                (syncStatus.data.state === "succeeded"
+                  ? `Read finished for ${monthName(month)}.`
+                  : syncStatus.data.state === "failed"
+                    ? "The read failed. The last good copy stays in use. Try again."
+                    : "Reading purchase orders from QuickBooks…")}
+            </div>
+            {sync.error && <p className="error-text">{errorText(sync.error)}</p>}
+            {ob.connected && poCount === 0 && (
+              <p className="muted">
+                No purchase orders were read. Check that the QuickBooks plan is Plus or Advanced with purchase orders turned on.
+              </p>
+            )}
+          </div>
+        </li>
+        <li className={ob.committed.length > 0 ? "done" : ""}>
+          <div>
+            <h2>Load receiving evidence</h2>
+            <p className="muted">
+              For those purchase orders, for any date, and say what kind it is. MatchDesk counts warehouse receiving records
+              and delivery documents your receiver has signed or marked. It does not count the "received" quantity on a
+              QuickBooks purchase order, or a supplier's packing slip with no receiver marks.
+            </p>
+            {ob.committed.length > 0 && (
+              <p>
+                Receiving: {plural(ob.committed.length, "file")}, {plural(lines, "line")}.
+              </p>
+            )}
+          </div>
+          <div className="step-action">
+            <StatusChip status={ob.committed.length ? "succeeded" : "queued"} word={ob.committed.length ? "Loaded" : "Not started"} />
+          </div>
+          <div style={{ gridColumn: "2 / -1" }}>
+            <Link to="/receiving">Load a receiving file</Link>
+            <p className="muted small" style={{ marginTop: 6 }}>
+              No warehouse receiving records at all? Every line will then carry a "receipt absent" exception and the report is
+              two-way only. Recording that choice on this screen is not built yet; tell MatchDesk support.
+            </p>
+          </div>
+        </li>
+        <li className={ob.processed > 0 ? "done" : ""}>
+          <div>
+            <h2>Upload the month's invoices and credit notes</h2>
+            <p className="muted">
+              And earlier invoices on the same purchase orders, where MatchDesk asks for them.
+              {ob.files > 0 && ` ${plural(ob.files, "file")} uploaded, ${ob.processed} processed.`}
+            </p>
+          </div>
+          <div className="step-action">
+            <StatusChip status={ob.processed ? "ready" : "queued"} word={ob.processed ? "Processed" : "Not started"} />
+          </div>
+          <div style={{ gridColumn: "2 / -1" }}>
+            <Link to="/intake">Upload invoices</Link>
+          </div>
+        </li>
+      </ol>
+    </>
+  );
+}

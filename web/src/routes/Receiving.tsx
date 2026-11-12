@@ -1,0 +1,623 @@
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { Link, useNavigate, useParams } from "react-router-dom";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ApiError, errorText, get, send, upload } from "../api/client";
+import type { Page, ReceivingImport } from "../api/types";
+import { useSession } from "../app/session";
+import { Banner, Dialog, Empty, ErrorState, Field, Loading, NarrowNote, PageHead, StatusChip, toast, usePageTitle } from "../components/ui";
+import { EVIDENCE_CLASSES } from "../lib/words";
+import { day, plural, when } from "../lib/format";
+
+const REJECT_WORDS: Record<string, string> = {
+  po_not_found: "Unknown PO number",
+  po_line_not_found: "Unknown PO line or item",
+  qty_unreadable: "Quantity not a number",
+  date_unreadable: "Unreadable date",
+  uom_unknown: "Unknown unit",
+  entered_after_bill: "Entered after the bill",
+  entered_by_ap_staff: "Entered by accounts-payable staff",
+};
+
+const TARGETS: { key: string; label: string; required?: boolean; guess: RegExp }[] = [
+  { key: "po_number", label: "PO number", required: true, guess: /^(po|po ?(number|no|#)|purchase ?order)/i },
+  { key: "line_no", label: "PO line number", guess: /^(line|line ?(no|number|#))$/i },
+  { key: "item_code", label: "Item code", guess: /^(item|sku|item ?code|part)/i },
+  { key: "qty_received", label: "Quantity received", required: true, guess: /^(qty|quantity|received ?qty|qty ?received)/i },
+  { key: "uom", label: "Unit", guess: /^(uom|unit|units)$/i },
+  { key: "received_date", label: "Received date", required: true, guess: /^(received|date|received ?date|receipt ?date)/i },
+  { key: "receiver_ref", label: "Receiver reference", guess: /^(receiver|received ?by|ref|reference)/i },
+];
+
+/** First day of the month two months before last month: the history a back-test usually needs. */
+function defaultStart(now: Date = new Date()): string {
+  const d = new Date(now.getFullYear(), now.getMonth() - 3, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
+}
+
+function status(i: ReceivingImport): string {
+  if (i.state === "succeeded") return "succeeded";
+  if (i.state === "voided") return "voided";
+  return "draft";
+}
+
+/** S-05 list: imports, their evidence class and rows, and the upload form. */
+export function ReceivingListPage() {
+  usePageTitle("Receiving imports");
+  const { can } = useSession();
+  const list = useQuery({
+    queryKey: ["receiving", "imports"],
+    queryFn: () => get<Page<ReceivingImport>>("/api/v1/receiving/imports?limit=200"),
+  });
+  return (
+    <>
+      <PageHead
+        title="Receiving imports"
+        lede="Warehouse receiving logs and receiver-signed delivery documents. Each receipt line shows the file, the row and the kind of evidence."
+      />
+      {can("upload") && <UploadForm />}
+      <section style={{ marginTop: 16 }} aria-labelledby="imports-h">
+        <h2 id="imports-h" style={{ marginBottom: 8 }}>
+          Imports
+        </h2>
+        {list.isLoading && <Loading />}
+        {list.error && <ErrorState error={list.error} retry={() => list.refetch()} />}
+        {list.data && list.data.items.length === 0 && (
+          <div className="panel">
+            <Empty title="No receiving file yet">
+              <p>
+                Upload the warehouse receiving log as CSV or XLSX. A layout that works: columns PO, Line, Qty, UOM, Received,
+                Receiver, one row per delivered line. The demo file is play-files/receiving-warehouse-log.csv.
+              </p>
+            </Empty>
+          </div>
+        )}
+        {list.data && list.data.items.length > 0 && (
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">File</th>
+                  <th scope="col">Evidence</th>
+                  <th scope="col">Declared complete for</th>
+                  <th scope="col">Loaded</th>
+                  <th scope="col" className="num">
+                    Rows imported
+                  </th>
+                  <th scope="col" className="num">
+                    Rows rejected
+                  </th>
+                  <th scope="col">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {list.data.items.map((i) => (
+                  <tr key={i.id}>
+                    <td>
+                      <Link to={`/receiving/imports/${i.id}`}>{i.file_name || "Receiving file"}</Link>
+                    </td>
+                    <td>
+                      {i.evidence_class} · {EVIDENCE_CLASSES[i.evidence_class]?.name}
+                      {i.source_type === "qbo_item_receipt_export" && <div className="muted small">QuickBooks item-receipt export</div>}
+                    </td>
+                    <td>{i.declared_complete ? `${day(i.coverage_start)} to ${day(i.coverage_end)}` : <span className="muted">Not declared</span>}</td>
+                    <td>{when(i.committed_at ?? i.created_at)}</td>
+                    <td className="num">{i.state === "succeeded" || i.state === "voided" ? i.rows_valid ?? 0 : ""}</td>
+                    <td className="num">{i.rows_rejected ?? ""}</td>
+                    <td>
+                      <StatusChip status={status(i)} word={i.state === "draft" ? "Draft, not imported" : undefined} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+    </>
+  );
+}
+
+function UploadForm() {
+  const navigate = useNavigate();
+  const qc = useQueryClient();
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [cls, setCls] = useState("A");
+  const [source, setSource] = useState("spreadsheet");
+  const [keptBy, setKeptBy] = useState("");
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    const f = fileRef.current?.files?.[0];
+    if (!f) {
+      setErr("Choose a CSV or XLSX file.");
+      fileRef.current?.focus();
+      return;
+    }
+    setErr(null);
+    setBusy(true);
+    const form = new FormData();
+    form.append("file", f);
+    form.append("evidence_class", source === "qbo_item_receipt_export" ? "A" : cls);
+    form.append("source_type", source);
+    if (keptBy.trim()) form.append("kept_by_name", keptBy.trim());
+    try {
+      const imp = await upload<ReceivingImport>("/api/v1/receiving/imports", form);
+      qc.invalidateQueries({ queryKey: ["receiving", "imports"] });
+      navigate(`/receiving/imports/${imp.id}`);
+    } catch (e2) {
+      if (e2 instanceof ApiError && e2.status === 409)
+        setErr("This file was already imported. Nothing was added. Void the earlier import first if it was wrong.");
+      else setErr(errorText(e2));
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <form className="panel" onSubmit={submit} aria-labelledby="upload-h">
+      <div className="panel-head">
+        <h2 id="upload-h">Load a receiving file</h2>
+      </div>
+      <div className="panel-body grid-2">
+        <div>
+          <div className="field">
+            <label htmlFor="rfile">File (CSV or XLSX, up to 20 MB)</label>
+            <input id="rfile" ref={fileRef} type="file" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" aria-describedby={err ? "rfile-err" : undefined} />
+            {err && (
+              <span className="error" id="rfile-err" role="alert">
+                {err}
+              </span>
+            )}
+          </div>
+          <div className="field">
+            <label htmlFor="source">Source</label>
+            <select id="source" value={source} onChange={(e) => setSource(e.target.value)}>
+              <option value="spreadsheet">Warehouse receiving log</option>
+              <option value="qbo_item_receipt_export">QuickBooks item-receipt export</option>
+            </select>
+          </div>
+          <Field label="Who keeps this record" hint="For example the warehouse supervisor.">
+            {(f) => <input id={f.id} type="text" value={keptBy} onChange={(e) => setKeptBy(e.target.value)} aria-describedby={f.describedBy} />}
+          </Field>
+        </div>
+        <fieldset>
+          <legend>What kind of evidence is it?</legend>
+          {Object.entries(EVIDENCE_CLASSES).map(([k, v]) => (
+            <label className="choice" key={k}>
+              <input
+                type="radio"
+                name="cls"
+                value={k}
+                checked={(source === "qbo_item_receipt_export" ? "A" : cls) === k}
+                disabled={source === "qbo_item_receipt_export" && k !== "A"}
+                onChange={() => setCls(k)}
+              />
+              <span>
+                <strong>
+                  {k} · {v.name}
+                </strong>
+                <br />
+                <span className="muted">{v.explain}</span>
+              </span>
+            </label>
+          ))}
+        </fieldset>
+      </div>
+      <div className="panel-body" style={{ paddingTop: 0 }}>
+        <button className="btn primary" type="submit" disabled={busy}>
+          {busy ? "Uploading…" : "Upload and preview"}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function downloadRejected(imp: ReceivingImport) {
+  const rows = imp.rejected_rows ?? [];
+  const esc = (v: unknown) => {
+    const s = String(v ?? "");
+    const safe = /^[=+\-@\t\r]/.test(s) ? `'${s}` : s;
+    return /[",\n]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
+  };
+  const text = ["row,reason,value", ...rows.map((r) => [r.row, REJECT_WORDS[r.reason] ?? r.reason, r.value].map(esc).join(","))].join("\n");
+  const url = URL.createObjectURL(new Blob([text], { type: "text/csv" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `rejected-rows-${imp.file_name ?? imp.id}.csv`.replace(/\.csv\.csv$/, ".csv");
+  a.click();
+  window.setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+
+/** S-05 import: map columns, validate, declare coverage, import valid rows; or view and void. */
+export function ReceivingImportPage() {
+  const { importId } = useParams();
+  const { can } = useSession();
+  const qc = useQueryClient();
+  const key = ["receiving", "import", importId];
+  const q = useQuery({ queryKey: key, queryFn: () => get<ReceivingImport>(`/api/v1/receiving/imports/${importId}`) });
+  usePageTitle("Receiving import", q.data?.file_name);
+  const imp = q.data;
+  const headers = imp?.preview?.headers ?? [];
+  const [map, setMap] = useState<Record<string, string>>({});
+  const [mapErr, setMapErr] = useState<string | null>(null);
+  const [validation, setValidation] = useState<ReceivingImport | null>(null);
+  const [complete, setComplete] = useState(true);
+  const [covStart, setCovStart] = useState(defaultStart());
+  const [covEnd, setCovEnd] = useState(new Date().toISOString().slice(0, 10));
+  const [keptBy, setKeptBy] = useState("");
+  const [voidOpen, setVoidOpen] = useState(false);
+  const [voidReason, setVoidReason] = useState("");
+  const summaryRef = useRef<HTMLDivElement>(null);
+  const [result, setResult] = useState<ReceivingImport | null>(null);
+
+  useEffect(() => {
+    if (!imp) return;
+    if (imp.column_map && Object.keys(map).length === 0) setMap(imp.column_map);
+    else if (headers.length && Object.keys(map).length === 0) {
+      const guess: Record<string, string> = {};
+      for (const t of TARGETS) {
+        const h = headers.find((x) => t.guess.test(x.trim()) && !Object.values(guess).includes(x));
+        if (h) guess[t.key] = h;
+      }
+      setMap(guess);
+    }
+    if (imp.kept_by_name && !keptBy) setKeptBy(imp.kept_by_name);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [imp?.id, headers.length]);
+
+  const saveMapping = useMutation({
+    mutationFn: () => {
+      const cols = Object.fromEntries(Object.entries(map).filter(([, v]) => v));
+      return send<ReceivingImport>("PUT", `/api/v1/receiving/imports/${importId}/mapping`, { columns: cols, save_as: "Warehouse log" });
+    },
+    onSuccess: (r) => {
+      // The validation counts are in `validation`; the import fields beside it predate the check.
+      const merged = { ...r, ...(r.validation as Partial<ReceivingImport>) };
+      setValidation(merged);
+      qc.setQueryData(key, { ...imp, ...merged, preview: imp?.preview });
+      window.setTimeout(() => summaryRef.current?.focus(), 0);
+    },
+    onError: (e) => {
+      setMapErr(errorText(e));
+      window.setTimeout(() => summaryRef.current?.focus(), 0);
+    },
+  });
+  const declare = useMutation({
+    mutationFn: () =>
+      send<ReceivingImport>("PUT", `/api/v1/receiving/imports/${importId}/declaration`, {
+        declared_complete: complete,
+        coverage_start: complete ? covStart : null,
+        coverage_end: complete ? covEnd : null,
+        kept_by_name: keptBy || null,
+      }),
+  });
+  const commit = useMutation({
+    mutationFn: async () => {
+      if (imp?.evidence_class === "A") await declare.mutateAsync();
+      return send<ReceivingImport>("POST", `/api/v1/receiving/imports/${importId}/commit`);
+    },
+    onSuccess: (r) => {
+      setResult(r);
+      qc.invalidateQueries({ queryKey: ["receiving"] });
+      qc.invalidateQueries({ queryKey: ["exceptions"] });
+      qc.invalidateQueries({ queryKey: ["invoice"] });
+      toast(`Imported ${plural(r.rows_valid ?? 0, "row")}.`);
+    },
+  });
+  const voidIt = useMutation({
+    mutationFn: () => send<ReceivingImport>("POST", `/api/v1/receiving/imports/${importId}/void`, { reason: voidReason }),
+    onSuccess: () => {
+      setVoidOpen(false);
+      qc.invalidateQueries({ queryKey: ["receiving"] });
+      qc.invalidateQueries({ queryKey: ["exceptions"] });
+      toast("Import voided. Its receipt lines no longer count; affected lines are being re-matched.");
+    },
+  });
+  const missing = useMemo(() => {
+    const m = TARGETS.filter((t) => t.required && !map[t.key]).map((t) => t.label);
+    if (!map.line_no && !map.item_code) m.push("PO line number or item code");
+    return m;
+  }, [map]);
+
+  if (q.isLoading) return <Loading />;
+  if (q.error) return <ErrorState error={q.error} retry={() => q.refetch()} />;
+  if (!imp) return null;
+  const draft = imp.state === "draft";
+  const v = validation ?? (imp.column_map ? imp : null);
+  return (
+    <>
+      <PageHead
+        title={imp.file_name || "Receiving import"}
+        crumbs={<Link to="/receiving">Receiving imports</Link>}
+        lede={`${imp.evidence_class} · ${EVIDENCE_CLASSES[imp.evidence_class]?.name}. ${imp.kept_by_name ? `Kept by ${imp.kept_by_name}.` : ""}`}
+        actions={
+          <>
+            <StatusChip status={status(imp)} word={draft ? "Draft, not imported" : undefined} />
+            {imp.state === "succeeded" && can("upload") && (
+              <button className="btn danger" onClick={() => setVoidOpen(true)}>
+                Void import
+              </button>
+            )}
+          </>
+        }
+      />
+      <NarrowNote />
+      {imp.evidence_class === "C" && (
+        <Banner tone="warn">Supplier documents only. Accepted and shown as context, labelled "Supplier's packing slip. Not counted as a receipt."</Banner>
+      )}
+      {result && (
+        <Banner tone="ok" role="status">
+          <p>
+            Imported {plural(result.rows_valid ?? 0, "row")}.{" "}
+            {result.late_lines
+              ? `${plural(result.late_lines, "row")} for lines that already had an open exception are waiting for controller approval and do not count until approved. `
+              : ""}
+            {result.match_run_id ? "The affected purchase-order lines are being re-matched." : "No line needed a re-match."}{" "}
+            <Link to="/exceptions">Go to exceptions</Link>
+          </p>
+        </Banner>
+      )}
+      {imp.state === "voided" && <Banner tone="warn">Voided: {imp.void_reason}. Its receipt lines no longer count.</Banner>}
+
+      {draft && can("upload") && (
+        <div className="stack wide-only">
+          <section className="panel" aria-labelledby="map-h">
+            <div className="panel-head">
+              <h2 id="map-h">1. Match the columns</h2>
+              <span className="muted">{plural(imp.preview?.rows_total ?? imp.rows_total ?? 0, "row")} in the file</span>
+            </div>
+            <div className="panel-body">
+              <div className="inline-form">
+                {TARGETS.map((t) => (
+                  <div className="field" key={t.key}>
+                    <label htmlFor={`map-${t.key}`}>
+                      {t.label}
+                      {t.required ? " (required)" : ""}
+                    </label>
+                    <select id={`map-${t.key}`} value={map[t.key] ?? ""} onChange={(e) => setMap({ ...map, [t.key]: e.target.value })}>
+                      <option value="">Not in this file</option>
+                      {headers.map((h) => (
+                        <option key={h} value={h}>
+                          {h}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ))}
+              </div>
+              {imp.preview && (
+                <div className="table-wrap" style={{ marginTop: 12, maxHeight: 320 }}>
+                  <table className="compact">
+                    <caption>First {Math.min(20, imp.preview.sample_rows?.length ?? 0)} rows</caption>
+                    <thead>
+                      <tr>
+                        <th scope="col">Row</th>
+                        {headers.map((h) => (
+                          <th scope="col" key={h}>
+                            {h}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(imp.preview.sample_rows ?? []).map((r, i) => (
+                        <tr key={i}>
+                          <td className="num muted">{i + 2}</td>
+                          {r.map((c, j) => (
+                            <td key={j}>{c}</td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              <div className="actions" style={{ marginTop: 12 }}>
+                <button
+                  className="btn"
+                  onClick={() => {
+                    setMapErr(missing.length ? `Choose a column for: ${missing.join(", ")}.` : null);
+                    if (!missing.length) saveMapping.mutate();
+                    else window.setTimeout(() => summaryRef.current?.focus(), 0);
+                  }}
+                  disabled={saveMapping.isPending}
+                >
+                  Check rows
+                </button>
+              </div>
+            </div>
+          </section>
+
+          <section className="panel" aria-labelledby="val-h">
+            <div className="panel-head">
+              <h2 id="val-h">2. Validation result</h2>
+            </div>
+            <div className="panel-body">
+              <div ref={summaryRef} tabIndex={-1}>
+                {mapErr && (
+                  <p className="error-text" role="alert">
+                    {mapErr}
+                  </p>
+                )}
+                {!mapErr && !v && <p className="muted">Match the columns and choose Check rows.</p>}
+                {!mapErr && v && (
+                  <p>
+                    <strong>
+                      {(v.rows_valid ?? 0).toLocaleString("en-CA")} rows valid, {(v.rows_rejected ?? 0).toLocaleString("en-CA")} rejected.
+                    </strong>{" "}
+                    {(v.rows_rejected ?? 0) > 0 &&
+                      `Download the ${v.rows_rejected} rows with reasons, fix them in your spreadsheet and upload them again, or import the valid rows now. A date outside the test month is not an error.`}
+                  </p>
+                )}
+              </div>
+              {v && (v.rejected_rows?.length ?? 0) > 0 && (
+                <>
+                  <div className="table-wrap" style={{ marginTop: 8 }}>
+                    <table className="compact">
+                      <thead>
+                        <tr>
+                          <th scope="col" className="num">
+                            Row
+                          </th>
+                          <th scope="col">Reason</th>
+                          <th scope="col">Value</th>
+                          <th scope="col">Fix</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {v.rejected_rows!.map((r) => (
+                          <tr key={r.row}>
+                            <td className="num">{r.row}</td>
+                            <td>{REJECT_WORDS[r.reason] ?? r.reason}</td>
+                            <td>{String(r.value ?? "")}</td>
+                            <td>{r.reason === "po_line_not_found" ? <Link to="/aliases">Add an alias</Link> : <span className="muted">Correct the file</span>}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <button className="btn small" style={{ marginTop: 8 }} onClick={() => downloadRejected(v)}>
+                    Download rejected rows
+                  </button>
+                </>
+              )}
+            </div>
+          </section>
+
+          {imp.evidence_class === "A" && (
+            <section className="panel" aria-labelledby="dec-h">
+              <div className="panel-head">
+                <h2 id="dec-h">3. Coverage</h2>
+              </div>
+              <div className="panel-body">
+                <label className="choice">
+                  <input type="checkbox" checked={complete} onChange={(e) => setComplete(e.target.checked)} />
+                  <span>Every delivery between these dates is in this file.</span>
+                </label>
+                <div className="inline-form">
+                  <Field label="From">{(f) => <input id={f.id} type="date" value={covStart} disabled={!complete} onChange={(e) => setCovStart(e.target.value)} />}</Field>
+                  <Field label="To">{(f) => <input id={f.id} type="date" value={covEnd} disabled={!complete} onChange={(e) => setCovEnd(e.target.value)} />}</Field>
+                  <Field label="Kept by">{(f) => <input id={f.id} type="text" value={keptBy} onChange={(e) => setKeptBy(e.target.value)} />}</Field>
+                </div>
+                <p className="muted small">
+                  Where the log is declared complete and shows nothing for an invoiced line, that line is "not received". Otherwise it is
+                  unverified.
+                </p>
+              </div>
+            </section>
+          )}
+
+          <div className="actions">
+            <button className="btn primary" disabled={!v || (v.rows_valid ?? 0) === 0 || commit.isPending} onClick={() => commit.mutate()}>
+              {commit.isPending ? "Importing…" : `Import ${v ? plural(v.rows_valid ?? 0, "valid row") : "valid rows"}`}
+            </button>
+            {(commit.error || declare.error) && <span className="error-text">{errorText(commit.error ?? declare.error)}</span>}
+          </div>
+        </div>
+      )}
+
+      {!draft && <ReceiptsTable imp={imp} />}
+
+      <Dialog
+        open={voidOpen}
+        title="Void import"
+        onClose={() => setVoidOpen(false)}
+        footer={
+          <>
+            <button className="btn" data-safe onClick={() => setVoidOpen(false)}>
+              Keep it
+            </button>
+            <button className="btn danger" disabled={!voidReason.trim() || voidIt.isPending} onClick={() => voidIt.mutate()}>
+              Void import
+            </button>
+          </>
+        }
+      >
+        <p>Its {plural(imp.rows_valid ?? 0, "receipt line")} stop counting and the affected lines are re-matched. The import stays listed as voided.</p>
+        <Field label="Reason (required)">{(f) => <textarea id={f.id} value={voidReason} onChange={(e) => setVoidReason(e.target.value)} />}</Field>
+        {voidIt.error && <p className="error-text">{errorText(voidIt.error)}</p>}
+      </Dialog>
+    </>
+  );
+}
+
+function ReceiptsTable({ imp }: { imp: ReceivingImport }) {
+  const { can } = useSession();
+  const qc = useQueryClient();
+  const [signer, setSigner] = useState<Record<string, string>>({});
+  const confirm = useMutation({
+    mutationFn: (r: { id: string; version: number; marks: boolean }) =>
+      send("POST", `/api/v1/receiving/receipts/${r.id}/confirm`, { receiver_marks_present: r.marks, receiver_name: signer[r.id] || null }, { ifMatch: r.version }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["receiving", "import", imp.id] }),
+  });
+  const receipts = imp.receipts ?? [];
+  if (!receipts.length) return <Empty title="No receipt lines in this import" />;
+  return (
+    <section aria-labelledby="rec-h">
+      <h2 id="rec-h" style={{ marginBottom: 8 }}>
+        Receipt lines
+      </h2>
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">PO</th>
+              <th scope="col">Received</th>
+              <th scope="col">Receiver reference</th>
+              <th scope="col" className="num">
+                Row
+              </th>
+              <th scope="col" className="num">
+                Quantity
+              </th>
+              <th scope="col">Counts as a receipt</th>
+            </tr>
+          </thead>
+          <tbody>
+            {receipts.flatMap((r) =>
+              r.lines.map((ln) => (
+                <tr key={ln.id} className={imp.state === "voided" || imp.evidence_class === "C" ? "greyed" : ""}>
+                  <td>
+                    <Link to={`/purchase-orders/${r.purchase_order_id}`}>{r.po_number ?? "PO"}</Link>
+                  </td>
+                  <td>{day(r.received_date)}</td>
+                  <td>{r.receiver_ref}</td>
+                  <td className="num">{ln.source_row}</td>
+                  <td className="num">{ln.qty_received.replace(/\.?0+$/, "")}</td>
+                  <td>
+                    {imp.state === "voided"
+                      ? "No: import voided"
+                      : imp.evidence_class === "C"
+                        ? "No: supplier's packing slip"
+                        : ln.added_after_exception && !ln.late_approved
+                          ? "Waiting for controller approval"
+                          : imp.evidence_class === "B" && !(r.receiver_marks_present && r.receiver_name)
+                            ? "No: receiver marks not recorded"
+                            : "Yes"}
+                  </td>
+                </tr>
+              )),
+            )}
+          </tbody>
+        </table>
+      </div>
+      {imp.evidence_class === "B" && can("upload") && imp.state === "succeeded" && (
+        <div className="stack" style={{ marginTop: 16 }}>
+          <h3>Confirm receiver marks</h3>
+          {receipts.map((r) => (
+            <div className="inline-form panel panel-body" key={r.id}>
+              <span>
+                PO {r.po_number} · {day(r.received_date)}
+              </span>
+              <Field label="Who signed">{(f) => <input id={f.id} type="text" value={signer[r.id] ?? r.receiver_name ?? ""} onChange={(e) => setSigner({ ...signer, [r.id]: e.target.value })} />}</Field>
+              <button className="btn" disabled={confirm.isPending} onClick={() => confirm.mutate({ id: r.id, version: r.version, marks: true })}>
+                Receiver's signature or count marks are on this document
+              </button>
+            </div>
+          ))}
+          {confirm.error && <p className="error-text">{errorText(confirm.error)}</p>}
+        </div>
+      )}
+    </section>
+  );
+}

@@ -58,6 +58,8 @@ def test_me_returns_the_sessions_anti_forgery_token(app_engine, client):  # type
     )
     assert bad.status_code == 403
     assert client.get("/api/v1/me").status_code == 401
+    # The QuickBooks screen is told the mode, so recorded-response mode is labelled (B4).
+    assert client.get("/api/v1/qbo/connection", headers=w.headers).json()["mode"] == "recorded"
 
 
 def test_match_view_evidence_and_calculation(app_engine, client):  # type: ignore[no-untyped-def]
@@ -154,6 +156,9 @@ def test_receiving_import_keeps_the_file_name(app_engine, client):  # type: igno
         data={"evidence_class": "A"},
     )
     assert r.status_code == 201, r.text
+    detail = client.get(f"/api/v1/receiving/imports/{r.json()['id']}", headers=w.headers).json()
+    assert detail["preview"]["headers"] == ["PO", "Line", "Qty", "Received"]
+    assert detail["preview"]["sample_rows"] == [["4471", "2", "5", "2026-10-01"]]
     listed = client.get("/api/v1/receiving/imports", headers=w.headers).json()["items"]
     assert listed[0]["file_name"] == "warehouse-log-oct.csv" and listed[0]["created_at"]
     again = client.post(

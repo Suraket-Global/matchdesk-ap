@@ -56,7 +56,8 @@ def register_qbo_routes(app: FastAPI, settings: Settings, engine: Engine, endpoi
     def get_qbo_connection(p: Auth) -> dict[str, Any]:
         require(p, "read")
         with session(p.tenant_id, engine) as s:
-            return describe_connection(get_connection(s))
+            # B4: the screen labels recorded-response mode and never sends anyone to Intuit in it.
+            return {**describe_connection(get_connection(s)), "mode": settings.qbo_mode}
 
     @app.post("/api/v1/qbo/connection/authorize")
     def authorize(p: Auth) -> dict[str, Any]:
