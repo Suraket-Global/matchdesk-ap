@@ -4,10 +4,13 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tansta
 import { errorText, get, send } from "../api/client";
 import type { Batch, Coverage, ExceptionItem, ExceptionPage, Page, Vendor } from "../api/types";
 import { useSession } from "../app/session";
+import { usePeriod } from "../app/period";
 import { useKeys } from "../app/shortcuts";
-import { Dialog, Empty, ErrorState, Loading, NarrowNote, PageHead, StatusChip, usePageTitle } from "../components/ui";
+import { CheckCircle2, FileBarChart, Inbox, X } from "lucide-react";
+import { Dialog, Empty, ErrorState, NarrowNote, PageHead, StatusChip, usePageTitle } from "../components/ui";
+import { TableSkeleton } from "../components/States";
 import { cad, cadCents, compareDecimal, formatCents, money, qty, sumCents, toCents } from "../lib/decimal";
-import { ageDays, ageText, lastMonth, monthName, monthRange, plural } from "../lib/format";
+import { ageDays, ageText, monthName, monthRange, plural } from "../lib/format";
 import { EXCEPTION_STATUS, RESOLUTION_CODES, RESOLUTION_HINTS, SUB_REASONS, typeWord, zeroCounted } from "../lib/words";
 
 const STATUS_OPTIONS: [string, string][] = [
@@ -63,7 +66,7 @@ export function ExceptionsPage() {
     refetchInterval: 15_000,
   });
   const vendors = useQuery({ queryKey: ["vendors"], queryFn: () => get<Page<Vendor>>("/api/v1/vendors") });
-  const month = lastMonth();
+  const { month } = usePeriod();
   // Live coverage for the test month, from the current results; no report draft needed (review W3).
   const coverage = useQuery({
     queryKey: ["coverage", month],
@@ -152,37 +155,60 @@ export function ExceptionsPage() {
   const unverified = absent.filter((e) => e.sub_reason !== "not_received");
   const processed = (batches.data?.items ?? []).reduce((n, b) => n + b.totals.ready + b.totals["needs review"], 0);
 
+  const openTotal = sumCents(rows.map(value));
+  const filtered = !!(type || vendor || min || max);
+  const colCount = can("resolve") ? 10 : 9;
   return (
     <>
       <PageHead
         title="Exception queue"
-        lede={can("resolve") ? "Keys: J and K move, Enter opens, X selects." : "Read only for your role."}
+        lede={
+          can("resolve")
+            ? `What needs a person for ${monthName(month)}, highest value first. Open one to see the arithmetic and resolve it.`
+            : "Read only for your role."
+        }
         actions={
           <Link className="btn" to="/reports">
+            <FileBarChart size={16} aria-hidden="true" />
             Back-test report
           </Link>
         }
       />
       <NarrowNote />
-      <div className="coverage" role="note">
-        <span>
-          Receipt coverage <strong>{cov ? pctText(cov.receipt_coverage_pct) : "not measured yet"}</strong>
-          {cov && ` of invoiced PO lines (warehouse log ${pctText(viaA)}, signed delivery documents ${pctText(cov.coverage_class_b_pct)})`}
-        </span>
-        {cov && (
-          <span className="meter" aria-hidden="true">
-            <span className="a" style={{ width: `${viaA}%` }} />
-            <span className="b" style={{ width: `${cov.coverage_class_b_pct}%` }} />
+      <div className="coverage" role="note" aria-label="Receipt coverage">
+        <div>
+          <span className="k">Receipt coverage </span>
+          <span className="v">{cov ? pctText(cov.receipt_coverage_pct) : "Not measured"}</span>
+          <span className="s">
+            {" "}
+            of invoiced PO lines
+            {cov && ` (warehouse log ${pctText(viaA)}, signed delivery documents ${pctText(cov.coverage_class_b_pct)})`}
           </span>
-        )}
-        {cov && <span>Complete warehouse log covers {pctText(cov.coverage_class_a_pct)}</span>}
-        <span>
-          Not received: <strong>{plural(notReceived.length, "line")}, {cadCents(sumCents(notReceived.map(value)))}</strong>
-        </span>
-        <span>
-          Unverified: <strong>{plural(unverified.length, "line")}, {cadCents(sumCents(unverified.map(value)))}</strong>
-        </span>
-        <Link to="/receiving">Receiving imports</Link>
+          {cov && (
+            <span className="meter" aria-hidden="true">
+              <span className="a" style={{ width: `${viaA}%` }} />
+              <span className="b" style={{ width: `${cov.coverage_class_b_pct}%` }} />
+            </span>
+          )}
+        </div>
+        <div>
+          <span className="k">Not received </span>
+          <span className={`v ${notReceived.length ? "danger" : ""}`}>{cadCents(sumCents(notReceived.map(value)))}</span>
+          <span className="s"> {plural(notReceived.length, "line")}: the log covers the order and shows nothing</span>
+        </div>
+        <div>
+          <span className="k">Unverified </span>
+          <span className={`v ${unverified.length ? "warn" : ""}`}>{cadCents(sumCents(unverified.map(value)))}</span>
+          <span className="s"> {plural(unverified.length, "line")} with no receiving evidence</span>
+        </div>
+        <div>
+          <span className="k">Complete warehouse log </span>
+          <span className="v">{cov ? pctText(cov.coverage_class_a_pct) : "None"}</span>
+          <span className="s">
+            {" "}
+            of lines covered. <Link to="/receiving">Receiving imports</Link>
+          </span>
+        </div>
       </div>
       <div className="counters" role="group" aria-label="Exceptions by type">
         <button className="counter" aria-pressed={!type} onClick={() => setParam("type", "")}>
@@ -198,7 +224,7 @@ export function ExceptionsPage() {
             </button>
           ))}
       </div>
-      <form className="inline-form panel panel-body" style={{ marginBottom: 12 }} onSubmit={(e) => e.preventDefault()} aria-label="Filters">
+      <form className="toolbar" onSubmit={(e) => e.preventDefault()} aria-label="Filters">
         <div className="field">
           <label htmlFor="f-status">Status</label>
           <select id="f-status" value={status} onChange={(e) => setParam("status", e.target.value === "open,pending_approval" ? "" : e.target.value)}>
@@ -222,11 +248,11 @@ export function ExceptionsPage() {
         </div>
         <div className="field">
           <label htmlFor="f-min">Value from (CAD)</label>
-          <input id="f-min" inputMode="decimal" size={8} defaultValue={min} onBlur={(e) => setParam("min", e.target.value.trim())} />
+          <input id="f-min" inputMode="decimal" size={8} placeholder="0.00" defaultValue={min} onBlur={(e) => setParam("min", e.target.value.trim())} />
         </div>
         <div className="field">
           <label htmlFor="f-max">Value to (CAD)</label>
-          <input id="f-max" inputMode="decimal" size={8} defaultValue={max} onBlur={(e) => setParam("max", e.target.value.trim())} />
+          <input id="f-max" inputMode="decimal" size={8} placeholder="Any" defaultValue={max} onBlur={(e) => setParam("max", e.target.value.trim())} />
         </div>
         <div className="field">
           <label htmlFor="f-sort">Sort</label>
@@ -236,28 +262,56 @@ export function ExceptionsPage() {
             <option value="vendor">Supplier</option>
           </select>
         </div>
-        {can("resolve") && (
-          <button type="button" className="btn primary" disabled={!chosen.length || chosenTypes.size !== 1} onClick={() => setBulkOpen(true)}>
-            Resolve {chosen.length ? plural(chosen.length, "item") : ""} as…
+        {filtered && (
+          <button type="button" className="btn ghost small" onClick={() => setParams(new URLSearchParams(status === "open,pending_approval" ? {} : { status }))}>
+            <X size={14} aria-hidden="true" />
+            Clear filters
           </button>
         )}
-        {chosenTypes.size > 1 && <span className="error-text">Bulk resolve works on one type at a time.</span>}
+        <span className="grow" />
+        {can("resolve") && (
+          <span className="keyhints" aria-hidden="true">
+            <span>
+              <kbd>J</kbd>
+              <kbd>K</kbd> move
+            </span>
+            <span>
+              <kbd>Enter</kbd> open
+            </span>
+            <span>
+              <kbd>X</kbd> select
+            </span>
+          </span>
+        )}
       </form>
+      {can("resolve") && chosen.length > 0 && (
+        <div className="bulkbar" role="region" aria-label="Bulk actions">
+          <span>
+            <strong>{chosen.length}</strong> selected · <strong>{cadCents(sumCents(chosen.map(value)))}</strong>
+          </span>
+          <button type="button" className="btn primary" disabled={chosenTypes.size !== 1} onClick={() => setBulkOpen(true)}>
+            Resolve {plural(chosen.length, "item")} as…
+          </button>
+          <button type="button" className="btn ghost" onClick={() => setSelected(new Set())}>
+            Clear selection
+          </button>
+          {chosenTypes.size > 1 && <span className="note">Bulk resolve works on one type at a time.</span>}
+        </div>
+      )}
       <p className="sr-only" role="status" aria-live="polite">
         {list.isFetching ? "" : `${plural(rows.length, "exception")} shown.`}
       </p>
-      {list.isLoading && <Loading label="Loading exceptions" />}
+      {list.isLoading && <TableSkeleton label="Loading exceptions" />}
       {list.error && <ErrorState error={list.error} retry={() => list.refetch()} />}
       {list.data && rows.length === 0 && (
-        <div className="panel">
+        <div className="panel" style={{ borderTopLeftRadius: 0, borderTopRightRadius: 0 }}>
           {processed === 0 ? (
-            <Empty title="Nothing processed yet">
-              <p>
-                Upload the month's invoices first. <Link to="/intake">Go to invoice intake</Link>
-              </p>
+            <Empty title="Nothing processed yet" icon={<Inbox size={22} />} action={<Link className="btn primary" to="/intake">Upload invoices</Link>}>
+              <p>Upload the month&apos;s invoices first; exceptions appear here as each one is matched.</p>
             </Empty>
           ) : (
             <Empty
+              icon={<CheckCircle2 size={22} />}
               title={
                 type
                   ? `No ${status.startsWith("open") ? "open " : ""}exceptions of type "${typeWord(type)}".`
@@ -265,28 +319,35 @@ export function ExceptionsPage() {
                     ? `No open exceptions for ${monthName(month)}.`
                     : "No exceptions match these filters."
               }
-            >
-              <p>
-                {type || vendor || min || max ? (
-                  <button type="button" className="btn small" onClick={() => setParams(new URLSearchParams(status === "open,pending_approval" ? {} : { status }))}>
+              action={
+                filtered ? (
+                  <button type="button" className="btn" onClick={() => setParams(new URLSearchParams(status === "open,pending_approval" ? {} : { status }))}>
                     Clear the filters
                   </button>
                 ) : (
-                  <Link to="/reports">Open the back-test report</Link>
-                )}
-              </p>
-            </Empty>
+                  <Link className="btn primary" to="/reports">
+                    Open the back-test report
+                  </Link>
+                )
+              }
+            />
           )}
         </div>
       )}
       {rows.length > 0 && (
-        <div className="table-wrap">
-          <table>
+        <div className="table-wrap sticky" style={{ borderTopLeftRadius: 0, borderTopRightRadius: 0 }}>
+          <table className="stack-sm">
+            <caption className="sr-only">Exceptions</caption>
             <thead>
               <tr>
                 {can("resolve") && (
-                  <th scope="col">
-                    <span className="sr-only">Select</span>
+                  <th scope="col" className="check">
+                    <input
+                      type="checkbox"
+                      aria-label="Select all shown"
+                      checked={rows.length > 0 && rows.every((r) => selected.has(r.id))}
+                      onChange={(e) => setSelected(e.target.checked ? new Set(rows.map((r) => r.id)) : new Set())}
+                    />
                   </th>
                 )}
                 <th scope="col">Type</th>
@@ -324,37 +385,39 @@ export function ExceptionsPage() {
                   }}
                 >
                   {can("resolve") && (
-                    <td>
+                    <td className="check" data-label="Select">
                       <input type="checkbox" aria-label={`Select ${typeWord(e.type)} on ${e.doc_number}`} checked={selected.has(e.id)} onChange={() => toggle(e.id)} />
                     </td>
                   )}
-                  <td>
-                    <strong>{typeWord(e.type)}</strong>
-                    {e.sub_reason && <div className="muted small">{SUB_REASONS[e.sub_reason] ?? e.sub_reason}</div>}
+                  <td data-label="Type">
+                    <span className="cell-main">{typeWord(e.type)}</span>
+                    {e.sub_reason && <span className="cell-sub">{SUB_REASONS[e.sub_reason] ?? e.sub_reason}</span>}
                   </td>
-                  <td>{e.vendor_name ?? <span className="muted">Not identified</span>}</td>
-                  <td>
+                  <td data-label="Supplier" className="nowrap">{e.vendor_name ?? <span className="muted">Not identified</span>}</td>
+                  <td data-label="Document" className="nowrap">
                     <Link to={hrefFor(e)} onClick={(ev) => { ev.preventDefault(); open(e); }}>
                       {e.doc_number ?? "No number"}
                     </Link>
                     {e.line_no ? <span className="muted"> line {e.line_no}</span> : null}
                   </td>
-                  <td>{e.po_number}</td>
-                  <td>{e.supplier_item_code}</td>
-                  <td className="num">{qty(e.variance_qty)}</td>
-                  <td className="num">
-                    {money(value(e))}
-                    {zeroCounted(e) && <div className="small muted">counted under another exception</div>}
+                  <td data-label="PO" className="nowrap">{e.po_number}</td>
+                  <td data-label="Item" className="nowrap">{e.supplier_item_code}</td>
+                  <td className="num" data-label="Variance qty">
+                    {qty(e.variance_qty)}
                   </td>
-                  <td>{ageText(e.raised_at)}</td>
-                  <td>{chipFor(e)}</td>
+                  <td className="num" data-label="Value (CAD)">
+                    <span className="cell-main">{money(value(e))}</span>
+                    {zeroCounted(e) && <span className="cell-sub">counted under another exception</span>}
+                  </td>
+                  <td data-label="Age" className="nowrap">{ageText(e.raised_at)}</td>
+                  <td data-label="Status">{chipFor(e)}</td>
                 </tr>
               ))}
             </tbody>
             <tfoot>
               <tr>
-                <td colSpan={can("resolve") ? 7 : 6}>{plural(rows.length, "exception")}</td>
-                <td className="num">{formatCents(sumCents(rows.map(value)))}</td>
+                <td colSpan={colCount - 3}>{plural(rows.length, "exception")}</td>
+                <td className="num">{formatCents(openTotal)}</td>
                 <td colSpan={2} />
               </tr>
             </tfoot>

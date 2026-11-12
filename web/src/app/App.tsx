@@ -2,9 +2,34 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Navigate, NavLink, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { SessionProvider, useSession } from "./session";
-import { NAV } from "./routes";
+import { NAV_GROUPS } from "./routes";
+import { PeriodProvider, usePeriod } from "./period";
 import { get, lastServerContact, send } from "../api/client";
-import type { Approval, Page, QboConnection } from "../api/types";
+import type { Approval, ExceptionPage, Page, QboConnection } from "../api/types";
+import {
+  AlertCircle,
+  ArrowLeftRight,
+  BarChart3,
+  Building2,
+  CalendarDays,
+  CheckSquare,
+  ChevronDown,
+  FileText,
+  History,
+  Inbox,
+  LifeBuoy,
+  Link2,
+  ListChecks,
+  LogOut,
+  Menu,
+  PackageCheck,
+  PanelLeftClose,
+  PanelLeftOpen,
+  SlidersHorizontal,
+  Users,
+  WifiOff,
+  type LucideIcon,
+} from "lucide-react";
 import { Dialog, Loading, PageErrorBoundary, ToastHost } from "../components/ui";
 import { LoginPage, VerifyPage } from "../routes/Login";
 import { InvitePage } from "../routes/Invite";
@@ -29,6 +54,7 @@ import { ShortcutsProvider, useShortcuts } from "./shortcuts";
 export function App() {
   return (
     <SessionProvider>
+      <PeriodProvider>
       <ShortcutsProvider>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
@@ -39,6 +65,7 @@ export function App() {
         </Routes>
         <ToastHost />
       </ShortcutsProvider>
+      </PeriodProvider>
     </SessionProvider>
   );
 }
@@ -111,8 +138,23 @@ function RootRedirect() {
   return <Navigate to="/exceptions" replace />;
 }
 
+const NAV_ICONS: Record<string, LucideIcon> = {
+  exceptions: AlertCircle,
+  invoices: FileText,
+  intake: Inbox,
+  receiving: PackageCheck,
+  approvals: CheckSquare,
+  reports: BarChart3,
+  onboarding: ListChecks,
+  quickbooks: Link2,
+  aliases: ArrowLeftRight,
+  tolerances: SlidersHorizontal,
+  users: Users,
+  audit: History,
+};
+
 function Shell({ children }: { children: ReactNode }) {
-  const { me, role, tenantName, can, offline } = useSession();
+  const { me, role, can, offline } = useSession();
   const location = useLocation();
   const qbo = useQuery({
     queryKey: ["qbo", "connection"],
@@ -126,62 +168,131 @@ function Shell({ children }: { children: ReactNode }) {
     enabled: can("approve"),
     refetchInterval: 30_000,
   });
+  const open = useQuery({
+    queryKey: ["exceptions", "open-count"],
+    queryFn: () => get<ExceptionPage>("/api/v1/exceptions?limit=1&status=open"),
+    enabled: !!me?.active_tenant_id,
+    refetchInterval: 30_000,
+  });
+  const [collapsed, setCollapsed] = useState(false); // in memory only: no browser storage (App-flow 4.3)
+  const [navOpen, setNavOpen] = useState(false);
   const mainRef = useRef<HTMLElement>(null);
   useEffect(() => {
     window.scrollTo(0, 0);
+    setNavOpen(false);
   }, [location.pathname]);
-  const items = NAV.filter((n) => role && n.roles.includes(role));
   const qboOk = qbo.data?.status === "connected";
+  const openCount = Object.values(open.data?.type_counters ?? {}).reduce((a, b) => a + b, 0);
+  const counts: Record<string, number> = { "/exceptions": openCount, "/approvals": pending.data?.items.length ?? 0 };
+  const countWords: Record<string, string> = { "/exceptions": "open", "/approvals": "waiting" };
+  const wide = /^\/invoices\/[^/]+(\/review)?$/.test(location.pathname);
   return (
-    <>
+    <div className={`shell ${collapsed ? "collapsed" : ""} ${navOpen ? "nav-open" : ""}`}>
       <a className="skip-link" href="#main">
         Skip to content
       </a>
-      <header className="topbar">
-        <NavLink to="/" className="brand" aria-label="MatchDesk home">
-          <img className="brand-mark" src="/favicon.svg" alt="" />
-          MatchDesk
-        </NavLink>
-        {tenantName && <TenantSwitcher />}
+      <aside className="sidebar" aria-label="Sidebar">
+        <div className="sidebar-head">
+          <NavLink to="/" className="brand" aria-label="MatchDesk home">
+            <img className="brand-mark" src="/favicon.svg" alt="" />
+            <span className="brand-word">MatchDesk</span>
+          </NavLink>
+        </div>
         {me?.active_tenant_id && (
-          <nav className="nav" aria-label="Main">
-            {items.map((n) => (
-              <NavLink key={n.to} to={n.to}>
-                {n.label}
-                {n.to === "/approvals" && (pending.data?.items.length ?? 0) > 0 && (
-                  <span className="count" aria-label={`${pending.data?.items.length} waiting`}>
-                    {pending.data?.items.length}
-                  </span>
-                )}
-              </NavLink>
-            ))}
+          <nav aria-label="Main">
+            {NAV_GROUPS.map((g) => {
+              const items = g.items.filter((n) => role && n.roles.includes(role));
+              if (!items.length) return null;
+              return (
+                <div className="nav-group" key={g.label}>
+                  <h2>{g.label}</h2>
+                  <ul>
+                    {items.map((n) => {
+                      const I = NAV_ICONS[n.icon ?? ""] ?? FileText;
+                      const c = counts[n.to] ?? 0;
+                      const descId = `nav-count-${n.icon}`;
+                      return (
+                        <li key={n.to}>
+                          <NavLink to={n.to} className="nav-link" aria-describedby={c > 0 ? descId : undefined} title={collapsed ? n.label : undefined}>
+                            <I size={17} aria-hidden="true" />
+                            <span className="label">{n.label}</span>
+                            {c > 0 && (
+                              <>
+                                <span className={`nav-count ${n.to === "/approvals" ? "alert" : ""}`} aria-hidden="true">
+                                  {c}
+                                </span>
+                                <span className="sr-only" id={descId}>
+                                  {c} {countWords[n.to]}
+                                </span>
+                              </>
+                            )}
+                          </NavLink>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              );
+            })}
           </nav>
         )}
-        {me?.active_tenant_id && (
-          <NavLink to="/settings/quickbooks" className="qbo-status">
-            <span className={`dot ${qboOk ? "ok" : qbo.data ? "bad" : ""}`} aria-hidden="true" />
-            {qboOk ? "QuickBooks connected" : qbo.data ? "QuickBooks not connected" : "QuickBooks"}
-          </NavLink>
-        )}
-        <UserMenu />
-      </header>
-      {offline && (
-        <div className="banner error" role="alert" style={{ borderRadius: 0, margin: 0 }}>
-          <p>Connection lost. Uploaded files and saved work are safe. Trying again…</p>
+        <div className="sidebar-foot">
+          <button className="btn ghost small collapse-toggle" aria-pressed={collapsed} onClick={() => setCollapsed((c) => !c)} aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}>
+            {collapsed ? <PanelLeftOpen size={16} aria-hidden="true" /> : <PanelLeftClose size={16} aria-hidden="true" />}
+            <span className="label">Collapse</span>
+          </button>
         </div>
-      )}
-      <main id="main" ref={mainRef} tabIndex={-1}>
-        <PageErrorBoundary resetKey={location.pathname}>{children}</PageErrorBoundary>
-      </main>
+      </aside>
+      <div className="scrim" onClick={() => setNavOpen(false)} aria-hidden="true" />
+      <div className="workspace">
+        <header className="topbar">
+          <button className="btn ghost icon-btn menu-toggle" aria-label="Open navigation" aria-expanded={navOpen} onClick={() => setNavOpen((o) => !o)}>
+            <Menu size={18} aria-hidden="true" />
+          </button>
+          <div className="company">
+            <Building2 size={16} aria-hidden="true" className="muted" />
+            <TenantSwitcher />
+          </div>
+          <div className="spacer" />
+          {me?.active_tenant_id && <PeriodPicker />}
+          {me?.active_tenant_id && (
+            <NavLink to="/settings/quickbooks" className="qbo-status" aria-label={qboOk ? "QuickBooks connected" : qbo.data ? "QuickBooks not connected" : "QuickBooks"}>
+              <span className={`dot ${qboOk ? "ok" : qbo.data ? "bad" : ""}`} aria-hidden="true" />
+              <span className="label">{qboOk ? "QuickBooks connected" : qbo.data ? "QuickBooks not connected" : "QuickBooks"}</span>
+            </NavLink>
+          )}
+          <UserMenu />
+        </header>
+        {offline && (
+          <div className="offline-banner" role="alert">
+            <WifiOff size={16} aria-hidden="true" />
+            <p>Connection lost. Uploaded files and saved work are safe. Trying again…</p>
+          </div>
+        )}
+        <main id="main" ref={mainRef} tabIndex={-1} className={wide ? "wide" : undefined}>
+          <PageErrorBoundary resetKey={location.pathname}>{children}</PageErrorBoundary>
+        </main>
+      </div>
       <IdleGuard />
-    </>
+    </div>
+  );
+}
+
+function PeriodPicker() {
+  const { month, setMonth } = usePeriod();
+  return (
+    <label className="period">
+      <CalendarDays size={16} aria-hidden="true" />
+      <span className="lbl">Period</span>
+      <input type="month" aria-label="Period" value={month} onChange={(e) => setMonth(e.target.value)} />
+    </label>
   );
 }
 
 function TenantSwitcher() {
   const { me, tenantName, signedIn } = useSession();
   const navigate = useNavigate();
-  if (!me || me.memberships.length < 2) return <span className="account">{tenantName}</span>;
+  if (!me || me.memberships.length < 2) return <span className="account">{tenantName ?? "MatchDesk operator"}</span>;
   return (
     <select
       aria-label="Account"
@@ -199,6 +310,11 @@ function TenantSwitcher() {
       ))}
     </select>
   );
+}
+
+function initials(name: string): string {
+  const parts = name.replace(/@.*/, "").split(/[\s._-]+/).filter(Boolean);
+  return ((parts[0]?.[0] ?? "") + (parts[1]?.[0] ?? "")).toUpperCase() || "?";
 }
 
 function UserMenu() {
@@ -226,20 +342,26 @@ function UserMenu() {
     else document.documentElement.dataset.theme = theme;
   }, [theme]);
   if (!me) return null;
+  const name = me.user.display_name || me.user.email;
   return (
     <div className="menu-wrap" ref={wrap}>
-      <button className="btn ghost" aria-expanded={open} aria-haspopup="true" onClick={() => setOpen((o) => !o)}>
-        {me.user.display_name || me.user.email}
+      <button className="user-button" aria-expanded={open} aria-haspopup="true" onClick={() => setOpen((o) => !o)}>
+        <span className="avatar" aria-hidden="true">
+          {initials(name)}
+        </span>
+        <span className="uname">{name}</span>
+        <ChevronDown size={14} aria-hidden="true" className="muted" />
       </button>
       {open && (
         <div className="menu">
           <div className="who">
-            <div>{me.user.email}</div>
+            <strong>{me.user.display_name}</strong>
+            <div className="muted small">{me.user.email}</div>
             <div className="muted small">{role ? role.charAt(0).toUpperCase() + role.slice(1) : "Operator"}</div>
           </div>
           <label>
+            <span>Single-key shortcuts (J, K, X, Enter)</span>
             <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
-            Single-key shortcuts (J, K, X, Enter)
           </label>
           <label>
             Theme
@@ -249,7 +371,11 @@ function UserMenu() {
               <option value="dark">Dark</option>
             </select>
           </label>
-          <a href="mailto:support@matchdesk.invalid">Help and contact</a>
+          <hr />
+          <a href="mailto:support@matchdesk.invalid">
+            <LifeBuoy size={16} aria-hidden="true" />
+            Help and contact
+          </a>
           <button
             onClick={async () => {
               setOpen(false);
@@ -258,6 +384,7 @@ function UserMenu() {
               await signOut();
             }}
           >
+            <LogOut size={16} aria-hidden="true" />
             Sign out
           </button>
         </div>

@@ -116,3 +116,20 @@ export function price(value: string | null | undefined): string {
   const [i, f = ""] = s.split(".");
   return `${i}.${f.padEnd(2, "0")}`;
 }
+
+/** a - b exactly, as a decimal string without trailing zeros ("100" - "60" -> "40"). For the
+ * difference column of the match view; the stored result stays the authority. */
+export function subtract(a: string, b: string): string {
+  const parse = (v: string) => {
+    const neg = v.trim().startsWith("-");
+    const [i, f = ""] = v.trim().replace("-", "").split(".");
+    return { n: BigInt((i || "0") + f) * (neg ? -1n : 1n), d: f.length };
+  };
+  const x = parse(a);
+  const y = parse(b);
+  const d = Math.max(x.d, y.d);
+  const n = x.n * 10n ** BigInt(d - x.d) - y.n * 10n ** BigInt(d - y.d);
+  const neg = n < 0n;
+  const out = scale(neg ? -n : n, d, d);
+  return (neg ? "-" : "") + qty(out);
+}

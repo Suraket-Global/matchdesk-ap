@@ -1,4 +1,7 @@
-import { useCallback, useRef, useState, type DragEvent } from "react";
+import { useCallback, useState } from "react";
+import { CheckCircle2, FileText, Inbox, RotateCw, XCircle } from "lucide-react";
+import { FileDropzone } from "../components/FileDropzone";
+import { TableSkeleton } from "../components/States";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, errorText, get, newKey, send, upload } from "../api/client";
@@ -103,67 +106,55 @@ function useUploader(onDone: (batchId: string) => void) {
 }
 
 function DropZone({ onFiles, disabled }: { onFiles: (f: File[]) => void; disabled: boolean }) {
-  const [over, setOver] = useState(false);
-  const input = useRef<HTMLInputElement>(null);
-  const drop = (e: DragEvent) => {
-    e.preventDefault();
-    setOver(false);
-    if (!disabled) onFiles(Array.from(e.dataTransfer.files));
-  };
   return (
-    <div
-      className={`dropzone wide-only ${over ? "over" : ""}`}
-      onDragOver={(e) => {
-        e.preventDefault();
-        setOver(true);
-      }}
-      onDragLeave={() => setOver(false)}
-      onDrop={drop}
-    >
-      <h2>Drop invoice and credit-note files here</h2>
-      <p className="muted">PDF, PNG or JPEG, up to 20 MB each and 500 per batch. The same file twice becomes one document.</p>
-      <label className="btn primary">
-        Choose files
-        <input
-          ref={input}
-          className="sr-only"
-          type="file"
-          multiple
-          accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg"
-          disabled={disabled}
-          onChange={(e) => {
-            const files = Array.from(e.target.files ?? []);
-            e.target.value = "";
-            if (files.length) onFiles(files);
-          }}
-        />
-      </label>
-    </div>
+    <FileDropzone
+      className="wide-only"
+      title="Drop invoice and credit-note files here"
+      hint="PDF, PNG or JPEG, up to 20 MB each and 500 per batch. The same file twice becomes one document."
+      accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg"
+      disabled={disabled}
+      onFiles={(files) => files.length && onFiles(files)}
+    />
   );
 }
+
+const PENDING_WORD: Record<Pending["state"], string> = { waiting: "Waiting", uploading: "Uploading", received: "Received", refused: "Refused" };
 
 function PendingList({ pending }: { pending: Pending[] }) {
   if (!pending.length) return null;
   const received = pending.filter((p) => p.state === "received").length;
   const sendable = pending.filter((p) => p.state !== "refused").length;
   return (
-    <div className="panel" style={{ marginTop: 12 }}>
+    <section className="panel" aria-labelledby="upload-h">
       <div className="panel-head">
-        <h2>Upload</h2>
-        <span role="status" aria-live="polite">
+        <h2 id="upload-h">Uploading</h2>
+        <span role="status" aria-live="polite" className="muted">
           {received} of {sendable} received
         </span>
       </div>
-      <div className="panel-body">
-        <ul style={{ margin: 0, paddingLeft: 18 }}>
-          {pending.map((p, i) => (
-            <li key={i}>
-              {p.name}: {p.state === "refused" ? <span className="error-text">{p.reason}</span> : p.state}
-            </li>
-          ))}
-        </ul>
+      <div className="progress ok" style={{ margin: "0 20px" }} aria-hidden="true">
+        <span style={{ width: `${sendable ? (received / sendable) * 100 : 0}%` }} />
       </div>
-    </div>
+      <ul className="file-rows">
+        {pending.map((p, i) => (
+          <li key={i} className="file-row">
+            <span className="ficon" aria-hidden="true">
+              {p.state === "received" ? <CheckCircle2 size={18} color="var(--success-solid)" /> : p.state === "refused" ? <XCircle size={18} color="var(--danger-solid)" /> : <FileText size={18} />}
+            </span>
+            <span className="fname" title={p.name}>
+              {p.name}
+              {p.reason && <span className="cell-sub error-text">{p.reason}</span>}
+            </span>
+            <span className={`progress ${p.state === "refused" ? "bad" : p.state === "received" ? "ok" : ""}`} aria-hidden="true">
+              <span style={{ width: p.state === "waiting" ? "0%" : p.state === "uploading" ? "55%" : "100%" }} />
+            </span>
+            <span className="small muted" style={{ minWidth: 70, textAlign: "right" }}>
+              {PENDING_WORD[p.state]}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 
@@ -185,22 +176,22 @@ export function IntakeListPage() {
       <NarrowNote />
       {can("upload") && <DropZone onFiles={(f) => start(f)} disabled={busy} />}
       <PendingList pending={pending} />
-      <section style={{ marginTop: 16 }} aria-labelledby="batches-h">
-        <h2 id="batches-h" style={{ marginBottom: 8 }}>
+      <section aria-labelledby="batches-h">
+        <h2 id="batches-h" style={{ margin: "8px 0 12px" }}>
           Batches
         </h2>
-        {batches.isLoading && <Loading />}
+        {batches.isLoading && <TableSkeleton />}
         {batches.error && <ErrorState error={batches.error} retry={() => batches.refetch()} />}
         {batches.data && items.length === 0 && (
           <div className="panel">
-            <Empty title="No invoices uploaded yet">
-              <p>Drop the month's invoice PDFs above. The demo files are in play-files/invoices.</p>
+            <Empty title="No invoices uploaded yet" icon={<Inbox size={22} />}>
+              <p>Drop the month&apos;s invoice PDFs above. The demo files are in play-files/invoices.</p>
             </Empty>
           </div>
         )}
         {items.length > 0 && (
           <div className="table-wrap">
-            <table>
+            <table className="stack-sm">
               <thead>
                 <tr>
                   <th scope="col">Uploaded</th>
@@ -216,13 +207,13 @@ export function IntakeListPage() {
               <tbody>
                 {items.map((b) => (
                   <tr key={b.id}>
-                    <td>
+                    <td data-label="Uploaded">
                       <Link to={`/intake/batches/${b.id}`}>{when(b.created_at)}</Link>
                     </td>
-                    <td>Upload</td>
-                    <td className="num">{b.totals.file_count}</td>
+                    <td data-label="Source">Upload</td>
+                    <td className="num" data-label="Files">{b.totals.file_count}</td>
                     {SEGMENTS.map((s) => (
-                      <td className="num" key={s.key}>
+                      <td className="num" key={s.key} data-label={s.label}>
                         {b.totals[s.key]}
                       </td>
                     ))}
@@ -288,6 +279,7 @@ export function BatchPage() {
           <>
             {can("upload") && t.failed > 0 && (
               <button className="btn" onClick={() => retry.mutate()} disabled={retry.isPending}>
+                <RotateCw size={16} aria-hidden="true" />
                 Retry failed
               </button>
             )}
@@ -299,7 +291,7 @@ export function BatchPage() {
           </>
         }
       />
-      <p>{sentence(t)}</p>
+      <p className="muted">{sentence(t)}</p>
       <ThrottledStatus text={sentence(t)} final={done} />
       <TotalsBar totals={t} />
       {t["needs review"] > 0 && (
@@ -311,8 +303,8 @@ export function BatchPage() {
       )}
       {can("upload") && <DropZone onFiles={(f) => start(f, batchId)} disabled={busy} />}
       <PendingList pending={pending} />
-      <div className="table-wrap" style={{ marginTop: 12 }}>
-        <table>
+      <div className="table-wrap">
+        <table className="stack-sm">
           <thead>
             <tr>
               <th scope="col">File</th>
@@ -325,8 +317,10 @@ export function BatchPage() {
           <tbody>
             {(b.files ?? []).map((f) => (
               <tr key={f.id}>
-                <td>{f.original_name ?? "file"}</td>
-                <td>
+                <td data-label="File">
+                  <span className="cell-main">{f.original_name ?? "file"}</span>
+                </td>
+                <td data-label="State">
                   <StatusChip status={f.displayed_state} />
                   {f.failure_code && <div className="error-text">{FAILURE_CODES[f.failure_code] ?? "Could not be read. Try again."}</div>}
                   {f.duplicate_of_document_id && (
@@ -340,8 +334,8 @@ export function BatchPage() {
                     </div>
                   )}
                 </td>
-                <td>{f.invoices.map((i) => i.vendor_name).filter(Boolean).join(", ") || <span className="muted">Not known yet</span>}</td>
-                <td>
+                <td data-label="Supplier">{f.invoices.map((i) => i.vendor_name).filter(Boolean).join(", ") || <span className="muted">Not known yet</span>}</td>
+                <td data-label="Document">
                   {f.invoices.map((i) => (
                     <div key={i.id}>
                       {i.doc_type === "credit_note" ? "Credit note " : ""}
@@ -350,7 +344,7 @@ export function BatchPage() {
                   ))}
                   {f.invoices.length > 1 && <div className="muted small">{f.invoices.length} documents in this file</div>}
                 </td>
-                <td>{fileAction(f)}</td>
+                <td data-label="Next">{fileAction(f)}</td>
               </tr>
             ))}
           </tbody>

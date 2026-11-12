@@ -5,6 +5,7 @@ import type { Me } from "../api/types";
 import { useSession } from "../app/session";
 import { usePageTitle } from "../components/ui";
 import { safePath } from "../lib/format";
+import { FlaskConical, Mail } from "lucide-react";
 
 const MAILPIT = "http://127.0.0.1:8025";
 // Shown only in a development build (Vite's `DEV` flag); a production build drops it.
@@ -20,6 +21,7 @@ export function AuthFrame({ children }: { children: React.ReactNode }) {
         </div>
         {children}
       </main>
+      <p className="auth-foot">Three-way match for accounts payable. Read-only access to QuickBooks.</p>
     </div>
   );
 }
@@ -28,6 +30,7 @@ function DevMailNote() {
   if (!SHOW_DEV_MAIL_NOTE) return null;
   return (
     <p className="dev-note">
+      <FlaskConical size={14} aria-hidden="true" style={{ verticalAlign: "-2px", marginRight: 6 }} />
       Local development: open Mailpit to get your link,{" "}
       <a href={MAILPIT} target="_blank" rel="noreferrer">
         {MAILPIT}
@@ -68,12 +71,15 @@ export function EmailForm({ intro }: { intro?: string }) {
   const next = params.get("next");
   return (
     <form onSubmit={submit} noValidate>
-      {intro && <p>{intro}</p>}
+      {intro && <p className="muted" style={{ marginBottom: 20 }}>{intro}</p>}
       <div className="field">
         <label htmlFor="email">Work email</label>
+        <span className="input-wrap">
+        <Mail size={16} aria-hidden="true" />
         <input
           id="email"
           type="email"
+          placeholder="you@company.com"
           autoComplete="email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
@@ -82,6 +88,7 @@ export function EmailForm({ intro }: { intro?: string }) {
           disabled={state === "pending"}
           style={{ width: "100%" }}
         />
+        </span>
         {invalid && (
           <span className="error" id="email-err">
             {invalid}
@@ -93,7 +100,7 @@ export function EmailForm({ intro }: { intro?: string }) {
       </button>
       <div role="status" aria-live="polite" style={{ marginTop: 12 }}>
         {state === "sent" && (
-          <p>
+          <p className="banner ok" style={{ display: "block" }}>
             If that address has access, a link is on its way. It works once, in this browser, and expires in 10 minutes. If
             nothing arrives, wait 15 minutes before asking again: after several requests for one address no further link is sent,
             and this page says the same either way so nobody can learn which addresses exist.
@@ -117,8 +124,8 @@ export function LoginPage() {
   if (me) return <Navigate to={safeNext(params.get("next"))} replace />;
   return (
     <AuthFrame>
-      <h1 style={{ marginBottom: 8 }}>Sign in</h1>
-      <EmailForm intro="We email you a link. There is no password." />
+      <h1>Sign in</h1>
+      <EmailForm intro="We email you a one-time link. There is no password." />
     </AuthFrame>
   );
 }
@@ -163,7 +170,7 @@ function VerifyLink({ hash }: { hash: string }) {
   }
   return (
     <AuthFrame>
-      <h1 style={{ marginBottom: 8 }}>Sign in</h1>
+      <h1>Sign in</h1>
       {(state === "ready" || state === "pending" || state === "totp") && (
         <>
           <p>{email ? <>Sign in to MatchDesk as <strong>{email}</strong> in this browser?</> : "Sign in to MatchDesk in this browser?"}</p>

@@ -1,12 +1,14 @@
 import { useState } from "react";
+import { AlertTriangle, Download, FileBarChart, HelpCircle, PackageCheck, PackageX, ShieldCheck } from "lucide-react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { download, errorText, get, send } from "../api/client";
 import type { Page, Refund, Report } from "../api/types";
 import { useSession } from "../app/session";
+import { usePeriod } from "../app/period";
 import { Banner, Dialog, Empty, ErrorState, Loading, PageHead, StatusChip, toast, usePageTitle } from "../components/ui";
 import { cad, cadCents, formatCents, money, sumCents } from "../lib/decimal";
-import { day, lastMonth, monthName, monthRange, plural, when } from "../lib/format";
+import { day, monthName, monthRange, plural, when } from "../lib/format";
 import { typeWord, zeroCounted } from "../lib/words";
 
 type Finding = NonNullable<Report["findings"]>[number];
@@ -25,7 +27,8 @@ export function ReportsPage() {
   const { can } = useSession();
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const [month, setMonth] = useState(lastMonth());
+  const period = usePeriod();
+  const [month, setMonth] = useState(period.month);
   const list = useQuery({ queryKey: ["reports"], queryFn: () => get<Page<Report>>("/api/v1/reports/backtest?limit=200") });
   const create = useMutation({
     mutationFn: () => send<Report>("POST", "/api/v1/reports/backtest", { period_start: monthRange(month).start, period_end: monthRange(month).end }),
@@ -62,14 +65,14 @@ export function ReportsPage() {
       {list.error && <ErrorState error={list.error} />}
       {list.data && rows.length === 0 && (
         <div className="panel">
-          <Empty title="No report yet">
+          <Empty title="No report yet" icon={<FileBarChart size={22} />}>
             <p>Create a draft for the test month when its invoices and receiving records are loaded.</p>
           </Empty>
         </div>
       )}
       {rows.length > 0 && (
         <div className="table-wrap">
-          <table>
+          <table className="stack-sm">
             <thead>
               <tr>
                 <th scope="col">Period</th>
@@ -84,20 +87,20 @@ export function ReportsPage() {
             <tbody>
               {rows.map((r) => (
                 <tr key={r.id}>
-                  <td>
+                  <td data-label="Period">
                     <Link to={`/reports/backtest/${r.id}`}>
                       {day(r.period_start)} to {day(r.period_end)}
                     </Link>
                   </td>
-                  <td className="num">{r.version_no}</td>
-                  <td>
+                  <td className="num" data-label="Version">{r.version_no}</td>
+                  <td data-label="Status">
                     <StatusChip status={reportStatus(r)} />
                     {r.is_stale && r.status === "approved" && <div className="small muted">Out of date</div>}
                   </td>
-                  <td className="num">{formatCents(sumCents([r.findings_amount, r.not_received_amount]))}</td>
-                  <td className="num">{money(r.not_received_amount)}</td>
-                  <td className="num">{money(r.unverified_amount)}</td>
-                  <td>{when(r.data_cutoff_at)}</td>
+                  <td className="num" data-label="Flagged discrepancies (CAD)">{formatCents(sumCents([r.findings_amount, r.not_received_amount]))}</td>
+                  <td className="num" data-label="of which not received">{money(r.not_received_amount)}</td>
+                  <td className="num" data-label="Unverified (CAD)">{money(r.unverified_amount)}</td>
+                  <td data-label="Data cut-off">{when(r.data_cutoff_at)}</td>
                 </tr>
               ))}
             </tbody>
@@ -250,9 +253,11 @@ export function ReportPage() {
         actions={
           <>
             <button className="btn" onClick={() => exportAs("pdf")} disabled={!!exporting}>
+              <Download size={16} aria-hidden="true" />
               {exporting === "pdf" ? "Preparing your file…" : "Export PDF"}
             </button>
             <button className="btn" onClick={() => exportAs("csv")} disabled={!!exporting}>
+              <Download size={16} aria-hidden="true" />
               {exporting === "csv" ? "Preparing your file…" : "Export CSV"}
             </button>
             {can("draft_report") && (r.status === "draft" || (r.status === "approved" && r.is_stale)) && (
@@ -262,6 +267,7 @@ export function ReportPage() {
             )}
             {can("approve_report") && r.status === "draft" && (
               <button className="btn primary" onClick={() => setApproveOpen(true)}>
+                <ShieldCheck size={16} aria-hidden="true" />
                 Approve version {r.version_no}
               </button>
             )}
@@ -318,34 +324,34 @@ export function ReportPage() {
 
       <div className="cards">
         <div>
-          <span className="muted small">Flagged discrepancies</span>
+          <span className="muted small"><AlertTriangle size={14} aria-hidden="true" style={{ verticalAlign: "-2px", marginRight: 6 }} />Flagged discrepancies</span>
           <span className="big">{cadCents(flagged)}</span>
           <span className="small">{plural(flaggedCount, "item")}</span>
         </div>
         <div>
-          <span className="muted small">of which not received</span>
+          <span className="muted small"><PackageX size={14} aria-hidden="true" style={{ verticalAlign: "-2px", marginRight: 6 }} />of which not received</span>
           <span className="big">{cad(r.not_received_amount)}</span>
           <span className="small">{plural(S.not_received?.count ?? 0, "line")}</span>
         </div>
         <div>
-          <span className="muted small">Unverified, no receiving evidence or not checkable</span>
+          <span className="muted small"><HelpCircle size={14} aria-hidden="true" style={{ verticalAlign: "-2px", marginRight: 6 }} />Unverified, not checkable</span>
           <span className="big">{cad(r.unverified_amount)}</span>
           <span className="small">{plural(S.unverified?.count ?? 0, "item")}</span>
         </div>
         <div>
-          <span className="muted small">Receipt coverage</span>
+          <span className="muted small"><PackageCheck size={14} aria-hidden="true" style={{ verticalAlign: "-2px", marginRight: 6 }} />Receipt coverage</span>
           <span className="big">{pct(r.receipt_coverage_pct)}</span>
           <span className="small">of invoiced PO lines have a counting receipt</span>
         </div>
       </div>
-      <p>
+      <p className="muted" style={{ marginTop: -8, marginBottom: 24 }}>
         Flagged discrepancies {flaggedCount}, {cadCents(flagged)}. Confirmed overcharges by the controller {confirmed.length},{" "}
         {cadCents(sumCents(confirmed.map((c) => c.amount)))}. Credit actually recovered: not recorded yet.
       </p>
 
       <section>
         <h2>1. Documents and lines</h2>
-        <dl className="facts">
+        <dl className="facts panel panel-body">
           <dt>Documents processed</dt>
           <dd>{r.totals.documents}</dd>
           <dt>Lines evaluated</dt>
@@ -422,7 +428,7 @@ export function ReportPage() {
       </section>
       <section>
         <h2>3. Receipt coverage and what could not be checked</h2>
-        <dl className="facts">
+        <dl className="facts panel panel-body">
           <dt>Invoiced PO lines with a counting receipt</dt>
           <dd>{pct(r.receipt_coverage_pct)}</dd>
           <dt>of which from a signed delivery document (B)</dt>

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { ChevronLeft, ChevronRight, Download, ZoomIn, ZoomOut } from "lucide-react";
 import { getDocument, GlobalWorkerOptions, type PDFDocumentProxy } from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { documentBytes, download } from "../api/client";
@@ -11,7 +12,9 @@ export default function PdfViewer({ documentId, label }: { documentId: string; l
   const canvas = useRef<HTMLCanvasElement>(null);
   const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null);
   const [page, setPage] = useState(1);
-  const [zoom, setZoom] = useState(1.25);
+  const [zoom, setZoom] = useState<number | null>(null); // null: fit the pane width
+  const wrap = useRef<HTMLDivElement>(null);
+  const [shown, setShown] = useState(1);
   const [error, setError] = useState(false);
   const [attempt, setAttempt] = useState(0);
   useEffect(() => {
@@ -42,7 +45,11 @@ export default function PdfViewer({ documentId, label }: { documentId: string; l
     pdf.getPage(page).then((p) => {
       // A page or zoom change before the page arrived: draw nothing for the old one (review, minor).
       if (cancelled || !canvas.current) return;
-      const viewport = p.getViewport({ scale: zoom * (window.devicePixelRatio || 1) });
+      const base = p.getViewport({ scale: 1 }).width;
+      const fit = wrap.current ? Math.max(0.5, Math.min(2, (wrap.current.clientWidth - 26) / base)) : 1;
+      const z = zoom ?? fit;
+      setShown(z);
+      const viewport = p.getViewport({ scale: z * (window.devicePixelRatio || 1) });
       const c = canvas.current!;
       c.width = viewport.width;
       c.height = viewport.height;
@@ -70,27 +77,30 @@ export default function PdfViewer({ documentId, label }: { documentId: string; l
   return (
     <div className="pdf">
       <div className="pdf-toolbar">
-        <button className="btn small" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
-          Previous page
+        <button className="btn small icon-btn sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)} aria-label="Previous page">
+          <ChevronLeft size={16} aria-hidden="true" />
         </button>
-        <span aria-live="polite">
+        <span aria-live="polite" className="small">
           Page {page} of {pdf?.numPages ?? "…"}
         </span>
-        <button className="btn small" disabled={!pdf || page >= pdf.numPages} onClick={() => setPage((p) => p + 1)}>
-          Next page
+        <button className="btn small icon-btn sm" disabled={!pdf || page >= pdf.numPages} onClick={() => setPage((p) => p + 1)} aria-label="Next page">
+          <ChevronRight size={16} aria-hidden="true" />
         </button>
-        <button className="btn small" onClick={() => setZoom((z) => Math.max(0.5, z - 0.25))} aria-label="Zoom out">
-          −
+        <span className="grow" style={{ flex: 1 }} />
+        <button className="btn small icon-btn sm" onClick={() => setZoom(Math.max(0.5, shown - 0.25))} aria-label="Zoom out">
+          <ZoomOut size={16} aria-hidden="true" />
         </button>
-        <span>{Math.round(zoom * 100)}%</span>
-        <button className="btn small" onClick={() => setZoom((z) => Math.min(3, z + 0.25))} aria-label="Zoom in">
-          +
+        <button className="btn small ghost" onClick={() => setZoom(null)} aria-label="Fit to width" title="Fit to width">
+          {Math.round(shown * 100)}%
         </button>
-        <button className="btn small" onClick={() => void download(`/api/v1/documents/${documentId}/content`, "document.pdf")}>
-          Download original
+        <button className="btn small icon-btn sm" onClick={() => setZoom(Math.min(3, shown + 0.25))} aria-label="Zoom in">
+          <ZoomIn size={16} aria-hidden="true" />
+        </button>
+        <button className="btn small icon-btn sm" onClick={() => void download(`/api/v1/documents/${documentId}/content`, "document.pdf")} aria-label="Download original">
+          <Download size={16} aria-hidden="true" />
         </button>
       </div>
-      <div className="pdf-canvas-wrap" tabIndex={0} aria-label={`${label}, page ${page}`}>
+      <div className="pdf-canvas-wrap" ref={wrap} tabIndex={0} aria-label={`${label}, page ${page}`}>
         <canvas ref={canvas} role="img" aria-label={`${label}, page ${page}. The values read from it are listed as text beside it.`} />
       </div>
     </div>

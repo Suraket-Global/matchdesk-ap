@@ -3,6 +3,13 @@ export interface NavItem {
   to: string;
   label: string;
   roles: string[];
+  /** lucide icon name used by the sidebar */
+  icon?: string;
+}
+
+export interface NavGroup {
+  label: string;
+  items: NavItem[];
 }
 
 const ALL = ["controller", "clerk", "viewer", "support_reader"];
@@ -16,6 +23,37 @@ export const NAV: NavItem[] = [
   { to: "/reports", label: "Reports", roles: ALL },
   { to: "/approvals", label: "Approvals", roles: ["controller"] },
   { to: "/settings", label: "Settings", roles: ALL },
+];
+
+// The sidebar, grouped by job (B6): daily work, review, and setup.
+export const NAV_GROUPS: NavGroup[] = [
+  {
+    label: "Work",
+    items: [
+      { to: "/exceptions", label: "Exceptions", roles: ALL, icon: "exceptions" },
+      { to: "/invoices", label: "Invoices", roles: ALL, icon: "invoices" },
+      { to: "/intake", label: "Intake", roles: ALL, icon: "intake" },
+      { to: "/receiving", label: "Receiving", roles: ALL, icon: "receiving" },
+    ],
+  },
+  {
+    label: "Review",
+    items: [
+      { to: "/approvals", label: "Approvals", roles: ["controller"], icon: "approvals" },
+      { to: "/reports", label: "Reports", roles: ALL, icon: "reports" },
+    ],
+  },
+  {
+    label: "Setup",
+    items: [
+      { to: "/onboarding", label: "Getting started", roles: ALL, icon: "onboarding" },
+      { to: "/settings/quickbooks", label: "QuickBooks", roles: ALL, icon: "quickbooks" },
+      { to: "/aliases", label: "Aliases", roles: ["controller", "clerk"], icon: "aliases" },
+      { to: "/settings/tolerances", label: "Tolerances", roles: ALL, icon: "tolerances" },
+      { to: "/settings/users", label: "Users", roles: ["controller"], icon: "users" },
+      { to: "/audit", label: "Audit log", roles: ["controller", "support_reader"], icon: "audit" },
+    ],
+  },
 ];
 
 export const SETTINGS_NAV: NavItem[] = [

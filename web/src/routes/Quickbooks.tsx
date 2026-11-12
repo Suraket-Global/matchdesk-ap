@@ -4,8 +4,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { errorText, get, send } from "../api/client";
 import type { QboConnection, SyncRun } from "../api/types";
 import { useSession } from "../app/session";
+import { usePeriod } from "../app/period";
 import { Banner, Dialog, ErrorState, Field, Loading, PageHead, StatusChip, toast, usePageTitle } from "../components/ui";
-import { lastMonth, monthRange, when } from "../lib/format";
+import { monthRange, when } from "../lib/format";
 
 const READS = "purchase orders, bills, vendor credits, vendors and items";
 
@@ -19,7 +20,7 @@ export function QuickbooksPage() {
   const conn = useQuery({ queryKey: ["qbo", "connection"], queryFn: () => get<QboConnection>("/api/v1/qbo/connection") });
   const [confirmConnect, setConfirmConnect] = useState(false);
   const [confirmDisconnect, setConfirmDisconnect] = useState(false);
-  const ym = lastMonth();
+  const ym = usePeriod().month;
   const [start, setStart] = useState(monthRange(ym).start);
   const [end, setEnd] = useState(monthRange(ym).end);
   const [run, setRun] = useState<SyncRun | null>(null);

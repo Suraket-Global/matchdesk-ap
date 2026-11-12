@@ -3,8 +3,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { errorText, get, send } from "../api/client";
 import type { Batch, InvoiceSummary, Page, PurchaseOrder, QboConnection, ReceivingImport, SyncRun } from "../api/types";
 import { useSession } from "../app/session";
+import { usePeriod } from "../app/period";
 import { Banner, ErrorState, Loading, PageHead, StatusChip, toast, usePageTitle } from "../components/ui";
-import { lastMonth, monthName, monthRange, plural, when } from "../lib/format";
+import { Stepper } from "../components/Page";
+import { monthName, monthRange, plural, when } from "../lib/format";
 import { useState } from "react";
 
 export function useOnboarding() {
@@ -34,7 +36,8 @@ export function useOnboarding() {
 export function OnboardingPage() {
   usePageTitle("Onboarding checklist");
   const [params, setParams] = useSearchParams();
-  const month = params.get("month") ?? lastMonth();
+  const period = usePeriod();
+  const month = params.get("month") ?? period.month;
   const { can } = useSession();
   const qc = useQueryClient();
   const ob = useOnboarding();
@@ -80,6 +83,9 @@ export function OnboardingPage() {
   if (ob.error) return <ErrorState error={ob.error} />;
   const lines = ob.committed.reduce((n, i) => n + (i.rows_valid ?? 0), 0);
   const poCount = pos.data?.items.length ?? 0;
+  const done = [ob.connected, ob.connected && poCount > 0, ob.committed.length > 0, ob.processed > 0];
+  const current = done.findIndex((d) => !d);
+  const cls = (i: number) => (done[i] ? "done" : i === current ? "current" : "");
   return (
     <>
       <PageHead
@@ -93,14 +99,28 @@ export function OnboardingPage() {
           ) : undefined
         }
       />
+      <div className="panel panel-body">
+        <Stepper
+          current={current}
+          steps={[
+            { label: "Connect QuickBooks", sub: ob.connected ? "Connected" : "Read-only access", done: done[0] },
+            { label: "Choose the test month", sub: monthName(month), done: done[1] },
+            { label: "Load receiving evidence", sub: ob.committed.length ? plural(ob.committed.length, "file") : "Warehouse log", done: done[2] },
+            { label: "Upload invoices", sub: ob.files ? `${ob.processed} of ${ob.files} processed` : "PDF files", done: done[3] },
+          ]}
+        />
+        <p className="muted" style={{ margin: 0 }}>
+          {current < 0 ? "Setup is complete. Work the exception queue, then draft the back-test report." : `${done.filter(Boolean).length} of 4 done. Next: step ${current + 1}.`}
+        </p>
+      </div>
       <Banner tone="info">
         <p>
           <strong>Pilot terms.</strong> The CAD 500 pilot covers 30 days: the back-test of one month and live checking.
           The signed terms and refund threshold are kept in the pilot record; showing that record here is not built yet.
         </p>
       </Banner>
-      <ol className="steps panel">
-        <li className={ob.connected ? "done" : ""}>
+      <ol className="steps">
+        <li className={cls(0)}>
           <div>
             <h2>Connect QuickBooks Online</h2>
             <p className="muted">
@@ -112,11 +132,11 @@ export function OnboardingPage() {
           <div className="step-action">
             <StatusChip status={ob.connected ? "connected" : "disconnected"} />
           </div>
-          <div style={{ gridColumn: "2 / -1" }}>
-            <Link to="/settings/quickbooks">{ob.connected ? "View the connection" : "Connect QuickBooks"}</Link>
+          <div style={{ gridColumn: "1 / -1" }}>
+            <Link className={`btn small ${ob.connected ? "" : "primary"}`} to="/settings/quickbooks">{ob.connected ? "View the connection" : "Connect QuickBooks"}</Link>
           </div>
         </li>
-        <li className={ob.connected && poCount > 0 ? "done" : ""}>
+        <li className={cls(1)}>
           <div>
             <h2>Choose the test month</h2>
             <p className="muted">
@@ -125,7 +145,7 @@ export function OnboardingPage() {
             </p>
           </div>
           <div className="step-action muted">{plural(poCount, "purchase order")}</div>
-          <div style={{ gridColumn: "2 / -1" }} className="inline-form">
+          <div style={{ gridColumn: "1 / -1" }} className="inline-form">
             <div className="field">
               <label htmlFor="month">Test month</label>
               <input
@@ -156,7 +176,7 @@ export function OnboardingPage() {
             )}
           </div>
         </li>
-        <li className={ob.committed.length > 0 ? "done" : ""}>
+        <li className={cls(2)}>
           <div>
             <h2>Load receiving evidence</h2>
             <p className="muted">
@@ -173,15 +193,15 @@ export function OnboardingPage() {
           <div className="step-action">
             <StatusChip status={ob.committed.length ? "succeeded" : "queued"} word={ob.committed.length ? "Loaded" : "Not started"} />
           </div>
-          <div style={{ gridColumn: "2 / -1" }}>
-            <Link to="/receiving">Load a receiving file</Link>
+          <div style={{ gridColumn: "1 / -1" }}>
+            <Link className={`btn small ${current === 2 ? "primary" : ""}`} to="/receiving">Load a receiving file</Link>
             <p className="muted small" style={{ marginTop: 6 }}>
               No warehouse receiving records at all? Every line will then carry a "receipt absent" exception and the report is
               two-way only. Recording that choice on this screen is not built yet; tell MatchDesk support.
             </p>
           </div>
         </li>
-        <li className={ob.processed > 0 ? "done" : ""}>
+        <li className={cls(3)}>
           <div>
             <h2>Upload the month's invoices and credit notes</h2>
             <p className="muted">
@@ -192,8 +212,8 @@ export function OnboardingPage() {
           <div className="step-action">
             <StatusChip status={ob.processed ? "ready" : "queued"} word={ob.processed ? "Processed" : "Not started"} />
           </div>
-          <div style={{ gridColumn: "2 / -1" }}>
-            <Link to="/intake">Upload invoices</Link>
+          <div style={{ gridColumn: "1 / -1" }}>
+            <Link className={`btn small ${current === 3 ? "primary" : ""}`} to="/intake">Upload invoices</Link>
           </div>
         </li>
       </ol>
