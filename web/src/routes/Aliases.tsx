@@ -267,7 +267,7 @@ export function AliasesPage() {
       )}
       {rows.length > 0 && (
         <div className="table-wrap">
-          <table>
+          <table className="stack-sm">
             <thead>
               <tr>
                 <th scope="col">Supplier</th>
@@ -287,24 +287,24 @@ export function AliasesPage() {
             <tbody>
               {rows.map((a) => (
                 <tr key={a.id}>
-                  <td>{a.vendor_name}</td>
-                  <td>
+                  <td data-label="Supplier">{a.vendor_name}</td>
+                  <td data-label="Supplier code">
                     {a.supplier_item_code}
                     {a.supplier_description && <div className="muted small">{a.supplier_description}</div>}
                   </td>
-                  <td>{[a.item_sku, a.item_name].filter(Boolean).join(" · ")}</td>
-                  <td>{a.supplier_uom}</td>
-                  <td>{a.item_uom}</td>
-                  <td className="num">{qty(a.conversion_factor)}</td>
-                  <td>
+                  <td data-label="Our item">{[a.item_sku, a.item_name].filter(Boolean).join(" · ")}</td>
+                  <td data-label="Supplier unit">{a.supplier_uom}</td>
+                  <td data-label="Our unit">{a.item_uom}</td>
+                  <td data-label="Conversion" className="num">{qty(a.conversion_factor)}</td>
+                  <td data-label="Status">
                     <StatusChip status={a.status} />
                   </td>
-                  <td>
+                  <td data-label="Created by">
                     {a.created_by_name}
                     <div className="muted small">{when(a.valid_from)}</div>
                   </td>
-                  <td>{a.approved_by_name ?? <span className="muted">{a.status === "active" && a.conversion_factor.startsWith("1.") ? "1:1, no approval needed" : ""}</span>}</td>
-                  <td>
+                  <td data-label="Approved by">{a.approved_by_name ?? <span className="muted">{a.status === "active" && a.conversion_factor.startsWith("1.") ? "1:1, no approval needed" : ""}</span>}</td>
+                  <td data-label="Actions">
                     {a.status !== "retired" && can("edit_alias") && (
                       <button className="btn small" onClick={() => setRetire(a)}>
                         Retire

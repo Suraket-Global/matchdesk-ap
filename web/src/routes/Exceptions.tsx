@@ -56,17 +56,18 @@ export function ExceptionsPage() {
     p.delete("sel");
     setParams(p);
   };
-  const query = new URLSearchParams({ limit: "200", status });
+  const { month } = usePeriod();
+  // The queue shows the selected test month: documents dated in it (B6 review minor).
+  const query = new URLSearchParams({ limit: "200", status, period_start: monthRange(month).start, period_end: monthRange(month).end });
   if (vendor) query.set("vendor_id", vendor);
   const list = useInfiniteQuery({
-    queryKey: ["exceptions", "queue", status, vendor],
+    queryKey: ["exceptions", "queue", status, vendor, month],
     queryFn: ({ pageParam }) => get<ExceptionPage>(`/api/v1/exceptions?${query}${pageParam ? `&cursor=${pageParam}` : ""}`),
     initialPageParam: "",
     getNextPageParam: (last) => last.next_cursor ?? undefined,
     refetchInterval: 15_000,
   });
   const vendors = useQuery({ queryKey: ["vendors"], queryFn: () => get<Page<Vendor>>("/api/v1/vendors") });
-  const { month } = usePeriod();
   // Live coverage for the test month, from the current results; no report draft needed (review W3).
   const coverage = useQuery({
     queryKey: ["coverage", month],
@@ -74,8 +75,11 @@ export function ExceptionsPage() {
     refetchInterval: 15_000,
   });
   const absentAll = useQuery({
-    queryKey: ["exceptions", "absent"],
-    queryFn: () => get<ExceptionPage>("/api/v1/exceptions?limit=200&type=receipt_absent&status=open,pending_approval,resolved"),
+    queryKey: ["exceptions", "absent", month],
+    queryFn: () =>
+      get<ExceptionPage>(
+        `/api/v1/exceptions?limit=200&type=receipt_absent&status=open,pending_approval,resolved&period_start=${monthRange(month).start}&period_end=${monthRange(month).end}`,
+      ),
   });
   const batches = useQuery({ queryKey: ["batches"], queryFn: () => get<Page<Batch>>("/api/v1/intake/batches?limit=200") });
 
@@ -206,7 +210,8 @@ export function ExceptionsPage() {
           <span className="v">{cov ? pctText(cov.coverage_class_a_pct) : "None"}</span>
           <span className="s">
             {" "}
-            of lines covered. <Link to="/receiving">Receiving imports</Link>
+            of lines are inside a log you declared complete. It counts lines the log shows as not received too, so it can be above receipt coverage.{" "}
+            <Link to="/receiving">Receiving imports</Link>
           </span>
         </div>
       </div>
@@ -336,7 +341,7 @@ export function ExceptionsPage() {
       )}
       {rows.length > 0 && (
         <div className="table-wrap sticky" style={{ borderTopLeftRadius: 0, borderTopRightRadius: 0 }}>
-          <table className="stack-sm">
+          <table className="stack-sm queue-table">
             <caption className="sr-only">Exceptions</caption>
             <thead>
               <tr>
@@ -393,7 +398,7 @@ export function ExceptionsPage() {
                     <span className="cell-main">{typeWord(e.type)}</span>
                     {e.sub_reason && <span className="cell-sub">{SUB_REASONS[e.sub_reason] ?? e.sub_reason}</span>}
                   </td>
-                  <td data-label="Supplier" className="nowrap">{e.vendor_name ?? <span className="muted">Not identified</span>}</td>
+                  <td data-label="Supplier" className="wrap-name">{e.vendor_name ?? <span className="muted">Not identified</span>}</td>
                   <td data-label="Document" className="nowrap">
                     <Link to={hrefFor(e)} onClick={(ev) => { ev.preventDefault(); open(e); }}>
                       {e.doc_number ?? "No number"}
@@ -448,7 +453,8 @@ export function BulkDialog({ items: chosenNow, onClose }: { items: ExceptionItem
   const { role } = useSession();
   const t = items[0]?.type;
   const codes = (items[0]?.allowed_codes ?? []).filter((c) => !(t === "receipt_absent" && c === "waived")).filter((c) => role === "controller" || c !== "confirmed_not_received");
-  const [code, setCode] = useState(codes[0] ?? "");
+  // Nothing chosen until the person chooses (B6 review minor).
+  const [code, setCode] = useState("");
   const [note, setNote] = useState("");
   const total = sumCents(items.map(value));
   const tol = useQuery({ queryKey: ["tolerances"], queryFn: () => get<{ waiver_limit: string; waiver_period_cap: string }>("/api/v1/tolerances") });

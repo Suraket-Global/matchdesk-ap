@@ -136,6 +136,13 @@ def create_draft(
     prior = s.scalars(
         select(BacktestReport).where(BacktestReport.period_start == start, BacktestReport.period_end == end)
     ).all()
+    approved = next((r for r in prior if r.status == "approved"), None)
+    if approved is not None and not changed_since_cutoff(s, approved):
+        # An identical version after approval would blur which version governs (B6 review M6).
+        raise ConflictError(
+            f"nothing changed since approved version {approved.version_no}; a new draft is offered "
+            "only when results change after its data cut-off"
+        )
     for r in prior:
         if r.status == "draft":
             r.status = "superseded"
@@ -336,6 +343,16 @@ def snapshot_changed(s: Session, report: BacktestReport) -> bool:
     return current != frozen
 
 
+def changed_since_cutoff(s: Session, report: BacktestReport) -> bool:
+    """True when a rebuild now would differ from this version: its frozen rows differ from the
+    current exceptions, or the current results of the period are out of date."""
+    if report.is_stale or snapshot_changed(s, report):
+        return True
+    ids = [i.id for i in _period_invoices(s, report.period_start, report.period_end)]
+    matches = _current_matches(s, ids)
+    return any(stale_runs(s, list({lm.match_run_id for lm, _ln in matches})).values())
+
+
 def approve(s: Session, report: BacktestReport, user_id: uuid.UUID) -> BacktestReport:
     """Idempotent. Refused while any blocking check fails; supersedes an earlier approved version."""
     if report.status == "approved":
@@ -438,7 +455,65 @@ def _cell(value: Any) -> str:
     return text
 
 
+SECTION_WORDS = {
+    "finding": "Finding",
+    "not_received": "Not received",
+    "unverified": "Unverified",
+    "waived": "Waived",
+    "open": "Undecided",
+}
+STATUS_WORDS = {
+    "open": "Open in the queue",
+    "pending_approval": "Waiting for approval",
+    "resolved": "Resolved",
+    "waived": "Waived",
+    "auto_closed": "Closed by the rules",
+}
+PAID_WORDS = {"paid": "Already paid", "unpaid": "Not yet paid", "unknown": "Not known"}
+TYPE_WORDS = {  # the same words as the web app (web/src/lib/words.ts)
+    "receipt_absent": "Receipt absent",
+    "qty_over_received": "Invoiced above received",
+    "qty_over_ordered": "Invoiced above ordered",
+    "price_variance": "Price variance",
+    "duplicate": "Duplicate",
+    "possible_duplicate": "Possible duplicate",
+    "no_po": "No purchase order",
+    "alias_unconfirmed": "Alias not confirmed",
+    "po_line_not_found": "PO line not found",
+    "uom_unresolved": "Unit not converted",
+    "history_incomplete": "History incomplete",
+    "unmatched_charge": "Charge not on the PO",
+    "credit_unlinked": "Credit note not linked",
+    "extraction_unverified": "Extraction not confirmed",
+    "currency_unsupported": "Currency not supported",
+}
+RESOLUTION_WORDS = {
+    "confirmed_overbilling": "Confirmed overbilling",
+    "confirmed_short_shipment": "Confirmed short shipment",
+    "source_corrected": "Source corrected",
+    "waived": "Waived",
+    "confirmed_not_received": "Confirmed not received",
+    "resolved_by_credit": "Resolved by a credit note",
+    "confirmed_duplicate": "Is a duplicate",
+    "not_a_duplicate": "Not a duplicate",
+}
+
+
+def _word(table: dict[str, str], code: Any) -> str:
+    if code is None:
+        return ""
+    return table.get(str(code), str(code).replace("_", " ").capitalize())
+
+
+def flagged_amount(r: BacktestReport) -> Decimal:
+    """Flagged discrepancies = findings + not received; the one figure the screens call that."""
+    return round_cents(dec(r.findings_amount or 0) + dec(r.not_received_amount or 0))
+
+
 def export_csv(r: BacktestReport, findings: list[ReportFinding]) -> bytes:
+    """Column names say the same as the screen (B6 review M5): ``flagged_discrepancies`` is findings
+    plus not received. Dates stay ISO 8601 (YYYY-MM-DD) so a spreadsheet reads them as dates; codes
+    are written as words and booleans as Yes or No (review minor)."""
     buf = io.StringIO()
     w = csv.writer(buf)
     if r.status != "approved":
@@ -449,10 +524,11 @@ def export_csv(r: BacktestReport, findings: list[ReportFinding]) -> bytes:
             "period_end",
             "version",
             "status",
-            "qualifying_amount",
-            "findings_amount",
-            "not_received_amount",
-            "unverified_amount",
+            "flagged_discrepancies",
+            "findings",
+            "not_received",
+            "unverified",
+            "qualifying_total_for_refund",
         ]
     )
     w.writerow(
@@ -460,11 +536,12 @@ def export_csv(r: BacktestReport, findings: list[ReportFinding]) -> bytes:
             r.period_start,
             r.period_end,
             r.version_no,
-            r.status,
-            r.qualifying_amount,
+            r.status.capitalize(),
+            flagged_amount(r),
             r.findings_amount,
             r.not_received_amount,
             r.unverified_amount,
+            r.qualifying_amount,
         ]
     )
     w.writerow([])
@@ -472,16 +549,16 @@ def export_csv(r: BacktestReport, findings: list[ReportFinding]) -> bytes:
         [
             "section",
             "type",
-            "vendor",
+            "supplier",
             "document",
             "date",
             "po",
             "line",
             "item_code",
             "amount",
-            "qualifying",
-            "paid_status",
-            "status",
+            "counts_for_refund",
+            "paid",
+            "queue_status",
             "resolution",
         ]
     )
@@ -491,8 +568,8 @@ def export_csv(r: BacktestReport, findings: list[ReportFinding]) -> bytes:
             [
                 _cell(x)
                 for x in (
-                    f.section,
-                    f.type,
+                    _word(SECTION_WORDS, f.section),
+                    _word(TYPE_WORDS, f.type),
                     sn.get("vendor_name"),
                     sn.get("doc_number"),
                     sn.get("doc_date"),
@@ -500,10 +577,10 @@ def export_csv(r: BacktestReport, findings: list[ReportFinding]) -> bytes:
                     sn.get("line_no"),
                     sn.get("supplier_item_code"),
                     f.amount,
-                    f.qualifying,
-                    f.paid_status,
-                    sn.get("status"),
-                    sn.get("resolution_code"),
+                    "Yes" if f.qualifying else "No",
+                    _word(PAID_WORDS, f.paid_status),
+                    _word(STATUS_WORDS, sn.get("status")),
+                    _word(RESOLUTION_WORDS, sn.get("resolution_code")),
                 )
             ]
         )
@@ -517,8 +594,10 @@ def export_pdf(r: BacktestReport, findings: list[ReportFinding]) -> bytes:
         f"Data cut-off: {r.data_cutoff_at.isoformat()}   History read from: {r.history_read_from or 'n/a'}",
         "",
         f"Qualifying total (refund criterion): {r.qualifying_amount}",
-        f"Findings: {r.findings_amount}   Not received: {r.not_received_amount}   Unverified: {r.unverified_amount}",
-        f"Waived (still counted): {sec.get('waived', {}).get('amount', '0.00')}   Open: {sec.get('open', {}).get('amount', '0.00')}",
+        f"Flagged discrepancies: {flagged_amount(r)} (findings {r.findings_amount} + not received"
+        f" {r.not_received_amount})   Unverified: {r.unverified_amount}",
+        f"Waived (still counted): {sec.get('waived', {}).get('amount', '0.00')}"
+        f"   Undecided: {sec.get('open', {}).get('amount', '0.00')}",
         f"Receipt coverage: {r.receipt_coverage_pct}%  class A complete-log coverage: {r.coverage_class_a_pct}%"
         f"  class B: {r.coverage_class_b_pct}%  supplier-slip-only lines: {r.class_c_only_lines}",
         "",

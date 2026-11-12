@@ -2551,3 +2551,131 @@ hr {
 .match-grid > * {
   min-width: 0;
 }
+
+/* ================================================================ B7: review line editor, wide tables */
+.line-editor {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.le-line {
+  padding: var(--s-3) var(--s-4);
+  border-top: 1px solid var(--border);
+  display: grid;
+  gap: var(--s-2);
+}
+.le-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+}
+.le-no {
+  font-weight: 600;
+  font-size: var(--fs-sm);
+  min-width: 52px;
+}
+.le-head select {
+  width: auto;
+}
+.le-what {
+  display: grid;
+  grid-template-columns: minmax(96px, 1fr) minmax(0, 2fr);
+  gap: var(--s-2) var(--s-3);
+}
+.le-sum {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 0.7fr) minmax(0, 1.1fr) minmax(0, 1.1fr);
+  gap: var(--s-2) var(--s-3);
+}
+.le-field {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.le-field label {
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  font-weight: 500;
+}
+.le-field input {
+  width: 100%;
+  min-width: 0;
+}
+.le-edited {
+  display: flex;
+  align-items: center;
+  gap: var(--s-1);
+}
+@media (max-width: 480px) {
+  .le-what,
+  .le-sum {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+}
+
+/* Exception queue: no clipped column from 1280 px (B6 review M2). */
+.queue-table th,
+.queue-table td {
+  padding-left: var(--s-3);
+  padding-right: var(--s-3);
+}
+.queue-table td .cell-sub {
+  white-space: normal;
+  max-width: 24ch;
+}
+.queue-table .wrap-name {
+  min-width: 10ch;
+  max-width: 18ch;
+  overflow-wrap: anywhere;
+}
+.queue-table td[data-label="Status"] {
+  white-space: nowrap;
+}
+.tag.muted {
+  color: var(--text-3);
+  background: transparent;
+  border: 1px dashed var(--border);
+}
+
+/* Audit log (B6 review M7) */
+.audit-table td {
+  vertical-align: top;
+}
+.audit-changes ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+}
+.audit-changes li {
+  overflow-wrap: anywhere;
+}
+.audit-table td:nth-child(4) {
+  width: 50%;
+}
+@media (max-width: 640px) {
+  .audit-changes {
+    flex-direction: column;
+    align-items: flex-end;
+  }
+}
+
+/* Tolerances: aligned fields of one width, one row gap (B6 review minor) */
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--s-4) var(--s-5);
+  align-items: start;
+}
+.form-grid .field {
+  margin-bottom: 0;
+}
+.form-grid input {
+  width: 100%;
+}
+.form-grid-gap {
+  margin-top: var(--s-5);
+  padding-top: var(--s-4);
+  border-top: 1px solid var(--border);
+}

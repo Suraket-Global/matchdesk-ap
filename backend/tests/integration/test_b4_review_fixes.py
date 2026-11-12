@@ -311,6 +311,9 @@ def test_m6_refund_only_on_the_approved_version_and_threshold_is_not_the_callers
     ev = client.get(f"/api/v1/reports/backtest/{r1}/refund-evaluation?threshold=1", headers=w.headers)
     assert ev.status_code == 200
     assert ev.json()["threshold"] == "500.00" and ev.json()["refund_due"] is True  # 15.00 < 500.00
+    # B6 review M6: a new version after approval needs a real change after the cut-off.
+    extra = add_invoice(app_engine, w, "m6b", "INV-M6B", date(2026, 10, 9), "1", price="4.35")
+    match(client, app_engine, w.headers, [extra, w.invoices["r"]])
     r2 = client.post("/api/v1/reports/backtest", json=OCT, headers=ctrl).json()["id"]
     assert client.post(f"/api/v1/reports/backtest/{r2}/approve", headers=ctrl).status_code == 200
     old = client.get(f"/api/v1/reports/backtest/{r1}/refund-evaluation", headers=w.headers)

@@ -66,14 +66,14 @@ export function ReceivingListPage() {
             <Empty title="No receiving file yet">
               <p>
                 Upload the warehouse receiving log as CSV or XLSX. A layout that works: columns PO, Line, Qty, UOM, Received,
-                Receiver, one row per delivered line. The demo file is play-files/receiving-warehouse-log.csv.
+                Receiver, one row per delivered line.
               </p>
             </Empty>
           </div>
         )}
         {list.data && list.data.items.length > 0 && (
           <div className="table-wrap">
-            <table>
+            <table className="stack-sm">
               <thead>
                 <tr>
                   <th scope="col">File</th>
@@ -95,19 +95,19 @@ export function ReceivingListPage() {
               <tbody>
                 {list.data.items.map((i) => (
                   <tr key={i.id}>
-                    <td>
+                    <td data-label="File">
                       <Link to={`/receiving/imports/${i.id}`}>{i.file_name || "Receiving file"}</Link>
                     </td>
-                    <td>
+                    <td data-label="Evidence">
                       {i.evidence_class} · {EVIDENCE_CLASSES[i.evidence_class]?.name}
                       {i.source_type === "qbo_item_receipt_export" && <div className="muted small">QuickBooks item-receipt export</div>}
                     </td>
-                    <td>{i.declared_complete ? `${day(i.coverage_start)} to ${day(i.coverage_end)}` : <span className="muted">Not declared</span>}</td>
-                    <td>{when(i.committed_at ?? i.created_at)}</td>
-                    <td className="num">{i.state === "succeeded" || i.state === "voided" ? i.rows_valid ?? 0 : ""}</td>
-                    <td className="num">{i.rows_rejected ?? ""}</td>
-                    <td className="num">{i.late_lines_waiting ? <Link to="/approvals">{i.late_lines_waiting}</Link> : i.state === "succeeded" ? 0 : ""}</td>
-                    <td>
+                    <td data-label="Declared complete for">{i.declared_complete ? `${day(i.coverage_start)} to ${day(i.coverage_end)}` : <span className="muted">Not declared</span>}</td>
+                    <td data-label="Loaded">{when(i.committed_at ?? i.created_at)}</td>
+                    <td data-label="Rows imported" className="num">{i.state === "succeeded" || i.state === "voided" ? i.rows_valid ?? 0 : ""}</td>
+                    <td data-label="Rows rejected" className="num">{i.rows_rejected ?? ""}</td>
+                    <td data-label="Waiting for approval" className="num">{i.late_lines_waiting ? <Link to="/approvals">{i.late_lines_waiting}</Link> : i.state === "succeeded" ? 0 : ""}</td>
+                    <td data-label="Status">
                       <StatusChip status={status(i)} word={i.state === "draft" ? "Draft, not imported" : undefined} />
                     </td>
                   </tr>
@@ -561,7 +561,7 @@ function ReceiptsTable({ imp }: { imp: ReceivingImport }) {
         Receipt lines
       </h2>
       <div className="table-wrap">
-        <table>
+        <table className="stack-sm">
           <thead>
             <tr>
               <th scope="col">PO</th>
@@ -584,16 +584,16 @@ function ReceiptsTable({ imp }: { imp: ReceivingImport }) {
             {receipts.flatMap((r) =>
               r.lines.map((ln) => (
                 <tr key={ln.id} className={imp.state === "voided" || imp.evidence_class === "C" ? "greyed" : ""}>
-                  <td>
+                  <td data-label="PO">
                     <Link to={`/purchase-orders/${r.purchase_order_id}`}>{r.po_number ?? "PO"}</Link>
                   </td>
-                  <td className="num">{ln.po_line_no ?? ""}</td>
-                  <td>{day(r.received_date)}</td>
-                  <td>{r.receiver_ref}</td>
-                  <td className="num">{ln.source_row}</td>
-                  <td className="num">{ln.qty_received.replace(/\.?0+$/, "")}</td>
-                  <td>{ln.uom ?? ""}</td>
-                  <td>
+                  <td data-label="PO line" className="num">{ln.po_line_no ?? ""}</td>
+                  <td data-label="Received">{day(r.received_date)}</td>
+                  <td data-label="Receiver reference">{r.receiver_ref}</td>
+                  <td data-label="Row" className="num">{ln.source_row}</td>
+                  <td data-label="Quantity" className="num">{ln.qty_received.replace(/\.?0+$/, "")}</td>
+                  <td data-label="Unit">{ln.uom ?? ""}</td>
+                  <td data-label="Counts as a receipt">
                     {imp.state === "voided"
                       ? "No: import voided"
                       : imp.evidence_class === "C"

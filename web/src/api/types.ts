@@ -380,6 +380,8 @@ export interface Report {
   unverified_amount: string;
   qualifying_amount: string;
   is_stale: boolean;
+  changed_since_cutoff?: boolean | null;
+  flagged_amount?: string;
   approved_by: string | null;
   approved_at: string | null;
   draft_mark: string | null;

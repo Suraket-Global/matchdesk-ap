@@ -1,7 +1,7 @@
 import path from "node:path";
 import { readdirSync } from "node:fs";
 import { expect, test } from "@playwright/test";
-import { axe, run, signIn, signOut } from "./helpers";
+import { axe, cardsAtPhoneWidth, run, signIn, signOut, tablesFit } from "./helpers";
 
 // E2E-01: the whole product as docs/PLAY.md tells the owner to play it, clerk then controller.
 test("E2E-01 clerk loads the month and resolves, controller approves and exports", async ({ page }) => {
@@ -32,7 +32,7 @@ test("E2E-01 clerk loads the month and resolves, controller approves and exports
   expect(pdfs).toHaveLength(13);
   await page.locator(".dropzone input[type=file]").setInputFiles(pdfs);
   await expect(page).toHaveURL(/\/intake\/batches\//, { timeout: 60_000 });
-  await expect(page.getByText(/Reading 13 files\. 10 ready, 2 need review, 0 failed, 1 duplicate, 0 still in progress\./).first()).toBeVisible({
+  await expect(page.getByText(/13 files read: 10 ready, 2 need review, 0 failed, 1 duplicate\./).first()).toBeVisible({
     timeout: 90_000,
   });
   await axe(page, "batch");
@@ -44,6 +44,8 @@ test("E2E-01 clerk loads the month and resolves, controller approves and exports
   await page.getByLabel("Total", { exact: true }).fill("0.80");
   await expect(page.getByText("All arithmetic checks pass.")).toBeVisible();
   await axe(page, "extraction review");
+  await tablesFit(page, "extraction review at 1440"); // B6 review M3
+  await expect(page.getByLabel("Line 1 Unit price")).toBeVisible();
   await page.getByRole("button", { name: "Confirm and match" }).click();
   await expect(page.getByRole("heading", { name: /Invoice FF-1006/ })).toBeVisible();
 
@@ -61,6 +63,7 @@ test("E2E-01 clerk loads the month and resolves, controller approves and exports
   // W3: the coverage strip is live before any report draft exists.
   await expect(page.locator(".coverage")).toContainText(/Receipt coverage \d+(\.\d+)?% of invoiced PO lines/);
   await axe(page, "exception queue");
+  await tablesFit(page, "exception queue at 1440"); // B6 review M2
   await page.getByRole("button", { name: /No purchase order/ }).click();
   await expect(page).toHaveURL(/type=no_po/);
   await page.getByRole("link", { name: "FF-1007" }).click();
@@ -109,6 +112,7 @@ test("E2E-01 clerk loads the month and resolves, controller approves and exports
   }
   await expect(page.getByText("Before this version can be approved:")).toHaveCount(0);
   await axe(page, "report");
+  await tablesFit(page, "report at 1440");
   const draftPdf = page.waitForEvent("download");
   await page.getByRole("button", { name: "Export PDF" }).click();
   expect((await draftPdf).suggestedFilename()).toMatch(/-draft\.pdf$/);
@@ -144,6 +148,12 @@ test("E2E-01 clerk loads the month and resolves, controller approves and exports
   await page.goto("/audit");
   await expect(page.getByRole("cell", { name: /Report/i }).first()).toBeVisible();
   await expect(page.getByRole("button", { name: /delete|edit/i })).toHaveCount(0);
+  await tablesFit(page, "audit log at 1440"); // B6 review M7
+  await expect(page.locator("main table")).not.toContainText(/[0-9a-f]{8}-[0-9a-f]{4}-/); // no identifiers
+  // B6 review M6: an approved report with nothing changed offers no identical new draft.
+  await page.goto("/reports");
+  await page.getByRole("row", { name: /Approved/ }).getByRole("link").first().click();
+  await expect(page.getByRole("button", { name: /new draft version/ })).toHaveCount(0);
 });
 
 test("a clerk who opens /approvals sees forbidden, and an unknown route is not found", async ({ page }) => {
@@ -163,7 +173,13 @@ test("phone width keeps the reading screens usable without sideways scrolling", 
   const ctx = await browser.newContext({ viewport: { width: 375, height: 812 } });
   const page = await ctx.newPage();
   await signIn(page, `controller.${tag}@example.invalid`);
-  for (const p of ["/onboarding", "/approvals", "/reports", "/settings/quickbooks", "/settings/users"]) {
+  await page.goto("/reports");
+  await expect(page.locator("main h1")).toBeVisible();
+  const links = page.locator("main table a");
+  const report = (await links.count()) ? await links.first().getAttribute("href") : null;
+  const pages = ["/onboarding", "/approvals", "/reports", "/settings/quickbooks", "/settings/users", "/invoices", "/receiving", "/audit"];
+  if (report) pages.push(report);
+  for (const p of pages) {
     await page.goto(p);
     await expect(page.locator("main h1")).toBeVisible();
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
@@ -180,6 +196,7 @@ test("phone width keeps the reading screens usable without sideways scrolling", 
         .map((e) => `${e.tagName.toLowerCase()}.${String(e.className)} ${Math.round(e.getBoundingClientRect().right)}`),
     );
     expect(overflow, `${p}: ${culprits.join(", ")}`).toBeLessThanOrEqual(1);
+    await cardsAtPhoneWidth(page, `${p} at 375`); // B6 review M8
   }
   await ctx.close();
 });

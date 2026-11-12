@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AlertTriangle, Download, FileBarChart, HelpCircle, PackageCheck, PackageX, ShieldCheck } from "lucide-react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -7,11 +7,21 @@ import type { Page, Refund, Report } from "../api/types";
 import { useSession } from "../app/session";
 import { usePeriod } from "../app/period";
 import { Banner, Dialog, Empty, ErrorState, Loading, PageHead, StatusChip, toast, usePageTitle } from "../components/ui";
-import { cad, cadCents, formatCents, money, sumCents } from "../lib/decimal";
+import { cad, cadCents, compareDecimal, formatCents, money, sumCents } from "../lib/decimal";
 import { day, monthName, monthRange, plural, when } from "../lib/format";
 import { typeWord, zeroCounted } from "../lib/words";
 
 type Finding = NonNullable<Report["findings"]>[number];
+
+/** Queue status in the report's words; the same words as the CSV export. */
+const STATUS_WORDS: Record<string, string> = {
+  open: "Not yet: open in the queue",
+  pending_approval: "Not yet: waiting for approval",
+  resolved: "Not yet: resolved",
+  waived: "Waived",
+};
+
+const byAmount = (a: Finding, b: Finding) => compareDecimal(b.amount, a.amount) || a.id.localeCompare(b.id);
 
 function pct(v: string | null | undefined): string {
   return `${money(v).replace(/\.00$/, "")}%`;
@@ -29,6 +39,8 @@ export function ReportsPage() {
   const qc = useQueryClient();
   const period = usePeriod();
   const [month, setMonth] = useState(period.month);
+  // Follows the top-bar period when it changes, not only on mount (B6 review minor).
+  useEffect(() => setMonth(period.month), [period.month]);
   const list = useQuery({ queryKey: ["reports"], queryFn: () => get<Page<Report>>("/api/v1/reports/backtest?limit=200") });
   const create = useMutation({
     mutationFn: () => send<Report>("POST", "/api/v1/reports/backtest", { period_start: monthRange(month).start, period_end: monthRange(month).end }),
@@ -115,7 +127,7 @@ function FindingsTable({ rows, caption, showPaid = true }: { rows: Finding[]; ca
   if (!rows.length) return <p className="muted">None.</p>;
   return (
     <div className="table-wrap">
-      <table className="compact">
+      <table className="compact stack-sm">
         <caption className="sr-only">{caption}</caption>
         <thead>
           <tr>
@@ -134,20 +146,26 @@ function FindingsTable({ rows, caption, showPaid = true }: { rows: Finding[]; ca
             const s = f.snapshot as Record<string, string | null>;
             return (
               <tr key={f.id}>
-                <td>
+                <td data-label="Type">
                   {typeWord(f.type)}
                   {s.sub_reason === "not_received" ? <div className="small muted">Not received</div> : null}
                 </td>
-                <td>{s.vendor_name}</td>
-                <td>
+                <td data-label="Supplier">{s.vendor_name}</td>
+                <td data-label="Document">
                   <Link to={`/exceptions?status=open,pending_approval,resolved,waived&sel=${f.exception_id}`}>{s.doc_number}</Link>
                   {s.line_no ? ` line ${s.line_no}` : ""}
                 </td>
-                <td>{s.po_number}</td>
-                <td>{s.supplier_item_code}</td>
-                {showPaid && <td>{f.paid_status === "unknown" ? "Not known" : f.paid_status === "paid" ? "Already paid" : "Not yet paid"}</td>}
-                <td>{s.resolution_code === "confirmed_overbilling" ? "Yes" : <span className="muted">Not yet</span>}</td>
-                <td className="num">
+                <td data-label="PO">{s.po_number}</td>
+                <td data-label="Item">{s.supplier_item_code}</td>
+                {showPaid && <td data-label="Paid">{f.paid_status === "unknown" ? "Not known" : f.paid_status === "paid" ? "Already paid" : "Not yet paid"}</td>}
+                <td data-label="Confirmed by the controller">
+                  {s.resolution_code === "confirmed_overbilling" || s.resolution_code === "confirmed_not_received" ? (
+                    "Yes"
+                  ) : (
+                    <span className="muted">{STATUS_WORDS[s.status ?? ""] ?? "Not yet"}</span>
+                  )}
+                </td>
+                <td data-label="Amount (CAD)" className="num">
                   {money(f.amount)}
                   {zeroCounted({ reported_amount: f.amount, variance_amount: s.variance_amount ?? null }) && (
                     <div className="small muted">counted under another exception on this line</div>
@@ -235,8 +253,11 @@ export function ReportPage() {
   const flaggedCount = findings.length + notReceived.length;
   const flagged = sumCents([...findings, ...notReceived].map((x) => x.amount));
   const confirmed = [...findings, ...notReceived].filter((x) => (x.snapshot as Record<string, unknown>).resolution_code === "confirmed_overbilling");
-  const byType = new Map<string, Finding[]>();
-  for (const x of findings) byType.set(x.type, [...(byType.get(x.type) ?? []), x]);
+  const byTypeMap = new Map<string, Finding[]>();
+  for (const x of findings) byTypeMap.set(x.type, [...(byTypeMap.get(x.type) ?? []), x]);
+  // Stable order: largest amount first, then the type's name (B6 review minor).
+  const total = (xs: Finding[]) => sumCents(xs.map((x) => x.amount));
+  const byType = [...byTypeMap.entries()].sort((a, b) => (total(b[1]) > total(a[1]) ? 1 : total(b[1]) < total(a[1]) ? -1 : typeWord(a[0]).localeCompare(typeWord(b[0]))));
   const bySupplier = new Map<string, Finding[]>();
   for (const x of [...findings, ...notReceived]) {
     const v = String((x.snapshot as Record<string, unknown>).vendor_name ?? "Unknown");
@@ -260,7 +281,7 @@ export function ReportPage() {
               <Download size={16} aria-hidden="true" />
               {exporting === "csv" ? "Preparing your file…" : "Export CSV"}
             </button>
-            {can("draft_report") && (r.status === "draft" || (r.status === "approved" && r.is_stale)) && (
+            {can("draft_report") && (r.status === "draft" || (r.status === "approved" && (r.is_stale || r.changed_since_cutoff))) && (
               <button className="btn" onClick={() => refresh.mutate()} disabled={refresh.isPending}>
                 {refresh.isPending ? "Generating…" : r.status === "draft" ? "Refresh draft" : "Create a new draft version"}
               </button>
@@ -287,7 +308,7 @@ export function ReportPage() {
             <strong>
               APPROVED{approver ? ` by ${approver.display_name || approver.email}` : ""} on {when(r.approved_at)} · version {r.version_no}
             </strong>
-            {r.is_stale && " · lines were re-matched after approval; refresh to create a new draft version."}
+            {(r.is_stale || r.changed_since_cutoff) && " · results changed after its data cut-off; you can create a new draft version."}
           </p>
         </Banner>
       )}
@@ -326,7 +347,9 @@ export function ReportPage() {
         <div>
           <span className="muted small"><AlertTriangle size={14} aria-hidden="true" style={{ verticalAlign: "-2px", marginRight: 6 }} />Flagged discrepancies</span>
           <span className="big">{cadCents(flagged)}</span>
-          <span className="small">{plural(flaggedCount, "item")}</span>
+          <span className="small">
+            {plural(flaggedCount, "item")}: findings {cad(r.findings_amount)} + not received {cad(r.not_received_amount)}
+          </span>
         </div>
         <div>
           <span className="muted small"><PackageX size={14} aria-hidden="true" style={{ verticalAlign: "-2px", marginRight: 6 }} />of which not received</span>
@@ -379,7 +402,7 @@ export function ReportPage() {
               </tr>
             </thead>
             <tbody>
-              {[...byType.entries()].map(([t, xs]) => (
+              {byType.map(([t, xs]) => (
                 <tr key={t}>
                   <td>
                     <Link to={`/exceptions?type=${t}&status=open,pending_approval,resolved,waived`}>{typeWord(t)}</Link>
@@ -407,7 +430,7 @@ export function ReportPage() {
               </tr>
             </thead>
             <tbody>
-              {[...bySupplier.entries()].map(([v, xs]) => (
+              {[...bySupplier.entries()].sort((a, b) => (total(b[1]) > total(a[1]) ? 1 : total(b[1]) < total(a[1]) ? -1 : a[0].localeCompare(b[0]))).map(([v, xs]) => (
                 <tr key={v}>
                   <td>{v}</td>
                   <td className="num">{xs.length}</td>
@@ -424,7 +447,7 @@ export function ReportPage() {
             .join(", ") || "none"}
           .
         </p>
-        <FindingsTable rows={[...findings, ...notReceived]} caption="Flagged discrepancies" />
+        <FindingsTable rows={[...findings, ...notReceived].sort(byAmount)} caption="Flagged discrepancies" />
       </section>
       <section>
         <h2>3. Receipt coverage and what could not be checked</h2>
@@ -458,8 +481,13 @@ export function ReportPage() {
         <FindingsTable rows={waived} caption="Waived items" showPaid={false} />
       </section>
       <section>
-        <h2>5. Open exceptions</h2>
-        <FindingsTable rows={open} caption="Open exceptions" showPaid={false} />
+        <h2>5. Undecided items</h2>
+        <p className="small muted" style={{ margin: "0 0 8px" }}>
+          Possible duplicates, possible credits and items waiting for an approval: not counted until someone decides them.{" "}
+          {stillOpen.length > 0 &&
+            `${plural(stillOpen.length, "item")} still open in the exception queue ${stillOpen.length === 1 ? "is" : "are"} counted in the sections above with ${stillOpen.length === 1 ? "its" : "their"} queue status.`}
+        </p>
+        <FindingsTable rows={[...open].sort(byAmount)} caption="Undecided items" showPaid={false} />
       </section>
       <section>
         <h2>6. Documents with self-inconsistent totals and duplicates</h2>
@@ -514,9 +542,11 @@ export function ReportPage() {
           </div>
         )}
         <p>
-          Approve version {r.version_no} of the {monthName(r.period_start.slice(0, 7))} back-test. Findings {cadCents(flagged)}, of which not received{" "}
-          {cad(r.not_received_amount)}. Unverified because no receiving evidence: {cad(r.unverified_amount)} on {plural(S.unverified?.count ?? 0, "item")}.{" "}
-          {plural(stillOpen.length, "exception")} still open {stillOpen.length === 1 ? "is" : "are"} listed with their status. Approved figures cannot be changed; later corrections create a new version.
+          Approve version {r.version_no} of the {monthName(r.period_start.slice(0, 7))} back-test. Flagged discrepancies {cadCents(flagged)} (findings{" "}
+          {cad(r.findings_amount)} + not received {cad(r.not_received_amount)}). Unverified because no receiving evidence: {cad(r.unverified_amount)} on{" "}
+          {plural(S.unverified?.count ?? 0, "item")}. {plural(stillOpen.length, "item")} still open in the exception queue{" "}
+          {stillOpen.length === 1 ? "is" : "are"} reported in those sections with {stillOpen.length === 1 ? "its" : "their"} queue status; undecided items (section 5):{" "}
+          {open.length}. Approved figures cannot be changed; later corrections create a new version.
         </p>
         <label className="choice">
           <input type="checkbox" checked={reviewed} onChange={(e) => setReviewed(e.target.checked)} />

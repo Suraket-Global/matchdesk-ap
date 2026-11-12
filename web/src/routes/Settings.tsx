@@ -118,19 +118,19 @@ export function TolerancesPage() {
           </div>
         </div>
         <div className="panel-body">
-          <div className="inline-form">
+          <div className="form-grid">
             {FIELDS.map((f) => (
               <Field key={f.key} label={f.label} hint={f.hint}>
                 {(ids) => (
-                  <input id={ids.id} inputMode="decimal" size={8} value={vals[f.key] ?? ""} disabled={!editable} aria-describedby={ids.describedBy} onChange={(e) => setVals({ ...vals, [f.key]: e.target.value })} />
+                  <input id={ids.id} inputMode="decimal" className="num" value={vals[f.key] ?? ""} disabled={!editable} aria-describedby={ids.describedBy} onChange={(e) => setVals({ ...vals, [f.key]: e.target.value })} />
                 )}
               </Field>
             ))}
           </div>
           {scope === "default" && (
-            <div className="inline-form">
-              <Field label="Clerk waiver limit per item (CAD)">{(f) => <input id={f.id} inputMode="decimal" size={8} value={limit} disabled={!editable} onChange={(e) => setLimit(e.target.value)} />}</Field>
-              <Field label="Clerk waiver cap per 30 days (CAD)">{(f) => <input id={f.id} inputMode="decimal" size={8} value={cap} disabled={!editable} onChange={(e) => setCap(e.target.value)} />}</Field>
+            <div className="form-grid form-grid-gap">
+              <Field label="Clerk waiver limit per item (CAD)">{(f) => <input id={f.id} inputMode="decimal" className="num" value={limit} disabled={!editable} onChange={(e) => setLimit(e.target.value)} />}</Field>
+              <Field label="Clerk waiver cap per 30 days (CAD)">{(f) => <input id={f.id} inputMode="decimal" className="num" value={cap} disabled={!editable} onChange={(e) => setCap(e.target.value)} />}</Field>
             </div>
           )}
           {err && (
@@ -282,7 +282,7 @@ export function UsersPage() {
           </div>
         </form>
         <div className="table-wrap">
-          <table>
+          <table className="stack-sm">
             <caption>Members</caption>
             <thead>
               <tr>
@@ -302,9 +302,9 @@ export function UsersPage() {
                 const last = u.role === "controller" && controllers <= 1;
                 return (
                   <tr key={u.membership_id}>
-                    <td>{u.display_name}</td>
-                    <td>{u.email}</td>
-                    <td>
+                    <td data-label="Name">{u.display_name}</td>
+                    <td data-label="Email">{u.email}</td>
+                    <td data-label="Role">
                       <label className="sr-only" htmlFor={`role-${u.membership_id}`}>
                         Role of {u.email}
                       </label>
@@ -321,11 +321,11 @@ export function UsersPage() {
                       {last && <div className="small muted">The last controller cannot be removed or demoted.</div>}
                       {self && !last && <div className="small muted">You cannot change your own role.</div>}
                     </td>
-                    <td>
+                    <td data-label="Status">
                       <StatusChip status={u.status} />
                     </td>
-                    <td>{u.last_sign_in_at ? when(u.last_sign_in_at) : <span className="muted">Never</span>}</td>
-                    <td>
+                    <td data-label="Last sign-in">{u.last_sign_in_at ? when(u.last_sign_in_at) : <span className="muted">Never</span>}</td>
+                    <td data-label="Actions">
                       {u.status === "active" && !self && !last && (
                         <button className="btn small danger" onClick={() => setChange({ u, status: "deactivated" })}>
                           Deactivate
@@ -339,7 +339,7 @@ export function UsersPage() {
           </table>
         </div>
         <div className="table-wrap">
-          <table>
+          <table className="stack-sm">
             <caption>Open invitations</caption>
             <thead>
               <tr>
@@ -354,10 +354,10 @@ export function UsersPage() {
             <tbody>
               {(invites.data?.items ?? []).map((i) => (
                 <tr key={i.id}>
-                  <td>{i.email}</td>
-                  <td>{ROLES[i.role] ?? i.role}</td>
-                  <td>{when(i.expires_at as string)}</td>
-                  <td>
+                  <td data-label="Email">{i.email}</td>
+                  <td data-label="Role">{ROLES[i.role] ?? i.role}</td>
+                  <td data-label="Expires">{when(i.expires_at as string)}</td>
+                  <td data-label="Actions">
                     <button className="btn small" onClick={() => revoke.mutate(i.id)}>
                       Revoke
                     </button>

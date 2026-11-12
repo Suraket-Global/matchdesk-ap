@@ -50,7 +50,7 @@ function fromReview(r: Review): { header: Header; lines: EditLine[] } {
   return { header, lines };
 }
 
-function Provenance({ src, changed, onHistory }: { src?: FieldSource; changed?: boolean; onHistory: () => void }) {
+function Provenance({ src, changed, value, onHistory }: { src?: FieldSource; changed?: boolean; value?: string | null; onHistory: () => void }) {
   if (src?.source === "edited" || changed)
     return (
       <span>
@@ -60,7 +60,10 @@ function Provenance({ src, changed, onHistory }: { src?: FieldSource; changed?: 
         </button>
       </span>
     );
-  return <span className="tag">read</span>;
+  // "read" only for a value the reader actually found (B6 review minor: an empty or unidentified
+  // field said "read").
+  if (src?.source === "read" && (value ?? "") !== "") return <span className="tag">read</span>;
+  return <span className="tag muted">not read</span>;
 }
 
 /** S-07: the document beside the fields; failed checks in words at the top; drafts on the server. */
@@ -202,7 +205,7 @@ export function ReviewPage() {
       qc.invalidateQueries({ queryKey: ["invoices"] });
       qc.invalidateQueries({ queryKey: ["batch"] });
       qc.invalidateQueries({ queryKey: ["exceptions"] });
-      toast("Confirmed. Matching…");
+      toast("Confirmed. The match view shows the result when matching finishes.");
       navigate(`/invoices/${invoiceId}`);
     } catch (err) {
       if (!onConflict(err)) setError(errorText(err));
@@ -305,6 +308,7 @@ export function ReviewPage() {
                       <Provenance
                         src={src}
                         changed={(header[f.key] ?? "") !== (asRead.header[f.key] ?? "")}
+                        value={asRead.header[f.key]}
                         onHistory={() => setHistory({ label: f.label, original: src?.source === "edited" ? src.original : asRead.header[f.key] })}
                       />
                     </span>
@@ -353,66 +357,57 @@ export function ReviewPage() {
                 Add a line
               </button>
             </div>
-            <div className="table-wrap" style={{ border: 0 }}>
-              <table className="compact">
-                <thead>
-                  <tr>
-                    <th scope="col">Line</th>
-                    <th scope="col">Kind</th>
-                    {LINE_FIELDS.map((k) => (
-                      <th scope="col" key={k} className={["qty", "unit_price", "amount"].includes(k) ? "num" : undefined}>
-                        {LINE_LABELS[k]}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {lines.map((l, i) => {
-                    const src = r.line_fields.find((x) => x.line_no === l.line_no)?.field_sources ?? {};
-                    return (
-                      <tr key={l.line_no}>
-                        <td className="num">{l.line_no}</td>
-                        <td>
-                          <select aria-label={`Line ${l.line_no} kind`} value={l.line_kind} onChange={(e) => setLine(i, "line_kind", e.target.value)}>
-                            <option value="item">Item</option>
-                            <option value="freight">Freight</option>
-                            <option value="fee">Fee</option>
-                            <option value="discount">Discount</option>
-                          </select>
-                        </td>
-                        {LINE_FIELDS.map((k) => (
-                          <td key={k}>
-                            <input
-                              aria-label={`Line ${l.line_no} ${LINE_LABELS[k]}`}
-                              className={["qty", "unit_price", "amount"].includes(k) ? "num" : undefined}
-                              size={k === "description" ? 18 : 8}
-                              value={l[k] ?? ""}
-                              onChange={(e) => setLine(i, k, e.target.value)}
-                            />
-                            {(src[k]?.source === "edited" || (readLine(l.line_no) && (l[k] ?? "") !== (readLine(l.line_no)?.[k] ?? ""))) && (
-                              <span>
-                                <span className="tag edited">edited</span>{" "}
-                                <button
-                                  type="button"
-                                  className="btn small ghost"
-                                  onClick={() =>
-                                    setHistory({ label: `Line ${l.line_no} ${LINE_LABELS[k]}`, original: src[k]?.source === "edited" ? src[k]?.original : readLine(l.line_no)?.[k] })
-                                  }
-                                >
-                                  History
-                                </button>
-                              </span>
-                            )}
-                          </td>
-                        ))}
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+            {/* One block per line, so quantity, unit, unit price and amount are always in view however
+                narrow the pane is (B6 review M3: the table was 929 px wide in a 564 px pane). */}
+            <ol className="line-editor">
+              {lines.map((l, i) => {
+                const src = r.line_fields.find((x) => x.line_no === l.line_no)?.field_sources ?? {};
+                const field = (k: (typeof LINE_FIELDS)[number]) => (
+                  <div className={`le-field le-${k}`} key={k}>
+                    <label htmlFor={`l-${l.line_no}-${k}`}>{LINE_LABELS[k]}</label>
+                    <input
+                      id={`l-${l.line_no}-${k}`}
+                      aria-label={`Line ${l.line_no} ${LINE_LABELS[k]}`}
+                      className={["qty", "unit_price", "amount"].includes(k) ? "num" : undefined}
+                      inputMode={["qty", "unit_price", "amount"].includes(k) ? "decimal" : undefined}
+                      value={l[k] ?? ""}
+                      onChange={(e) => setLine(i, k, e.target.value)}
+                    />
+                    {(src[k]?.source === "edited" || (readLine(l.line_no) && (l[k] ?? "") !== (readLine(l.line_no)?.[k] ?? ""))) && (
+                      <span className="le-edited">
+                        <span className="tag edited">edited</span>
+                        <button
+                          type="button"
+                          className="btn small ghost"
+                          onClick={() =>
+                            setHistory({ label: `Line ${l.line_no} ${LINE_LABELS[k]}`, original: src[k]?.source === "edited" ? src[k]?.original : readLine(l.line_no)?.[k] })
+                          }
+                        >
+                          History
+                        </button>
+                      </span>
+                    )}
+                  </div>
+                );
+                return (
+                  <li key={l.line_no} className="le-line">
+                    <div className="le-head">
+                      <span className="le-no">Line {l.line_no}</span>
+                      <select aria-label={`Line ${l.line_no} kind`} value={l.line_kind} onChange={(e) => setLine(i, "line_kind", e.target.value)}>
+                        <option value="item">Item</option>
+                        <option value="freight">Freight</option>
+                        <option value="fee">Fee</option>
+                        <option value="discount">Discount</option>
+                      </select>
+                    </div>
+                    <div className="le-what">{field("supplier_item_code")}{field("description")}</div>
+                    <div className="le-sum">{field("qty")}{field("uom")}{field("unit_price")}{field("amount")}</div>
+                  </li>
+                );
+              })}
+            </ol>
             <p className="muted small" style={{ padding: "0 16px 12px" }}>
-              Deleting a line is not built yet. Correct a misread line's values instead.
+              Lines cannot be removed here. Correct a misread line's values instead.
             </p>
           </div>
           {arithmetic.length > 0 && (

@@ -57,11 +57,16 @@ _HEADINGS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("invoice", re.compile(r"^\s*(?:TAX\s+)?INVOICE\s*$", re.I)),
     ("credit_note", re.compile(r"^\s*(?:TAX\s+)?CREDIT\s+(?:NOTE|MEMO)\s*$", re.I)),
 )
+# A label counts only when ":" or "#" follows it and then a value ("Credit note number will be sent
+# on request" is prose, not a label; B6 review M9).
+_VALUE = r"\s*[:#]\s*\S"
 _TYPE_LABELS: tuple[tuple[str, re.Pattern[str]], ...] = (
-    ("invoice", re.compile(r"^\s*Invoice\s+(?:No\.?|Number|#|Date|Total)\s*:?", re.I)),
-    ("credit_note", re.compile(r"^\s*Credit\s+(?:Note|Memo)\s+(?:No\.?|Number|#|Date|Total)\s*:?", re.I)),
-    ("credit_note", re.compile(r"^\s*Credit\s+Total\s*:", re.I)),
-    ("credit_note", re.compile(r"^\s*(?:Re|Refers\s+to|References)\s+Invoice\s*:", re.I)),
+    ("invoice", re.compile(rf"^\s*Invoice\s+(?:No\.?|Number|Date|Total){_VALUE}", re.I)),
+    ("invoice", re.compile(r"^\s*Invoice\s*#\s*:?\s*\S", re.I)),
+    ("credit_note", re.compile(rf"^\s*Credit\s+(?:Note|Memo)\s+(?:No\.?|Number|Date|Total){_VALUE}", re.I)),
+    ("credit_note", re.compile(r"^\s*Credit\s+(?:Note|Memo)\s*#\s*:?\s*\S", re.I)),
+    ("credit_note", re.compile(rf"^\s*Credit\s+Total{_VALUE}", re.I)),
+    ("credit_note", re.compile(rf"^\s*(?:Re|Refers\s+to|References)\s+Invoice{_VALUE}", re.I)),
 )
 
 

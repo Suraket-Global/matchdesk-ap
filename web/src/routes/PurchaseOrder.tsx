@@ -76,7 +76,7 @@ export function PurchaseOrderPage() {
       />
       {reread.error && <p className="error-text">{errorText(reread.error)}</p>}
       <div className="table-wrap">
-        <table>
+        <table className="stack-sm">
           <thead>
             <tr>
               <th scope="col">Line</th>
@@ -96,19 +96,19 @@ export function PurchaseOrderPage() {
               const cr = sumQty(l.id, "credit_note");
               return (
                 <tr key={l.id}>
-                  <td className="num">{l.line_no}</td>
-                  <td>{l.description ?? l.charge_kind ?? ""}</td>
-                  <td className="num">
+                  <td data-label="Line" className="num">{l.line_no}</td>
+                  <td data-label="Item">{l.description ?? l.charge_kind ?? ""}</td>
+                  <td data-label="Ordered" className="num">
                     {qty(l.qty_ordered)} {l.uom}
                   </td>
-                  <td className="num">
+                  <td data-label="Received independently" className="num">
                     {qty(l.qty_received_counting)} <span className="muted small">({plural(l.counting_receipt_lines, "line")})</span>
                   </td>
-                  <td className="num">{inv}</td>
-                  <td className="num">{cr}</td>
-                  <td className="num">{subQty(inv, cr)}</td>
-                  <td className="num">{price(l.unit_price)}</td>
-                  <td className="num">{openByLine.get(l.id) ?? 0}</td>
+                  <td data-label="Invoiced" className="num">{inv}</td>
+                  <td data-label="Credited" className="num">{cr}</td>
+                  <td data-label="Net invoiced" className="num">{subQty(inv, cr)}</td>
+                  <td data-label="Price" className="num">{price(l.unit_price)}</td>
+                  <td data-label="Open exceptions" className="num">{openByLine.get(l.id) ?? 0}</td>
                 </tr>
               );
             })}

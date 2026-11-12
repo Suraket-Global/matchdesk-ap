@@ -1,9 +1,10 @@
+import { E2E_MAILPIT } from "./stack";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { expect, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 
-const MAILPIT = "http://127.0.0.1:8025/api/v1";
+const MAILPIT = E2E_MAILPIT;
 
 export function run(): { tag: string; files: string } {
   return JSON.parse(readFileSync(path.join(import.meta.dirname, ".run.json"), "utf8"));
@@ -50,4 +51,30 @@ export async function axe(page: Page, label: string): Promise<void> {
   const result = await new AxeBuilder({ page: page as never }).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"]).analyze();
   const bad = result.violations.filter((v) => v.impact === "serious" || v.impact === "critical");
   expect(bad.map((v) => `${label}: ${v.id} (${v.nodes.length}) ${v.nodes[0]?.target.join(" ")}`)).toEqual([]);
+}
+
+/** B6 review M2, M3, M7: no table is wider than the box that holds it (no clipped column). */
+export async function tablesFit(page: Page, label: string): Promise<void> {
+  const wide = await page.evaluate(() =>
+    [...document.querySelectorAll("main table, main .line-editor")]
+      .map((t) => {
+        const box = (t.closest(".table-wrap, .panel, section") as HTMLElement | null) ?? t.parentElement!;
+        return { w: Math.round((t as HTMLElement).scrollWidth), c: Math.round(box.clientWidth), name: (t.querySelector("caption")?.textContent || t.className || "table").trim() };
+      })
+      .filter((x) => x.w > x.c + 1)
+      .map((x) => `${x.name} ${x.w}px in ${x.c}px`),
+  );
+  expect(wide, label).toEqual([]);
+}
+
+/** B6 review M8: at phone width every list table is a stack of cards (header hidden, cells as rows). */
+export async function cardsAtPhoneWidth(page: Page, label: string): Promise<void> {
+  const notCards = await page.evaluate(() =>
+    [...document.querySelectorAll("main table")]
+      .filter((t) => (t as HTMLElement).offsetParent !== null)
+      .filter((t) => !t.classList.contains("stack-sm") || getComputedStyle(t.querySelector("tbody td") ?? t).display !== "flex")
+      .filter((t) => (t as HTMLElement).scrollWidth > (t.parentElement as HTMLElement).clientWidth + 1)
+      .map((t) => t.querySelector("caption")?.textContent || t.className || "table"),
+  );
+  expect(notCards, label).toEqual([]);
 }

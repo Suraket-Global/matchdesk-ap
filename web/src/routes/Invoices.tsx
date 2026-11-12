@@ -79,7 +79,7 @@ export function InvoicesPage() {
       )}
       {rows.length > 0 && (
         <div className="table-wrap">
-          <table>
+          <table className="stack-sm">
             <thead>
               <tr>
                 <th scope="col">Document</th>
@@ -95,17 +95,17 @@ export function InvoicesPage() {
             <tbody>
               {rows.map((i) => (
                 <tr key={i.id}>
-                  <td>
+                  <td data-label="Document">
                     <Link to={i.displayed_state === "needs review" ? `/invoices/${i.id}/review` : `/invoices/${i.id}`}>
                       {i.doc_type === "credit_note" ? "Credit note " : ""}
                       {i.doc_number ?? "No number read"}
                     </Link>
                   </td>
-                  <td>{day(i.doc_date)}</td>
-                  <td>{i.vendor_name ?? <span className="muted">Not identified</span>}</td>
-                  <td>{i.po_number}</td>
-                  <td className="num">{money(i.total)}</td>
-                  <td>
+                  <td data-label="Date">{day(i.doc_date)}</td>
+                  <td data-label="Supplier">{i.vendor_name ?? <span className="muted">Not identified</span>}</td>
+                  <td data-label="PO">{i.po_number}</td>
+                  <td data-label="Total (CAD)" className="num">{money(i.total)}</td>
+                  <td data-label="State">
                     <StatusChip status={i.displayed_state ?? "queued"} />
                   </td>
                 </tr>

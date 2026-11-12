@@ -47,6 +47,14 @@ function queueOrder(items: ExceptionItem[], from: URLSearchParams): ExceptionIte
     .sort((a, b) => (sort === "age" ? (a.raised_at ?? "").localeCompare(b.raised_at ?? "") : sort === "vendor" ? (a.vendor_name ?? "").localeCompare(b.vendor_name ?? "") : compareDecimal(v(b), v(a))) || a.id.localeCompare(b.id));
 }
 
+function crumbFor(path: string): string {
+  if (path.startsWith("/invoices")) return "Invoices";
+  if (path.startsWith("/intake")) return "Intake batch";
+  if (path.startsWith("/reports")) return "Back-test report";
+  if (path.startsWith("/purchase-orders")) return "Purchase order";
+  return "Exception queue";
+}
+
 /** S-09: invoice, purchase order, receipts and history, with the calculation in words. */
 export function MatchViewPage() {
   const { invoiceId } = useParams();
@@ -186,11 +194,8 @@ export function MatchViewPage() {
           <nav className="crumbs" aria-label="Breadcrumb">
             <ol>
               <li>
-                <Link to={fromUrl}>Exception queue</Link>
-              </li>
-              <li>
-                <ChevronRight size={14} aria-hidden="true" />
-                <Link to="/invoices">Invoices</Link>
+                {/* One crumb: the list the person came from (B6 review minor). */}
+                <Link to={fromUrl}>{crumbFor(fromUrl)}</Link>
               </li>
             </ol>
           </nav>
@@ -231,7 +236,9 @@ export function MatchViewPage() {
       <NarrowNote />
       {inv.stale && (
         <Banner tone="draft" role="status">
-          Matching… Inputs changed since the last result; the new result appears here without a reload.
+          {inv.lines.every((l) => l.result_status === null)
+            ? "Matching… The result appears here without a reload."
+            : "Matching… Inputs changed since the last result; the new result appears here without a reload."}
         </Banner>
       )}
       {inv.verification_status === "failed" && (

@@ -1,19 +1,25 @@
+import { Fragment, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { download, get } from "../api/client";
 import type { AuditEvent, Page, UserRow } from "../api/types";
 import { Empty, ErrorState, Loading, PageHead, toast, usePageTitle } from "../components/ui";
 import { when } from "../lib/format";
+import { actionWord, changes, entityWord, type Change } from "../lib/audit";
 
-function words(action: string): string {
-  return action.replace(/[._]/g, " ").replace(/^\w/, (c) => c.toUpperCase());
-}
-
-function brief(v: Record<string, unknown> | null): string {
-  if (!v) return "";
-  return Object.entries(v)
-    .map(([k, x]) => `${k.replace(/_/g, " ")}: ${typeof x === "object" ? JSON.stringify(x) : String(x)}`)
-    .join("; ");
+function ChangeText({ c }: { c: Change }) {
+  return (
+    <>
+      <span className="muted">{c.label}: </span>
+      {c.before !== null && c.after !== null ? (
+        <>
+          {c.before} <span aria-label="changed to">→</span> {c.after}
+        </>
+      ) : (
+        (c.after ?? `${c.before} (removed)`)
+      )}
+    </>
+  );
 }
 
 /** S-17: who did what. No edit or delete control exists. Filters live in the URL. */
@@ -102,48 +108,85 @@ export function AuditPage() {
           <Empty title="No events match these filters" />
         </div>
       )}
-      {rows.length > 0 && (
-        <div className="table-wrap">
-          <table className="compact">
-            <thead>
-              <tr>
-                <th scope="col">Time</th>
-                <th scope="col">Actor</th>
-                <th scope="col">Action</th>
-                <th scope="col">Record</th>
-                <th scope="col">Before</th>
-                <th scope="col">After</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((e) => (
-                <tr key={e.id}>
-                  <td style={{ whiteSpace: "nowrap" }}>{when(e.occurred_at)}</td>
-                  <td>{e.actor_name ?? e.actor_type}</td>
-                  <td>{words(e.action)}</td>
-                  <td>
-                    {e.entity_type.replace(/_/g, " ")}
-                    {e.entity_id && (
-                      <div>
-                        <Link to={`/audit?record=${e.entity_id}`} className="small">
-                          History of this record
-                        </Link>
-                      </div>
-                    )}
-                  </td>
-                  <td className="small">{brief(e.before)}</td>
-                  <td className="small">{brief(e.after)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+      {rows.length > 0 && <AuditTable rows={rows} />}
       {list.hasNextPage && (
         <button className="btn" style={{ marginTop: 12 }} onClick={() => list.fetchNextPage()}>
           Load more
         </button>
       )}
     </>
+  );
+}
+
+/** Who, what, which record and what changed, in words. A row with more than two changes opens to
+ * show all of them (B6 review M7: raw JSON, identifiers, an empty "Before" column, overflow). */
+function AuditTable({ rows }: { rows: AuditEvent[] }) {
+  const [open, setOpen] = useState<Set<string>>(new Set());
+  const toggle = (id: string) =>
+    setOpen((s) => {
+      const n = new Set(s);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
+  return (
+    <div className="table-wrap">
+      <table className="compact stack-sm audit-table">
+        <caption className="sr-only">Audit events</caption>
+        <thead>
+          <tr>
+            <th scope="col">Time</th>
+            <th scope="col">Who</th>
+            <th scope="col">What happened</th>
+            <th scope="col">Changes</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((e) => {
+            const cs = changes(e.before, e.after);
+            const isOpen = open.has(e.id);
+            const shown = isOpen ? cs : cs.slice(0, 2);
+            return (
+              <Fragment key={e.id}>
+                <tr>
+                  <td data-label="Time" className="nowrap">{when(e.occurred_at)}</td>
+                  <td data-label="Who">{e.actor_name ?? (e.actor_type === "job" || e.actor_type === "system" ? "MatchDesk" : "Operator")}</td>
+                  <td data-label="What happened">
+                    <span className="cell-main">{actionWord(e.action)}</span>
+                    <span className="cell-sub">
+                      {entityWord(e.entity_type)}
+                      {e.entity_id && (
+                        <>
+                          {" · "}
+                          <Link to={`/audit?record=${e.entity_id}`}>history of this record</Link>
+                        </>
+                      )}
+                    </span>
+                  </td>
+                  <td data-label="Changes" className="audit-changes">
+                    {cs.length === 0 ? (
+                      <span className="muted">No values recorded</span>
+                    ) : (
+                      <ul>
+                        {shown.map((c) => (
+                          <li key={c.key}>
+                            <ChangeText c={c} />
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {cs.length > 2 && (
+                      <button type="button" className="btn small ghost" aria-expanded={isOpen} onClick={() => toggle(e.id)}>
+                        {isOpen ? "Show fewer" : `Show all ${cs.length} changes`}
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              </Fragment>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
   );
 }

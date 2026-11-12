@@ -57,7 +57,12 @@ from matchdesk.exceptions.models import ExceptionRow, LineMatch, MatchRun
 from matchdesk.identity import Principal, csrf_matches, load_session
 from matchdesk.intake import add_file, create_batch, describe_fields
 from matchdesk.intake.models import DocumentRow, InvoiceLineRow, InvoiceRow, UploadBatch
-from matchdesk.qbo import QboNotConfiguredError, TokenEndpoint, token_endpoint_from_settings
+from matchdesk.qbo import (
+    QboNotConfiguredError,
+    TokenEndpoint,
+    processing_allowed,
+    token_endpoint_from_settings,
+)
 from matchdesk.qbo.models import PurchaseOrderRow
 from matchdesk.tenancy import get_engine, global_session, session
 from matchdesk.tenancy.models import IdempotencyKey
@@ -304,7 +309,9 @@ def create_app(mailer: Mailer | None = None, qbo_token_endpoint: TokenEndpoint |
             excs = s.scalars(select(ExceptionRow).where(ExceptionRow.invoice_id == inv.id)).all()
             stale = stale_runs(s, [lm.match_run_id for lm in results.values()])
             run_of_match = {lm.id: lm.match_run_id for lm in results.values()}
-            any_stale = any(stale.values())
+            # Pending, not "not matched yet", while a run covering this invoice is queued or running, or
+            # while a matchable invoice still has a line without a current result (B6 review M1).
+            any_stale = any(stale.values()) or _matching_pending(s, inv, lines, results)
             evidence = views.line_evidence(s, inv, list(lines))
             ctx_by_exc = views.exception_context(s, list(excs))
             po = s.get(PurchaseOrderRow, inv.purchase_order_id) if inv.purchase_order_id else None
@@ -459,6 +466,23 @@ class _Unconfigured:
 
     def revoke(self, token: str) -> None:
         return None
+
+
+def _matching_pending(s: Any, inv: InvoiceRow, lines: Any, results: dict[Any, Any]) -> bool:
+    latest = s.scalar(
+        select(MatchRun.state)
+        .where(MatchRun.scope["invoice_ids"].contains([str(inv.id)]))
+        .order_by(MatchRun.created_at.desc())
+        .limit(1)
+    )
+    if latest in ("queued", "running", "retry_wait"):
+        return True
+    if latest == "failed" or inv.verification_status == "failed" or inv.vendor_id is None or not lines:
+        return False
+    if all(ln.id in results for ln in lines):
+        return False
+    # The document-ready job has not created its run yet (intake enqueues it for the worker).
+    return bool(processing_allowed(s))
 
 
 def _line_status(lm: LineMatch | None, stale: dict[uuid.UUID, bool]) -> dict[str, Any]:
