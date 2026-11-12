@@ -41,8 +41,21 @@ from matchdesk.identity.models import (
     LoginToken,
     Membership,
     SessionRow,
+    SupportGrant,
     Tenant,
     User,
+)
+from matchdesk.identity.support import (
+    decide_grant,
+    describe_grant,
+    enter_support,
+    leave_support,
+    operator_grants,
+    request_grant,
+    tenant_grants,
+)
+from matchdesk.identity.support import (
+    is_active as grant_is_active,
 )
 from matchdesk.identity.totp import code_at_step, provisioning_uri, step_at
 
@@ -62,6 +75,7 @@ __all__ = [
     "Principal",
     "SessionContext",
     "SessionRow",
+    "SupportGrant",
     "Tenant",
     "User",
     "accept_invitation",
@@ -69,20 +83,28 @@ __all__ = [
     "create_invitation",
     "csrf_for",
     "csrf_matches",
+    "decide_grant",
+    "describe_grant",
     "describe_me",
     "end_session",
     "enroll_operator",
+    "enter_support",
     "exchange_login_token",
+    "grant_is_active",
     "hash_token",
     "issue_session",
+    "leave_support",
     "list_invitations",
     "list_users",
     "load_session",
+    "operator_grants",
     "provisioning_uri",
+    "request_grant",
     "request_login_link",
     "resolve_session",
     "revoke_invitation",
     "step_at",
     "switch_tenant",
+    "tenant_grants",
     "update_membership",
 ]

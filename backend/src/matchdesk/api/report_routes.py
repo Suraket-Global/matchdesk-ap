@@ -136,13 +136,13 @@ def register_report_routes(app: FastAPI, engine: Engine) -> None:
 
     @app.get("/api/v1/reports/backtest/{report_id}/refund-evaluation")
     def refund(report_id: uuid.UUID, p: Auth) -> dict[str, Any]:
-        # The threshold is the pilot term (schema.md pilot_engagements.refund_threshold, default
-        # 500.00). That table is not built yet, so the server constant applies; a caller can no
-        # longer choose it (B3/B4 review M6).
-        threshold = reporting.DEFAULT_THRESHOLD
+        # The threshold is the pilot term (pilot_engagements.refund_threshold; the default only when
+        # the account has no pilot record); a caller can never choose it (B3/B4 review M6, B7).
         require(p, "read")
         with session(p.tenant_id, engine) as s:
             r = _load(s, report_id)
+            threshold = reporting.threshold_for(s, p.tenant_id)
+            pilot = reporting.get_pilot(s, p.tenant_id)
             calc = reporting.refund_evaluation(r, threshold)
             return {
                 "report_id": str(r.id),
@@ -151,4 +151,7 @@ def register_report_routes(app: FastAPI, engine: Engine) -> None:
                 "qualifying_total": str(calc.qualifying_total),
                 "unverified_total": str(calc.unverified_total),
                 "refund_due": calc.refund_due,
+                "is_governing": bool(pilot and pilot.governing_report_id == r.id),
+                "governing_set": bool(pilot and pilot.governing_report_id),
+                "has_pilot": pilot is not None,
             }

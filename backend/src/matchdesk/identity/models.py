@@ -41,6 +41,8 @@ class Tenant(GlobalMixin, Base):
     # (schema.md 3.1; PRD MH-11 defaults [assumption]).
     waiver_limit: Mapped[Decimal] = mapped_column(MONEY, nullable=False, server_default="100.00")
     waiver_period_cap: Mapped[Decimal] = mapped_column(MONEY, nullable=False, server_default="500.00")
+    # Local part of the account's intake address (``<local>@<intake domain>``); unique (B7, T-3.3.4).
+    intake_address_local: Mapped[str | None] = mapped_column(Text, unique=True)
 
 
 class User(GlobalMixin, Base):
@@ -120,6 +122,40 @@ class SessionRow(GlobalMixin, Base):
     token_hash: Mapped[bytes] = mapped_column(LargeBinary, nullable=False, unique=True)
     csrf_token_hash: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     active_tenant_id: Mapped[uuid.UUID | None] = mapped_column(UUIDT, ForeignKey("tenants.id"))
+    # Set when an operator entered the tenant as ``support_reader`` under this grant (B7, S-18).
+    support_grant_id: Mapped[uuid.UUID | None] = mapped_column(UUIDT)
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+GRANT_STATES = ("requested", "active", "ended", "declined")
+
+
+class SupportGrant(TenantMixin, Base):
+    """Read-only support access for the operator, requested by the operator and granted by a
+    controller of the tenant, for at most 7 days (schema.md 3.1; B7, T-5.1.5)."""
+
+    __tablename__ = "support_grants"
+    __table_args__ = tenant_args(
+        CheckConstraint(enum_check("status", GRANT_STATES), name="status"),
+        CheckConstraint("hours_requested between 1 and 168", name="hours_requested"),
+        CheckConstraint(
+            "ends_at is null or (ends_at > starts_at and ends_at <= starts_at + interval '7 days')",
+            name="window",
+        ),
+        CheckConstraint(
+            "status not in ('active', 'ended') or (granted_by is not null and starts_at is not null "
+            "and ends_at is not null)",
+            name="granted_has_window",
+        ),
+    )
+    requested_by: Mapped[uuid.UUID] = mapped_column(UUIDT, ForeignKey("users.id"), nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    hours_requested: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="requested")
+    granted_by: Mapped[uuid.UUID | None] = mapped_column(UUIDT, ForeignKey("users.id"))
+    starts_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    ended_early_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    ended_by: Mapped[uuid.UUID | None] = mapped_column(UUIDT, ForeignKey("users.id"))

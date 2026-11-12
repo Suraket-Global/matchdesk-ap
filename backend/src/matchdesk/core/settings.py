@@ -17,7 +17,15 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 SECRET_FIELDS = frozenset(
-    {"session_key", "token_key", "s3_secret_key", "smtp_password", "qbo_client_secret", "extraction_api_key"}
+    {
+        "session_key",
+        "token_key",
+        "s3_secret_key",
+        "smtp_password",
+        "qbo_client_secret",
+        "extraction_api_key",
+        "inbound_signing_key",
+    }
 )
 
 
@@ -105,6 +113,14 @@ class Settings:
     extractor: str = "local"
     extraction_provider: str = ""
     extraction_api_key: str = ""
+    # Email intake (B7, T-3.3.4): "local" accepts messages signed with HMAC-SHA256 under
+    # ``inbound_signing_key`` (``make demo-email`` posts one); a hosted provider is selected by name
+    # and refuses until its account exists. Addresses are ``<tenant local part>@<intake_domain>``.
+    inbound_provider: str = "local"
+    inbound_signing_key: str = ""
+    intake_domain: str = "intake.matchdesk.invalid"
+    # Weekly summary (B7, T-5.1.4): sent on Mondays from this hour, Pacific time, by the worker.
+    weekly_summary_hour: int = 8
 
     def fingerprint(self) -> str:
         """Hash of the non-secret settings; both entry points log it at start (CI-02)."""
@@ -167,4 +183,8 @@ def load_settings() -> Settings:
         extractor=env("MATCHDESK_EXTRACTOR", Settings.extractor),
         extraction_provider=env("MATCHDESK_EXTRACTION_PROVIDER", ""),
         extraction_api_key=env("MATCHDESK_EXTRACTION_API_KEY", ""),
+        inbound_provider=env("MATCHDESK_INBOUND_PROVIDER", Settings.inbound_provider),
+        inbound_signing_key=env("MATCHDESK_INBOUND_SIGNING_KEY", ""),
+        intake_domain=env("MATCHDESK_INTAKE_DOMAIN", Settings.intake_domain),
+        weekly_summary_hour=int(env("MATCHDESK_WEEKLY_SUMMARY_HOUR", "8")),
     )

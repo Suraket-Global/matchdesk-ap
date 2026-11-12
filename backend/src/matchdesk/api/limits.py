@@ -26,6 +26,7 @@ MAX_FILE_BYTES: dict[str, int] = {
 MAX_UPLOAD_FILE_BYTES = max(MAX_FILE_BYTES.values())
 MULTIPART_OVERHEAD_BYTES = 64 * 1024  # boundaries and part headers
 MAX_UPLOAD_BODY_BYTES = MAX_UPLOAD_FILE_BYTES + MULTIPART_OVERHEAD_BYTES
+MAX_INBOUND_BODY_BYTES = MAX_UPLOAD_FILE_BYTES * 4 // 3 + MULTIPART_OVERHEAD_BYTES
 MAX_JSON_BODY_BYTES = 1024 * 1024  # every other request: JSON of a few kilobytes at most
 
 Scope = dict[str, Any]
@@ -38,6 +39,8 @@ ASGIApp = Callable[[Scope, Receive, Send], Awaitable[None]]
 def body_limit_for(path: str) -> int:
     if path.startswith("/api/v1/intake/batches/") and path.endswith("/files"):
         return MAX_UPLOAD_BODY_BYTES
+    if path == "/api/v1/inbound/email":  # JSON with base64 attachments (B7): about 4/3 of one file
+        return MAX_INBOUND_BODY_BYTES
     return MAX_JSON_BODY_BYTES
 
 

@@ -18,7 +18,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import CITEXT, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from matchdesk.tenancy import MONEY, PRICE, QTY, UUIDT, Base, TenantMixin, enum_check, tenant_args, tfk
@@ -135,3 +135,57 @@ class InvoiceLineRow(TenantMixin, Base):
     amount: Mapped[Decimal | None] = mapped_column(MONEY)
     line_kind: Mapped[str] = mapped_column(Text, nullable=False, server_default="item")
     field_sources: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default="{}")
+
+
+class UsageEvent(TenantMixin, Base):
+    """One billable unit per invoice or credit note, in the month (Pacific time) it was first
+    extracted; never twice however often it is re-extracted or re-matched (schema.md 3.3; IT-26)."""
+
+    __tablename__ = "usage_events"
+    __table_args__ = tenant_args(
+        tfk("invoice_id", "invoices"),
+        tfk("document_id", "documents"),
+        UniqueConstraint("tenant_id", "invoice_id"),
+        Index("ix_usage_events_tenant_id_unit_month", "tenant_id", "unit_month"),
+        CheckConstraint(enum_check("kind", ("invoice", "credit_note")), name="kind"),
+        CheckConstraint("extract(day from unit_month) = 1", name="first_of_month"),
+    )
+    invoice_id: Mapped[uuid.UUID] = mapped_column(UUIDT, nullable=False)
+    document_id: Mapped[uuid.UUID] = mapped_column(UUIDT, nullable=False)
+    unit_month: Mapped[date] = mapped_column(Date, nullable=False)
+    kind: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class IntakeSender(TenantMixin, Base):
+    """An address or a whole domain allowed to email invoices to the account (schema.md 3.3)."""
+
+    __tablename__ = "intake_senders"
+    __table_args__ = tenant_args(UniqueConstraint("tenant_id", "address_or_domain"))
+    address_or_domain: Mapped[str] = mapped_column(CITEXT, nullable=False)
+    added_by: Mapped[uuid.UUID] = mapped_column(UUIDT, ForeignKey("users.id"), nullable=False)
+
+
+INBOUND_STATES = ("processed", "held", "discarded")
+
+
+class InboundMessage(TenantMixin, Base):
+    """An emailed invoice message. From an allowed sender its attachments go into an intake batch;
+    otherwise it is held for a person (schema.md 3.3; B7, T-3.3.4)."""
+
+    __tablename__ = "inbound_messages"
+    __table_args__ = tenant_args(
+        UniqueConstraint("tenant_id", "provider_message_id"),
+        tfk("raw_document_id", "documents"),
+        tfk("batch_id", "upload_batches"),
+        CheckConstraint(enum_check("status", INBOUND_STATES), name="status"),
+    )
+    provider_message_id: Mapped[str] = mapped_column(Text, nullable=False)
+    from_address: Mapped[str] = mapped_column(CITEXT, nullable=False)
+    subject: Mapped[str | None] = mapped_column(Text)
+    attachment_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    raw_document_id: Mapped[uuid.UUID | None] = mapped_column(UUIDT)
+    batch_id: Mapped[uuid.UUID | None] = mapped_column(UUIDT)
+    decided_by: Mapped[uuid.UUID | None] = mapped_column(UUIDT, ForeignKey("users.id"))
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

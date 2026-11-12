@@ -51,8 +51,8 @@ DISPLAYED = {
 }
 
 
-def create_batch(s: Session, tenant_id: uuid.UUID) -> UploadBatch:
-    batch = UploadBatch(tenant_id=tenant_id, source="upload")
+def create_batch(s: Session, tenant_id: uuid.UUID, source: str = "upload") -> UploadBatch:
+    batch = UploadBatch(tenant_id=tenant_id, source=source)
     s.add(batch)
     s.flush()
     return batch
@@ -61,17 +61,25 @@ def create_batch(s: Session, tenant_id: uuid.UUID) -> UploadBatch:
 def add_file(
     s: Session,
     tenant_id: uuid.UUID,
-    user_id: uuid.UUID,
+    user_id: uuid.UUID | None,
     batch_id: uuid.UUID,
     idempotency_key: str,
     data: bytes,
     mime_type: str = "application/pdf",
     original_name: str | None = None,
+    source: str = "upload",
 ) -> DocumentRow:
-    """Store one uploaded file. Idempotent on the key; a byte-identical file is ``duplicate_file``."""
+    """Store one uploaded file. Idempotent on the key; a byte-identical file is ``duplicate_file``.
+    An emailed attachment (``source="email"``) has no user; its message id makes it idempotent."""
     request_hash = hashlib.sha256(data).digest()
-    seen = s.scalar(
-        select(IdempotencyKey).where(IdempotencyKey.user_id == user_id, IdempotencyKey.key == idempotency_key)
+    seen = (
+        s.scalar(
+            select(IdempotencyKey).where(
+                IdempotencyKey.user_id == user_id, IdempotencyKey.key == idempotency_key
+            )
+        )
+        if user_id is not None
+        else None
     )
     if seen is not None and seen.result_entity_id is not None:
         doc = s.get(DocumentRow, seen.result_entity_id)
@@ -88,13 +96,13 @@ def add_file(
     )
     doc_id = uuid.uuid4()
     key = blobstore.build_key(
-        tenant_id, "invoice", data, source="upload", record_id=doc_id, ext=EXTENSIONS.get(mime_type, "bin")
+        tenant_id, "invoice", data, source=source, record_id=doc_id, ext=EXTENSIONS.get(mime_type, "bin")
     )
     doc = DocumentRow(
         id=doc_id,
         tenant_id=tenant_id,
         purpose="invoice",
-        source="upload",
+        source=source,
         batch_id=batch_id,
         sha256=request_hash,
         mime_type=mime_type,
@@ -114,6 +122,9 @@ def add_file(
     s.execute(
         text("update upload_batches set file_count = file_count + 1 where id = :b"), {"b": str(batch_id)}
     )
+    if user_id is None:
+        s.flush()
+        return doc
     s.add(
         IdempotencyKey(
             tenant_id=tenant_id,

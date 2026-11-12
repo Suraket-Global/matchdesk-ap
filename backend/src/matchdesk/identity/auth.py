@@ -44,6 +44,7 @@ from matchdesk.identity.models import (
     User,
 )
 from matchdesk.identity.secrets_box import seal, unseal
+from matchdesk.identity.support import active_grant, leave_support
 from matchdesk.tenancy import global_session, invitation_lookup_session, session, user_session
 
 LINK_TTL = timedelta(minutes=10)
@@ -94,8 +95,14 @@ class SessionContext:
     idle_expires_at: datetime
     absolute_expires_at: datetime
 
+    support_grant_id: uuid.UUID | None = None
+
     def principal(self) -> Principal | None:
-        if self.is_operator or self.tenant_id is None or self.role is None:
+        """The user in their active tenant. An operator has one only inside an active support grant,
+        and then only the read-only role ``support_reader`` (B7, IT-29)."""
+        if self.tenant_id is None or self.role is None:
+            return None
+        if self.is_operator and (self.role != "support_reader" or self.support_grant_id is None):
             return None
         return Principal(self.user_id, self.tenant_id, self.role, self.session_id)
 
@@ -462,13 +469,23 @@ def load_session(
         if touch:
             row.last_seen_at = at
         sid, uid, tid, csrf_hash = row.id, row.user_id, row.active_tenant_id, row.csrf_token_hash
+        grant_id = row.support_grant_id
         idle_deadline, absolute = row.last_seen_at + IDLE_TIMEOUT, row.expires_at
         is_operator = user.is_operator
-    if is_operator:
-        # B2-S01: an operator never acts in a tenant without an active support grant, and support
-        # grants are not built, so an operator session carries no tenant on any path.
-        tid = None
     role: str | None = None
+    if is_operator:
+        # B2-S01, B7: an operator acts in a tenant only inside a support grant that is active now
+        # and was asked for by this operator; otherwise the session carries no tenant at all.
+        grant = active_grant(engine, grant_id, uid, at) if grant_id is not None and tid is not None else None
+        if grant is None or grant.tenant_id != tid:
+            if tid is not None or grant_id is not None:
+                leave_support(engine, sid)
+            tid, grant_id = None, None
+        else:
+            role = "support_reader"
+        return SessionContext(
+            sid, uid, is_operator, tid, role, csrf_hash, min(idle_deadline, absolute), absolute, grant_id
+        )
     if tid is not None:
         with session(tid, engine) as s:
             role = s.scalar(
@@ -498,6 +515,19 @@ def switch_tenant(engine: Engine, ctx: SessionContext, tenant_id: uuid.UUID) -> 
         )
 
 
+def _support_body(engine: Engine, ctx: SessionContext) -> dict[str, Any] | None:
+    if ctx.support_grant_id is None or ctx.tenant_id is None:
+        return None
+    g = active_grant(engine, ctx.support_grant_id, ctx.user_id)
+    with global_session(engine) as s:
+        t = s.get(Tenant, ctx.tenant_id)
+    return {
+        "grant_id": str(ctx.support_grant_id),
+        "tenant_name": t.name if t else None,
+        "ends_at": g.ends_at.isoformat() if g and g.ends_at else None,
+    }
+
+
 def describe_me(engine: Engine, ctx: SessionContext) -> dict[str, Any]:
     with global_session(engine) as s:
         user = s.get(User, ctx.user_id)
@@ -516,6 +546,7 @@ def describe_me(engine: Engine, ctx: SessionContext) -> dict[str, Any]:
         ],
         "active_tenant_id": str(ctx.tenant_id) if ctx.tenant_id else None,
         "role": ctx.role,
+        "support": _support_body(engine, ctx),
         "idle_expires_at": ctx.idle_expires_at.isoformat(),
         "absolute_expires_at": ctx.absolute_expires_at.isoformat(),
     }

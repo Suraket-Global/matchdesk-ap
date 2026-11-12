@@ -10,15 +10,17 @@ A document that passed every gate requests a match run; one that failed waits fo
 from __future__ import annotations
 
 import uuid
-from datetime import date
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from matchdesk.core import dec
-from matchdesk.intake.models import DocumentRow, InvoiceLineRow, InvoiceRow
+from matchdesk.intake.models import DocumentRow, InvoiceLineRow, InvoiceRow, UsageEvent
 from matchdesk.matching import normalise_number
 from matchdesk.qbo.models import PurchaseOrderRow, Vendor
 from matchdesk.tenancy import enqueue
@@ -37,6 +39,39 @@ HEADER_FIELDS = (
     "references_invoice_number",
 )
 LINE_FIELDS = ("supplier_item_code", "description", "qty", "uom", "unit_price", "amount", "kind")
+
+
+PACIFIC = ZoneInfo("America/Vancouver")
+
+
+def usage_month(at: datetime) -> date:
+    """First day of the month, Pacific time, of the moment ``at`` (schema.md usage_events)."""
+    local = at.astimezone(PACIFIC)
+    return date(local.year, local.month, 1)
+
+
+def record_usage(
+    s: Session,
+    tenant_id: uuid.UUID,
+    document_id: uuid.UUID,
+    rows: list[InvoiceRow],
+    at: datetime | None = None,
+) -> None:
+    """One billable unit per invoice or credit note, in the month it was first extracted. A second
+    extraction or a re-match never adds one (unique per invoice; IT-26)."""
+    month = usage_month(at or datetime.now(UTC))
+    for inv in rows:
+        s.execute(
+            pg_insert(UsageEvent)
+            .values(
+                tenant_id=tenant_id,
+                invoice_id=inv.id,
+                document_id=document_id,
+                unit_month=month,
+                kind=inv.doc_type if inv.doc_type in ("invoice", "credit_note") else "invoice",
+            )
+            .on_conflict_do_nothing(index_elements=["tenant_id", "invoice_id"])
+        )
 
 
 def _name(value: str | None) -> str:
@@ -141,6 +176,7 @@ def materialise(
             )
         rows.append(inv)
     s.flush()
+    record_usage(s, tenant_id, doc.id, rows)
     if passed and rows:
         enqueue(
             s,

@@ -23,6 +23,7 @@ from sqlalchemy.exc import IntegrityError
 from matchdesk import blobstore
 from matchdesk.api import views
 from matchdesk.api.auth_routes import PUBLIC_API_PATHS, register_auth_routes
+from matchdesk.api.b7_routes import INBOUND_PATH, register_b7_routes
 from matchdesk.api.common import (
     CSRF_HEADER,
     MUTATING,
@@ -112,7 +113,9 @@ def create_app(mailer: Mailer | None = None, qbo_token_endpoint: TokenEndpoint |
         set_correlation_id(corr)
         started = time.monotonic()
         path = request.url.path
-        if path.startswith("/api/") and path not in PUBLIC_API_PATHS:
+        if path.startswith("/api/") and path not in PUBLIC_API_PATHS and path != INBOUND_PATH:
+            # The inbound email webhook is the one exception: no session, its signature is checked in
+            # the route before the body is used (B7, T-3.3.4).
             # Authenticate before the body is parsed or validated, so an anonymous caller gets
             # 401 and learns nothing about the request shape (B1-010). Only the cookie counts.
             token = request.cookies.get(SESSION_COOKIE)
@@ -125,6 +128,14 @@ def create_app(mailer: Mailer | None = None, qbo_token_endpoint: TokenEndpoint |
                 denied = problem(401, "Not signed in")
             elif request.method in MUTATING and not csrf_matches(ctx, request.headers.get(CSRF_HEADER)):
                 denied = problem(403, "Anti-forgery token missing or wrong")
+            elif (
+                ctx.role == "support_reader"
+                and request.method in MUTATING
+                and not path.startswith("/api/v1/operator/")
+                and not path.startswith("/api/v1/auth/session")
+            ):
+                # Support access reads only, whatever an endpoint's own check says (B7, IT-29).
+                denied = problem(403, "Support access is read only")
             if denied is not None:
                 denied.headers["X-Correlation-Id"] = corr
                 denied.headers["Cache-Control"] = "no-store"
@@ -161,6 +172,7 @@ def create_app(mailer: Mailer | None = None, qbo_token_endpoint: TokenEndpoint |
     register_exception_routes(app, engine())
     register_report_routes(app, engine())
     register_read_routes(app, engine())
+    register_b7_routes(app, settings, engine(), out_mail)
     # Outermost of the application's own middleware: refuses oversize bodies before anything reads them.
     app.add_middleware(BodyLimitMiddleware)
 

@@ -29,8 +29,9 @@ from sqlalchemy import func, select
 
 from matchdesk.core import load_settings, text_pdf
 from matchdesk.exceptions import create_alias
-from matchdesk.identity import Membership, Tenant, User, issue_session, load_session
-from matchdesk.intake import add_file, create_batch
+from matchdesk.identity import Membership, Tenant, User, enroll_operator, issue_session, load_session
+from matchdesk.identity.totp import provisioning_uri, secret_b32
+from matchdesk.intake import add_file, add_sender, create_batch
 from matchdesk.qbo import (
     DEFAULT_FIXTURES,
     FakeIntuitTokenEndpoint,
@@ -42,12 +43,26 @@ from matchdesk.qbo import (
 )
 from matchdesk.qbo.models import Item, Vendor
 from matchdesk.receiving import attest, commit, create_import, save_mapping, set_declaration
-from matchdesk.tenancy import get_engine, global_session, session
+from matchdesk.reporting import save_pilot
+from matchdesk.tenancy import get_engine, global_session, operator_session, session
 from matchdesk.worker.__main__ import run_once
 
 TENANT = "Demo Distributor Ltd (synthetic)"
 CONTROLLER = "controller.demo@example.invalid"
 CLERK = "clerk.demo@example.invalid"
+OPERATOR = "operator.demo@example.invalid"
+ALLOWED_SENDER = "@fictional-fasteners.example"  # invented supplier domain allowed to email invoices
+PILOT_TERMS = {
+    "price": "500.00",
+    "period_start": "2026-10-01",
+    "period_end": "2026-10-31",
+    "refund_threshold": "500.00",
+    "signed_terms_ref": "Pilot terms v1 (synthetic), signed 2026-10-01, filed as PT-DEMO-001",
+    "signed_by_name": "Demo Controller",
+    "signed_by_role": "controller",
+    "delivery_mode": "application",
+    "payment_status": "paid",
+}
 ROOT = Path(__file__).resolve().parents[1]
 PLAY_DIR = ROOT.parent / "play-files"
 
@@ -231,6 +246,7 @@ def main() -> int:
     tenant_name = TENANT if tag is None else f"{TENANT} {tag}"
     controller = CONTROLLER if tag is None else f"controller.{tag}@example.invalid"
     clerk = CLERK if tag is None else f"clerk.{tag}@example.invalid"
+    operator = OPERATOR if tag is None else f"operator.{tag}@example.invalid"
     if args.files_dir:
         folder = Path(args.files_dir)
     else:
@@ -255,8 +271,12 @@ def main() -> int:
             print(f"  controller: {controller}   clerk: {clerk}   play files: {folder}")
             print("  for a clean start: make demo-reset")
             return 0
-        t = Tenant(name=tenant_name)
+        t = Tenant(
+            name=tenant_name, intake_address_local="demo-invoices" if tag is None else f"demo-{tag.lower()}"
+        )
         s.add(t)
+        if s.scalar(select(User).where(User.email == operator)) is None:
+            s.add(User(email=operator, display_name="Demo Operator"))
         users = {}
         for email, name in ((controller, "Demo Controller"), (clerk, "Demo Clerk")):
             u = s.scalar(select(User).where(User.email == email)) or User(email=email, display_name=name)
@@ -308,6 +328,11 @@ def main() -> int:
         ):
             create_alias(s, tid, clerk_id, vendors[vq], code, items[sku], Decimal(factor), sup, itm)
         attest(s, tid, ctrl_id, "A", "Warehouse receiving log kept by the receiver (synthetic)", [])
+        add_sender(s, tid, ALLOWED_SENDER, ctrl_id)
+    # B7: the pilot record as the operator would enter it, and the operator's sign-in factor.
+    with operator_session(engine) as s:
+        save_pilot(s, tid, dict(PILOT_TERMS), None)
+    totp_secret = enroll_operator(engine, operator, settings)
     processed = 0
     if args.preload:
         with session(tid, engine) as s:
@@ -348,11 +373,21 @@ def main() -> int:
         open_excs = s.scalar(
             select(func.count()).select_from(ExceptionRow).where(ExceptionRow.status == "open")
         )
+    with global_session(engine) as g:
+        tl = g.get(Tenant, tid)
+        t_address = f"{tl.intake_address_local}@{settings.intake_domain}" if tl else ""
     print(f"seed-demo: tenant '{tenant_name}' ({tid})")
     print(f"  controller: {controller}   clerk: {clerk}")
     print("  sign in: open the web app (make web, http://127.0.0.1:5173), ask for a link,")
     print("           then open it from Mailpit (http://127.0.0.1:8025)")
     print(f"  play files: {folder} (receiving log and 13 invoice PDFs; see docs/PLAY.md)")
+    print(f"  operator: {operator}  (sign-in needs a one-time code; LOCAL DEMO ONLY, synthetic secret)")
+    print(f"    TOTP secret: {secret_b32(totp_secret)}")
+    print(f"    authenticator URI: {provisioning_uri(totp_secret, operator)}")
+    print("    or print the current code: make operator-code")
+    print(
+        f"  email intake: {t_address}  (allowed sender {ALLOWED_SENDER}; make demo-email posts two messages)"
+    )
     if args.preload:
         print(f"  preloaded: {len(files)} files uploaded, {processed} jobs run, {open_excs} open exceptions")
     return 0

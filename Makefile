@@ -1,8 +1,8 @@
-# Local commands for build milestones B1 to B4 (AGENTS.md section 12). Run from the repository root.
+# Local commands for build milestones B1 to B7 (AGENTS.md section 12). Run from the repository root.
 BACKEND := backend
 VENV := $(BACKEND)/.venv/bin
 
-.PHONY: up down seed-demo demo-reset web web-build web-test web-e2e web-check test test-unit test-integration check reset-test-db
+.PHONY: up down seed-demo demo-reset demo-email operator-code web web-build web-test web-e2e web-check test test-unit test-integration check reset-test-db
 
 up:
 	$(BACKEND)/scripts/dev_up.sh
@@ -18,6 +18,14 @@ seed-demo:
 # Empty matchdesk_dev, restart the API and worker, and seed again (local synthetic data only).
 demo-reset:
 	$(BACKEND)/scripts/demo_reset.sh
+
+# B7: two synthetic signed emails to the local intake webhook (one accepted, one held).
+demo-email:
+	cd $(BACKEND) && .venv/bin/python scripts/demo_email.py
+
+# B7: the current one-time code of the local demo operator (development only).
+operator-code:
+	cd $(BACKEND) && .venv/bin/python scripts/operator_code.py $(EMAIL)
 
 # The web app (B4): Vite dev server on http://127.0.0.1:5173, /api/v1 proxied to the API on 8101.
 web: web/node_modules

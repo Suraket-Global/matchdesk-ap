@@ -2,8 +2,8 @@
 (T-2.2.3 (d); B2). Screens and endpoints never decide a permission on their own.
 
 Columns: controller, clerk, viewer, operator without a grant, operator with a grant
-(``support_reader``). The support-reader path is not built yet (no ``support_grants`` table),
-so ``support_reader`` never appears on a session in B2; its column is kept for IT-13.
+(``support_reader``). Since B7 an operator session inside an active support grant carries the
+role ``support_reader``: read rows only.
 """
 
 from __future__ import annotations
@@ -41,6 +41,8 @@ PERMISSIONS: dict[str, frozenset[str]] = {
     "enter_support_session": frozenset({_S}),
     # TRD 12: POST /match-runs is C K (re-match a scope); not a row of its own in schema.md 4.1.
     "start_match_run": frozenset({_C, _K}),
+    # B7, T-5.1.4: "Send now" for the weekly summary email (a row added to schema.md 4.1).
+    "send_weekly_summary": frozenset({_C}),
 }
 
 
