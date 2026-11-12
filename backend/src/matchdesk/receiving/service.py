@@ -238,6 +238,9 @@ def save_mapping(
     return imp
 
 
+CLASS_RANK = {"A": 3, "B": 2, "C": 1}
+
+
 def latest_attestation(s: Session) -> ReceivingAttestation | None:
     return s.scalar(
         select(ReceivingAttestation)
@@ -317,7 +320,7 @@ def validate(s: Session, imp: ReceivingImportRow) -> Validation:
     for po in s.scalars(select(PurchaseOrderRow)):
         pos_by_number[po.po_number_norm].append(po)
     lines_by_po: dict[uuid.UUID, list[PoLineRow]] = defaultdict(list)
-    for pl in s.scalars(select(PoLineRow)):
+    for pl in s.scalars(select(PoLineRow).where(PoLineRow.removed_at.is_(None))):
         lines_by_po[pl.purchase_order_id].append(pl)
     item_codes: dict[uuid.UUID, set[str]] = {
         it.id: {normalise_code(it.sku), normalise_code(it.name)} - {""} for it in s.scalars(select(Item))
@@ -427,12 +430,22 @@ def commit(
     )
     if other is not None:
         raise ConflictError("this receiving file was already imported")
-    if imp.source_type == QBO_EXPORT and latest_attestation(s) is None:
+    attestation = latest_attestation(s)
+    if imp.source_type == QBO_EXPORT and attestation is None:
         # Without the attestation nobody has named the accounts-payable users, so no row can be
         # shown to be independent (B3/B4 review C1).
         raise ConflictError(
             "the controller must attest the receiving evidence and name the accounts-payable users "
             "before a QuickBooks item-receipt export is committed"
+        )
+    if imp.evidence_class in ("A", "B") and (
+        attestation is None or CLASS_RANK[imp.evidence_class] > CLASS_RANK[attestation.evidence_class]
+    ):
+        # The uploader chooses a class; it counts only up to what the controller attested (m7).
+        attested = attestation.evidence_class if attestation else "none"
+        raise ConflictError(
+            f"this import is marked class {imp.evidence_class} but the controller attested class "
+            f"{attested} receiving evidence; ask the controller to attest first or choose the attested class"
         )
     v = validate(s, imp)
     receipts: dict[tuple[uuid.UUID, date, str | None], ReceiptRow] = {}

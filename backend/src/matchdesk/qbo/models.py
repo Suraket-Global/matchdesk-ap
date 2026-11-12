@@ -79,6 +79,8 @@ class PoLineRow(TenantMixin, Base):
     # Never used as a receipt (AD-05); only for the history_incomplete check.
     qbo_billed_qty: Mapped[Decimal | None] = mapped_column(QTY)
     charge_kind: Mapped[str | None] = mapped_column(Text)
+    # Set when a sync reads the purchase order without this line (deleted in QuickBooks; m6).
+    removed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class QboBillRow(TenantMixin, Base):

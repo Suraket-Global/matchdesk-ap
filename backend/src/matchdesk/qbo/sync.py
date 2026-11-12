@@ -299,12 +299,15 @@ def _pos(
             pl.qbo_line_id: pl
             for pl in s.scalars(select(PoLineRow).where(PoLineRow.purchase_order_id == po.id))
         }
+        seen: set[str] = set()
         for ln in r.get("Line", []):
             if ln.get("Id") is None:
                 continue
+            seen.add(str(ln["Id"]))
             pl = lines.get(str(ln["Id"])) or PoLineRow(
                 tenant_id=tid, purchase_order_id=po.id, qbo_line_id=str(ln["Id"])
             )
+            pl.removed_at = None
             pl.line_no = int(ln.get("LineNum") or 0)
             pl.description = ln.get("Description")
             pl.amount = _d(ln.get("Amount"))
@@ -324,6 +327,9 @@ def _pos(
                 pl.qty_ordered = Decimal("1")
                 pl.unit_price = pl.amount or Decimal("0")
             s.add(pl)
+        for qbo_line_id, gone in lines.items():
+            if qbo_line_id not in seen and gone.removed_at is None:
+                gone.removed_at = now  # deleted in QuickBooks: no longer matchable (B3/B4 review m6)
         vendor_qbo.add(vendor_ref)
         po_ids.add(str(po.id))
     cursor["vendor_qbo_ids"] = sorted(vendor_qbo)

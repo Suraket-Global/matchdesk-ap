@@ -183,6 +183,7 @@ def register_qbo_routes(app: FastAPI, settings: Settings, engine: Engine, endpoi
                     "unit_price": str(ln.unit_price),
                     "amount": money(ln.amount),
                     "charge_kind": ln.charge_kind,
+                    "removed_at": ln.removed_at.isoformat() if ln.removed_at else None,
                     "qty_received_counting": str(received.get(ln.id, (Decimal("0"), 0))[0]),
                     "counting_receipt_lines": received.get(ln.id, (Decimal("0"), 0))[1],
                 }

@@ -22,13 +22,14 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from matchdesk.audit import write_audit
 from matchdesk.core import ConflictError, NotFoundError, Settings, get_logger
 from matchdesk.qbo.client import QboNotConfiguredError
 from matchdesk.qbo.models import QboConnection, QboOauthState
-from matchdesk.tenancy import seal, unseal
+from matchdesk.tenancy import seal, session, unseal
 
 log = get_logger("matchdesk.qbo")
 STATE_LIFETIME = timedelta(minutes=10)
@@ -202,8 +203,11 @@ def complete_callback(
             tenant_id=tenant_id, realm_id=realm_id, token_key_id=settings.token_key_id, state_version=0
         )
         s.add(conn)
-    elif conn.realm_id != realm_id and conn.status != "disconnected":
-        raise ConflictError("a different QuickBooks company is already connected")
+    elif conn.realm_id != realm_id:
+        # The earlier company's purchase orders, bills and results are still held (until
+        # ``delete_after`` once disconnected); mixing a second company into them would match one
+        # company's invoices against the other's orders (B3/B4 review m1).
+        raise ConflictError("this account is linked to a different QuickBooks company")
     conn.realm_id = realm_id
     conn.company_name = company_name
     conn.connected_by = pending.user_id
@@ -212,7 +216,13 @@ def complete_callback(
     _store_tokens(conn, settings, tenant_id, tokens)
     conn.status = "connected"
     conn.state_version += 1
-    s.flush()
+    try:
+        with s.begin_nested():
+            s.flush()
+    except IntegrityError:
+        # The company is connected to another MatchDesk account (global unique realm). Refused with
+        # the same words as any other refusal, never a 500 (m1).
+        raise ConflictError("this QuickBooks company cannot be connected to this account") from None
     write_audit(
         s,
         tenant_id,
@@ -245,7 +255,10 @@ def _store_tokens(
 
 def access_token(s: Session, settings: Settings, endpoint: TokenEndpoint, tenant_id: uuid.UUID) -> str:
     """A valid access token, refreshing it when it has expired (T-3.1.1 (d)). A refused refresh
-    marks the connection ``needs_reconnect`` and raises ``ConflictError``."""
+    marks the connection ``needs_reconnect`` (committed on its own) and raises ``ConflictError``.
+
+    Only the Intuit reader needs a token, and that reader is not built until T-1.1.1: the recorded
+    reader of B3 reads fixtures and never calls this, so no sync path refreshes tokens yet."""
     conn = get_connection(s)
     if conn is None or conn.status != "connected" or conn.refresh_token_enc is None:
         raise ConflictError("QuickBooks is not connected")
@@ -256,17 +269,23 @@ def access_token(s: Session, settings: Settings, endpoint: TokenEndpoint, tenant
     try:
         tokens = endpoint.refresh(unseal(keys, conn.refresh_token_enc, ctx).decode())
     except RefreshExpiredError:
-        conn.status = "needs_reconnect"
-        conn.state_version += 1
-        s.flush()
-        write_audit(
-            s,
-            tenant_id,
-            actor_type="system",
-            action="qbo.needs_reconnect",
-            entity_type="qbo_connection",
-            entity_id=conn.id,
-        )
+        # Written in its own transaction: the caller's transaction is rolled back by the error, and
+        # the connection must still say "needs reconnect" afterwards (B3/B4 review m2).
+        engine = s.get_bind()
+        with session(tenant_id, engine) as own:  # type: ignore[arg-type]
+            row = own.get(QboConnection, conn.id, with_for_update=True)
+            if row is not None and row.status == "connected":
+                row.status = "needs_reconnect"
+                row.state_version += 1
+                own.flush()
+                write_audit(
+                    own,
+                    tenant_id,
+                    actor_type="system",
+                    action="qbo.needs_reconnect",
+                    entity_type="qbo_connection",
+                    entity_id=row.id,
+                )
         raise ConflictError("QuickBooks needs to be reconnected") from None
     _store_tokens(conn, settings, tenant_id, tokens)
     conn.state_version += 1

@@ -59,7 +59,9 @@ def build_match_input(
         if p.id in po_ids or (p.vendor_id, p.po_number_norm) in po_refs
     ]
     po_line_rows = s.scalars(
-        select(PoLineRow).where(PoLineRow.purchase_order_id.in_([p.id for p in po_rows]))
+        select(PoLineRow).where(
+            PoLineRow.purchase_order_id.in_([p.id for p in po_rows]), PoLineRow.removed_at.is_(None)
+        )
     ).all()
     po_line_ids = [pl.id for pl in po_line_rows]
     pos = tuple(

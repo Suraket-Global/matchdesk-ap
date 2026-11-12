@@ -66,15 +66,23 @@ def read_table(data: bytes, mime: str) -> tuple[list[str], list[list[str]]]:
 
 
 def _csv(data: bytes) -> list[list[str]]:
-    text = data.decode("utf-8-sig")
+    try:
+        text = data.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:  # only the first 64 KB are checked when the file is sniffed (m4)
+        raise ReceivingFileError(
+            "the CSV file is not UTF-8 text; save it as CSV UTF-8 and upload again"
+        ) from exc
     first = text.split("\n", 1)[0]
     delimiter = ";" if first.count(";") > first.count(",") else ","
     out = []
-    for i, row in enumerate(csv.reader(io.StringIO(text), delimiter=delimiter)):
-        if i > MAX_ROWS + 1:
-            raise ReceivingFileError(f"more than {MAX_ROWS} rows")
-        if any(c.strip() for c in row):
-            out.append(row)
+    try:
+        for i, row in enumerate(csv.reader(io.StringIO(text), delimiter=delimiter)):
+            if i > MAX_ROWS + 1:
+                raise ReceivingFileError(f"more than {MAX_ROWS} rows")
+            if any(c.strip() for c in row):
+                out.append(row)
+    except csv.Error as exc:
+        raise ReceivingFileError("the CSV file cannot be read") from exc
     return out
 
 
@@ -132,7 +140,10 @@ def _xlsx(data: bytes) -> list[list[str]]:
             kind = c.get("t")
             v = c.find("m:v", NS)
             if kind == "s" and v is not None and v.text is not None:
-                value = shared[int(v.text)]
+                try:
+                    value = shared[int(v.text)]
+                except (ValueError, IndexError) as exc:  # m4: a bad index was a 500
+                    raise ReceivingFileError("XLSX refers to a shared text that does not exist") from exc
             elif kind == "inlineStr":
                 value = "".join(t.text or "" for t in c.iter(f"{{{NS['m']}}}t"))
             else:

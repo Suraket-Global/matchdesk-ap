@@ -225,3 +225,11 @@ def add_user(engine: Engine, w: World, role: str) -> tuple[uuid.UUID, dict[str, 
     with session(w.tenant_id, engine) as s:
         s.add(Membership(tenant_id=w.tenant_id, user_id=uid, role=role))
     return uid, auth_headers(issue_session(engine, uid, w.tenant_id))
+
+
+def attest(engine: Engine, w: World, evidence_class: str = "A", ap_staff: list[str] | None = None) -> None:
+    """The controller's receiving attestation, needed before a class A or B import is committed."""
+    from matchdesk.receiving import attest as attest_receiving
+
+    with session(w.tenant_id, engine) as s:
+        attest_receiving(s, w.tenant_id, w.user_id, evidence_class, "synthetic receiving log", ap_staff or [])

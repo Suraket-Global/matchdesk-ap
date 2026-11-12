@@ -18,7 +18,7 @@ from matchdesk.receiving.models import ReceiptLineRow
 from matchdesk.tenancy import session
 from matchdesk.worker.__main__ import run_once
 
-from .seed import add_invoice, make_tenant
+from .seed import add_invoice, attest, make_tenant
 
 pytestmark = pytest.mark.integration
 MAP = {"po_number": "PO", "line_no": "Line", "qty_received": "Qty", "received_date": "Received", "uom": "UOM"}
@@ -49,6 +49,7 @@ def csv_rows(rows: list[str], header: str = "PO,Line,Qty,UOM,Received") -> bytes
 
 def test_it07b_preview_commit_twice_and_reupload(app_engine, client):  # type: ignore[no-untyped-def]
     w = make_tenant(app_engine, "Fictional Distributor R1")
+    attest(app_engine, w)  # a class A or B import counts only up to the attested class (review m7)
     rows = []
     bad = 0
     for i in range(1221):
@@ -108,6 +109,7 @@ def _match(client, app_engine, w, inv) -> dict:  # type: ignore[no-untyped-def]
 
 def test_ut30_class_c_and_unconfirmed_class_b_never_pass_then_confirmed_class_b_matches(app_engine, client):  # type: ignore[no-untyped-def]
     w = make_tenant(app_engine, "Fictional Distributor R2")
+    attest(app_engine, w)  # a class A or B import counts only up to the attested class (review m7)
     inv = add_invoice(app_engine, w, "inv", "INV-2001", date(2026, 10, 10), "100")
     # (a) class C supplier packing slip for 100: stored as context only.
     c = upload(client, w, csv_rows(["4471,2,100,EA,2026-10-05"]), evidence_class="C")
@@ -164,6 +166,7 @@ def test_ut30_class_c_and_unconfirmed_class_b_never_pass_then_confirmed_class_b_
 
 def test_void_stops_counting_and_rematches(app_engine, client):  # type: ignore[no-untyped-def]
     w = make_tenant(app_engine, "Fictional Distributor R3")
+    attest(app_engine, w)  # a class A or B import counts only up to the attested class (review m7)
     a = upload(client, w, csv_rows(["4471,2,100,EA,2026-10-05"]))
     aid = a.json()["id"]
     client.put(f"/api/v1/receiving/imports/{aid}/mapping", json={"columns": MAP}, headers=w.headers)

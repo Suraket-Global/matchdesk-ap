@@ -33,6 +33,7 @@ from matchdesk.receiving import counting_receipt_totals
 from matchdesk.receiving.models import ReceiptLineRow, ReceivingImportRow
 from matchdesk.reporting.models import BacktestReport, ReportFinding
 from matchdesk.reporting.refund import DEFAULT_THRESHOLD, RefundCalculation
+from matchdesk.tenancy import advisory_lock
 
 REMOVED_BY_EVIDENCE = frozenset({"resolved_by_credit", "source_corrected", "not_a_duplicate"})
 UNFINISHED_DOCUMENT_STATES = ("queued", "running", "retry_wait", "needs_review")
@@ -120,12 +121,17 @@ def blocking_reasons(s: Session, start: date, end: date) -> list[str]:
     return reasons
 
 
+def _period_lock_key(tenant_id: uuid.UUID, start: date, end: date) -> str:
+    return f"backtest:{tenant_id}:{start.isoformat()}:{end.isoformat()}"
+
+
 def create_draft(
     s: Session, tenant_id: uuid.UUID, user_id: uuid.UUID | None, start: date, end: date
 ) -> BacktestReport:
     """Create (or refresh, as a new version) a draft with a frozen snapshot (T-5.1.1 (a) to (e))."""
     if end < start:
         raise ValueError("the period ends before it starts")
+    advisory_lock(s, _period_lock_key(tenant_id, start, end))  # one draft or approval at a time (m5)
     now = datetime.now(UTC)
     prior = s.scalars(
         select(BacktestReport).where(BacktestReport.period_start == start, BacktestReport.period_end == end)
@@ -308,6 +314,8 @@ def approve(s: Session, report: BacktestReport, user_id: uuid.UUID) -> BacktestR
     """Idempotent. Refused while any blocking check fails; supersedes an earlier approved version."""
     if report.status == "approved":
         return report
+    advisory_lock(s, _period_lock_key(report.tenant_id, report.period_start, report.period_end))
+    s.refresh(report)  # a draft refreshed meanwhile is superseded and is no longer approvable
     if report.status != "draft":
         raise ConflictError(f"a report in status {report.status} cannot be approved")
     reasons = blocking_reasons(s, report.period_start, report.period_end)
@@ -393,7 +401,11 @@ def describe_report(r: BacktestReport) -> dict[str, Any]:
 
 
 def _cell(value: Any) -> str:
-    """CSV formula-injection guard (UT-11): a cell starting with = + - @ or a control is prefixed."""
+    """CSV formula-injection guard (UT-11): a cell starting with = + - @ or a control is prefixed.
+    Numbers (amounts, line numbers, booleans) are written as numbers, so a credit of -12.50 stays a
+    number in a spreadsheet (B3/B4 review m3)."""
+    if isinstance(value, (Decimal, int)):
+        return str(value)
     text = "" if value is None else str(value)
     if text and (text[0] in "=+-@\t\r" or text[0] == "＝"):
         return "'" + text

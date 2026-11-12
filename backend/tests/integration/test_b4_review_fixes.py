@@ -343,3 +343,184 @@ def test_m7_xlsx_far_column_reference_and_wide_rows_are_refused_quickly(app_engi
     assert upload(client, w, xfe, name="xfe.xlsx").status_code == 422
     wide = _xlsx_raw('<row r="1"><c r="GT1" t="inlineStr"><is><t>PO</t></is></c></row>')  # column 202
     assert upload(client, w, wide, name="wide.xlsx").status_code == 422
+
+
+# --- minor findings -------------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def qbo_endpoint():  # type: ignore[no-untyped-def]
+    from matchdesk.qbo import FakeIntuitTokenEndpoint
+
+    return FakeIntuitTokenEndpoint()
+
+
+@pytest.fixture(scope="module")
+def qbo_client(migrated, qbo_endpoint):  # type: ignore[no-untyped-def]
+    return TestClient(create_app(qbo_token_endpoint=qbo_endpoint))
+
+
+def _connect(client, endpoint, w, realm: str) -> str:  # type: ignore[no-untyped-def]
+    from urllib.parse import parse_qs, urlparse
+
+    r = client.post("/api/v1/qbo/connection/authorize", headers=w.headers)
+    assert r.status_code == 200, r.text
+    state = parse_qs(urlparse(r.json()["authorization_url"]).query)["state"][0]
+    cb = client.get(
+        "/oauth/intuit/callback",
+        params={"state": state, "code": endpoint.issue_code(), "realmId": realm},
+        headers={"Cookie": w.headers["Cookie"]},
+        follow_redirects=False,
+    )
+    assert cb.status_code == 303, cb.text  # never a 500
+    return str(cb.headers["location"])
+
+
+def test_m1_minor_reconnecting_another_company_or_a_company_used_elsewhere_is_refused(
+    app_engine, qbo_client, qbo_endpoint
+):  # type: ignore[no-untyped-def]
+    a = make_tenant(app_engine, "Fictional Distributor RV-m1a", role="controller")
+    b = make_tenant(app_engine, "Fictional Distributor RV-m1b", role="controller")
+    realm = f"realm-{a.tenant_id}"
+    assert _connect(qbo_client, qbo_endpoint, a, realm).endswith("result=connected")
+    assert qbo_client.delete("/api/v1/qbo/connection", headers=a.headers).status_code == 200
+    # The earlier company's data is still held: another company is not mixed into it.
+    assert _connect(qbo_client, qbo_endpoint, a, f"realm-other-{a.tenant_id}").endswith("result=refused")
+    assert _connect(qbo_client, qbo_endpoint, a, realm).endswith("result=connected")  # same company again
+    # A company connected to another account: refused, not a 500.
+    assert _connect(qbo_client, qbo_endpoint, b, realm).endswith("result=refused")
+    assert qbo_client.get("/api/v1/qbo/connection", headers=b.headers).json()["status"] == "not_connected"
+
+
+def test_m2_minor_needs_reconnect_survives_the_callers_rollback(app_engine, qbo_client, qbo_endpoint):  # type: ignore[no-untyped-def]
+    from matchdesk.core import ConflictError, load_settings
+    from matchdesk.qbo import access_token
+
+    w = make_tenant(app_engine, "Fictional Distributor RV-m2", role="controller")
+    assert _connect(qbo_client, qbo_endpoint, w, f"realm-{w.tenant_id}").endswith("result=connected")
+    with session(w.tenant_id, app_engine) as s:
+        s.execute(text("update qbo_connections set access_expires_at = now() - interval '1 minute'"))
+    qbo_endpoint.expire_refresh = True
+    try:
+        with pytest.raises(ConflictError), session(w.tenant_id, app_engine) as s:
+            access_token(s, load_settings(), qbo_endpoint, w.tenant_id)  # not caught: rolls back
+    finally:
+        qbo_endpoint.expire_refresh = False
+    assert qbo_client.get("/api/v1/qbo/connection", headers=w.headers).json()["status"] == "needs_reconnect"
+
+
+def test_m3_minor_csv_guard_keeps_negative_amounts_numeric():  # type: ignore[no-untyped-def]
+    from matchdesk.reporting.backtest import _cell
+
+    assert _cell(Decimal("-12.50")) == "-12.50" and _cell(3) == "3"
+    assert _cell("-cmd") == "'-cmd" and _cell("=1+1") == "'=1+1"
+
+
+def test_m4_minor_non_utf8_csv_and_bad_shared_string_are_422(app_engine, client):  # type: ignore[no-untyped-def]
+    w = make_tenant(app_engine, "Fictional Distributor RV-m4")
+    head = b"PO,Line,Qty,UOM,Received\n" + b"4471,2,1,EA,2026-10-01\n" * 4000  # > 64 KB of UTF-8
+    assert len(head) > 65536
+    r = upload(client, w, head + b"4471,2,1,\xe9A,2026-10-01\n", name="latin1.csv")
+    assert r.status_code == 422, r.text
+    bad = _xlsx_raw('<row r="1"><c r="A1" t="s"><v>7</v></c></row>')
+    assert upload(client, w, bad, name="bad.xlsx").status_code == 422
+
+
+def test_m5_minor_two_drafts_at_once_get_two_versions(app_engine, client):  # type: ignore[no-untyped-def]
+    from matchdesk.reporting import create_draft
+
+    w, _ctrl = _report_world(client, app_engine)
+    start, end = date(2026, 10, 1), date(2026, 10, 31)
+
+    def draft(s):  # type: ignore[no-untyped-def]
+        return create_draft(s, w.tenant_id, w.user_id, start, end).version_no
+
+    second, waited = _hold_then_run(app_engine, w, draft, draft)
+    assert waited and second == 2  # before the fix: a unique violation (500)
+
+
+def test_m6_minor_po_line_deleted_in_quickbooks_is_no_longer_matchable(app_engine, qbo_client, qbo_endpoint):  # type: ignore[no-untyped-def]
+    import copy
+
+    from matchdesk.exceptions import build_match_input
+    from matchdesk.qbo import DEFAULT_FIXTURES, RecordedQboReader, execute_sync, request_sync
+
+    w = make_tenant(app_engine, "Fictional Distributor RV-m6", role="controller")
+    assert _connect(qbo_client, qbo_endpoint, w, f"realm-{w.tenant_id}").endswith("result=connected")
+    reader = RecordedQboReader(DEFAULT_FIXTURES)
+
+    def sync(rdr) -> None:  # type: ignore[no-untyped-def]
+        with session(w.tenant_id, app_engine) as s:
+            run, _created = request_sync(
+                s, w.tenant_id, w.user_id, "date_range", date(2026, 8, 1), date(2026, 10, 31)
+            )
+            run_id = run.id
+        assert execute_sync(app_engine, w.tenant_id, run_id, rdr, page_size=50) == "succeeded"
+
+    sync(reader)
+    second = RecordedQboReader(DEFAULT_FIXTURES)
+    second.rows = copy.deepcopy(reader.rows)
+    po = next(p for p in second.rows["PurchaseOrder"] if p["Id"] == "101")
+    po["Line"] = [ln for ln in po["Line"] if str(ln.get("Id")) != "2"]
+    sync(second)
+    with session(w.tenant_id, app_engine) as s:
+        po_row = s.scalar(text("select id from purchase_orders where qbo_id = '101'"))
+        removed = s.scalars(
+            text("select qbo_line_id from po_lines where purchase_order_id = :p and removed_at is not null"),
+            {"p": po_row},
+        ).all()
+        assert removed == ["2"]
+        inv = add_invoice(app_engine, w, "m6", "INV-M6", date(2026, 10, 6), "1")
+    with session(w.tenant_id, app_engine) as s:
+        s.execute(
+            text(
+                "update invoices set purchase_order_id = :p, "
+                "vendor_id = (select vendor_id from purchase_orders where id = :p) where id = :i"
+            ),
+            {"p": po_row, "i": inv},
+        )
+        mi = build_match_input(s, [inv])
+        in_scope = [p for p in mi.purchase_orders if p.id == str(po_row)]
+        assert len(in_scope) == 1
+        line_ids = {ln.id for ln in in_scope[0].lines}
+        rows = dict(
+            s.execute(
+                text("select qbo_line_id, id from po_lines where purchase_order_id = :p"), {"p": po_row}
+            ).all()
+        )
+        assert str(rows["1"]) in line_ids and str(rows["2"]) not in line_ids
+
+
+def test_m7_minor_import_class_above_the_attested_class_is_not_committed(app_engine, client):  # type: ignore[no-untyped-def]
+    from .seed import attest
+
+    w = make_tenant(app_engine, "Fictional Distributor RV-m7")
+    mapping = {
+        "po_number": "PO",
+        "line_no": "Line",
+        "qty_received": "Qty",
+        "received_date": "Received",
+        "uom": "UOM",
+    }
+
+    def staged(cls: str, day: int) -> str:
+        data = f"PO,Line,Qty,UOM,Received\n4471,2,5,EA,2026-10-{day:02d}\n".encode()
+        r = upload(client, w, data, evidence_class=cls, name=f"{cls}{day}.csv")
+        assert r.status_code == 201, r.text
+        client.put(
+            f"/api/v1/receiving/imports/{r.json()['id']}/mapping",
+            json={"columns": mapping},
+            headers=w.headers,
+        )
+        return str(r.json()["id"])
+
+    def commit(i: str) -> int:
+        return int(client.post(f"/api/v1/receiving/imports/{i}/commit", headers=w.headers).status_code)
+
+    a = staged("A", 1)
+    assert commit(a) == 409  # no attestation yet
+    attest(app_engine, w, "C")
+    assert commit(a) == 409  # attested class C only
+    assert commit(staged("C", 2)) == 200
+    attest(app_engine, w, "A")
+    assert commit(a) == 200

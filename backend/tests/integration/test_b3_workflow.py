@@ -16,7 +16,7 @@ from matchdesk.exceptions.models import LineMatch, ToleranceRule
 from matchdesk.tenancy import session
 from matchdesk.worker.__main__ import run_once
 
-from .seed import add_invoice, add_receipt, add_user, make_tenant
+from .seed import add_invoice, add_receipt, add_user, attest, make_tenant
 
 pytestmark = pytest.mark.integration
 
@@ -292,6 +292,7 @@ def test_it28_late_receiving_evidence_counts_only_after_approval(app_engine, cli
     w = make_tenant(app_engine, "Fictional Distributor W4")
     _c, ctrl = add_user(app_engine, w, "controller")
     add_receipt(app_engine, w, "50", date(2026, 10, 1))
+    attest(app_engine, w)
     inv = add_invoice(app_engine, w, "inv", "INV-L1", date(2026, 10, 5), "100")
     match(client, app_engine, w.headers, [inv])
     assert queue(client, w.headers, type="qty_over_received", status="open")
