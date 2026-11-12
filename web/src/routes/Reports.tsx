@@ -416,10 +416,10 @@ export function ReportPage() {
           <dt>Credit recovered</dt>
           <dd className="muted">Not recorded yet</dd>
         </div>
-        <p className="small muted">
-          Totals open the queue with this report&apos;s dates. The queue is live; this version is frozen at its data cut-off, so later resolutions show there, not here.
-        </p>
       </dl>
+      <p className="small muted three-note">
+        Totals open the queue with this report&apos;s dates. The queue is live; this version is frozen at its data cut-off, so later resolutions show there, not here.
+      </p>
 
       <section>
         <h2>1. Documents and lines</h2>

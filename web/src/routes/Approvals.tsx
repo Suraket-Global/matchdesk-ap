@@ -63,7 +63,7 @@ function DecisionCard({ a, importName, onDecide }: { a: Approval; importName?: R
         <h3 className="d-label">Affected records</h3>
         {al && affected.length > 0 && (
           <div className="table-wrap">
-            <table className="compact">
+            <table className="compact stack-sm">
               <caption className="sr-only">Invoice lines re-matched by this conversion</caption>
               <thead>
                 <tr>
@@ -80,18 +80,18 @@ function DecisionCard({ a, importName, onDecide }: { a: Approval; importName?: R
               <tbody>
                 {affected.map((x) => (
                   <tr key={x.invoice_line_id}>
-                    <td className="nowrap">
+                    <td className="nowrap" data-label="Invoice line">
                       <Link to={`/invoices/${x.invoice_id}?line=${x.invoice_line_id}&from=${encodeURIComponent("/approvals")}`}>
                         {x.doc_number} line {x.line_no}
                       </Link>
                     </td>
-                    <td className="num">
+                    <td className="num" data-label="Billed">
                       {qty(x.qty)} {x.uom ?? ""}
                     </td>
-                    <td className="num">
+                    <td className="num" data-label="After conversion">
                       {qty(x.converted_qty)} {al.item_uom ?? ""}
                     </td>
-                    <td className="small">{x.open_exceptions.length ? x.open_exceptions.map(typeWord).join(", ") : <span className="muted">None</span>}</td>
+                    <td className="small" data-label="Open now">{x.open_exceptions.length ? x.open_exceptions.map(typeWord).join(", ") : <span className="muted">None</span>}</td>
                   </tr>
                 ))}
               </tbody>

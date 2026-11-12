@@ -3312,7 +3312,7 @@ details.fold > summary {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--s-2) var(--s-4);
-  margin: -8px 0 var(--s-6);
+  margin: -8px 0 var(--s-5);
   padding: var(--s-3) var(--s-4);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
@@ -3327,9 +3327,8 @@ details.fold > summary {
   font-size: var(--fs-lg);
   font-weight: 600;
 }
-.three-counts p {
-  grid-column: 1 / -1;
-  margin: 0;
+.three-note {
+  margin: calc(-1 * var(--s-4)) 0 var(--s-6);
 }
 @media (max-width: 639px) {
   .three-counts {

@@ -52,7 +52,7 @@ test("B7 operator console, support access, pilot record, weekly summary and emai
   await signInOperator(page, operator);
   await axe(page, "operator console");
   await page.getByRole("link", { name: new RegExp(tag) }).click();
-  await expect(page.getByRole("heading", { name: "Pilot record" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /pilot record/i })).toBeVisible(); // B8: "Edit the pilot record"
   await expect(page.getByLabel("Refund threshold (CAD)")).toHaveValue("500.00");
   await page.getByLabel("Signed terms reference").fill(`Pilot terms v2 (synthetic) ${tag}`);
   await page.getByRole("button", { name: "Save pilot record" }).click();

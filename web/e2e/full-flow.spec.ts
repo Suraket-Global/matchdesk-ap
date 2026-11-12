@@ -66,13 +66,13 @@ test("E2E-01 clerk loads the month and resolves, controller approves and exports
   await tablesFit(page, "exception queue at 1440"); // B6 review M2
   await page.getByRole("button", { name: /No purchase order/ }).click();
   await expect(page).toHaveURL(/type=no_po/);
-  await page.getByRole("link", { name: "FF-1007" }).click();
+  await page.getByRole("link", { name: /Review FF-1007/ }).click(); // B8: each row has a Review control
   await expect(page.getByRole("heading", { name: /Invoice FF-1007/ })).toBeVisible();
   await expect(page.locator(".workings .sentence")).toBeVisible();
   await axe(page, "match view");
   await page.locator("#res-code").selectOption("waived");
   await page.locator("#res-note").fill("PO 4999 does not exist; trivial amount (synthetic).");
-  await page.getByRole("button", { name: "Resolve and next" }).click();
+  await page.getByRole("button", { name: /^Resolve and (next|return to the queue)$/ }).click();
   await expect(page.getByRole("heading", { name: "Exception queue" })).toBeVisible();
   // The type filter stays visible and says what it filters, after its last item went (review, minor).
   await expect(page.getByRole("button", { name: /No purchase order/ })).toBeVisible();
@@ -80,13 +80,13 @@ test("E2E-01 clerk loads the month and resolves, controller approves and exports
 
   // The match view never counts the QuickBooks billed quantity as received (DD-06).
   await page.goto("/exceptions?type=qty_over_received");
-  await page.getByRole("link", { name: "FF-1003" }).click();
+  await page.getByRole("link", { name: /Review FF-1003/ }).click();
   await expect(page.locator(".workings .sentence")).toContainText("Received to date 60 EA.");
   await expect(page.locator(".workings .sentence")).toContainText("Excess 40 × 4.20 = 168.00.");
-  await expect(page.getByText("receiving-warehouse-log.csv row 4")).toBeVisible();
+  await expect(page.getByText("receiving-warehouse-log.csv row 4").first()).toBeVisible();
   // W1: a ?from= that is not a path inside the app is ignored.
   await page.goto(`${page.url().split("&from=")[0]}&from=${encodeURIComponent("javascript:alert(1)")}`);
-  await expect(page.getByRole("link", { name: "Exception queue" })).toHaveAttribute("href", "/exceptions");
+  await expect(page.getByRole("link", { name: /^Exception queue/ })).toHaveAttribute("href", "/exceptions");
 
   await signOut(page, "Demo Clerk");
 
@@ -94,7 +94,7 @@ test("E2E-01 clerk loads the month and resolves, controller approves and exports
   await signIn(page, controller);
   await expect(page.getByRole("heading", { name: "Approvals" })).toBeVisible();
   await axe(page, "approvals");
-  await page.getByRole("row", { name: /CT-25/ }).getByRole("button", { name: "Approve" }).click();
+  await page.locator(".decision", { hasText: "CT-25" }).getByRole("button", { name: "Approve" }).click(); // B8: decision cards
   await expect(page.getByRole("dialog")).toContainText("1 CS of Imaginary Packaging Inc code CT-25 = 25 EA");
   await page.getByRole("dialog").getByRole("button", { name: "Approve" }).click();
   await expect(page.getByText("Approved. The affected lines are being re-matched.")).toBeVisible();
