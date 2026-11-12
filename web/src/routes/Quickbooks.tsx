@@ -65,7 +65,9 @@ export function QuickbooksPage() {
         <Banner tone="warn">
           <p>
             <strong>Recorded-response mode.</strong> This server reads invented QuickBooks responses recorded for the demo, not
-            a real QuickBooks company. Connecting a real company needs an Intuit developer account, which is not set up.
+            a real QuickBooks company. The live connection is not built: it needs the owner&apos;s Intuit developer account and
+            the sandbox check (task T-1.1.1). The step that remains is to run that check, then write the live reader from what
+            it records.
           </p>
         </Banner>
       )}

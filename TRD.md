@@ -563,6 +563,17 @@ The 22 production risks, with tests and owning tasks, are in [verification-repor
 
 Decisions that can wait: extraction provider and model (T-1.1.3); object storage; a second factor at sign-in; Canadian cloud region; in-app billing; error-tracking product; whether staging gets its own server.
 
+### 11.1 Live QuickBooks reader: what remains (B6, 2026-11-12)
+
+`IntuitQboReader.page()` raises `QboNotConfiguredError`; it is not faked. It needs the owner's Intuit developer account and sandbox company (`execution-plan.md` section 3 dependencies) and task T-1.1.1. TODO, in order:
+
+1. Owner: open the Intuit developer account, create the app and a sandbox company with synthetic POs, partial bills and vendor credits; put the sandbox client id, secret and redirect URI into the staging `.env` only.
+2. T-1.1.1: call each entity used by `qbo.sync` (vendors, items, purchase orders, bills, vendor credits) in the sandbox and record request and response samples as fixtures under `backend/fixtures/qbo/`, replacing the invented recordings where the shape differs.
+3. Write `IntuitQboReader.page()` over `httpx`: the query endpoint with `STARTPOSITION`/`MAXRESULTS` paging, the minor version T-1.1.1 records, `Authorization: Bearer` from `qbo.access_token`, timeouts of section 6.4, retry on 429 and 5xx with backoff, and no write method (test `test_readers_have_no_write_method`).
+4. Write `IntuitTokenEndpoint` (exchange, refresh, revoke) against the token and revoke URLs in settings; a refused refresh already commits `needs_reconnect`.
+5. Contract tests that replay the recorded sandbox responses through the real client; one manual sandbox run recorded in `verification-report-fixing.md`.
+6. Update S-04 wording (`App-flow.md`), `docs/PLAY.md` and `AGENTS.md`, and remove the recorded-response banner for `intuit` mode.
+
 ## 12. API contracts
 
 Base path `/api/v1`. JSON. Errors use `application/problem+json` with `type`, `title`, `status`, `detail`, `correlation_id`. Lists use cursor pagination (`?cursor=&limit=`, limit ≤ 200). Records that can be edited return `version`; updates send `If-Match: <version>` and receive 409 with the current record if it changed. Mutating requests accept `Idempotency-Key` (stored 24 hours per tenant and user). A record in another tenant returns 404. A permitted record with a forbidden action returns 403.

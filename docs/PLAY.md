@@ -100,6 +100,8 @@ Sign in with `controller.demo@example.invalid` as in step 1. Because approvals a
 
 ## Not built yet (the screens say so)
 
+- **Live QuickBooks.** The demo reads recorded, invented QuickBooks responses. The live connection is not built: it needs the owner's Intuit developer account and the sandbox check T-1.1.1 (`execution-plan.md`). The step that remains: the owner opens the Intuit developer account and sandbox company, T-1.1.1 records the real responses, then the live reader is written from them (TODO list in `TRD.md` section 11). Until then `MATCHDESK_QBO_MODE=intuit` refuses to start a sync, and the QuickBooks screen (S-04) says so.
+
 Weekly summary (S-14), operator console (S-18), support access grants, pilot terms record, the "we have no receiving records" choice, email intake, deleting an invoice line in review.
 
 ## Start again

@@ -1,18 +1,16 @@
-import { execFileSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { counts, stack } from "./stack";
 
-// Each run seeds its own tenant and synthetic users (seed_demo.py --tag), so the owner's demo
-// tenant is never touched and runs can repeat.
+// Each run gets a fresh matchdesk_e2e database and its own API and worker (e2e_stack.sh), seeds one
+// tagged tenant there, and records the row counts of matchdesk_dev so the teardown can prove the
+// run left the owner's demo database alone (B6, outside QA finding 2).
 export default function globalSetup(): void {
-  const root = path.resolve(import.meta.dirname, "..", "..");
   const tag = `e2e${Date.now().toString(36)}`;
-  // The run's files go to the system temporary folder, never into play-files/ (review, minor).
   const files = path.join(os.tmpdir(), `matchdesk-${tag}`);
-  execFileSync(path.join(root, "backend/.venv/bin/python"), [path.join(root, "backend/scripts/seed_demo.py"), "--tag", tag, "--files-dir", files], {
-    cwd: path.join(root, "backend"),
-    stdio: "inherit",
-  });
-  writeFileSync(path.join(import.meta.dirname, ".run.json"), JSON.stringify({ tag, files }));
+  const dev = counts("matchdesk_dev");
+  stack("up");
+  stack("seed", "--tag", tag, "--files-dir", files);
+  writeFileSync(path.join(import.meta.dirname, ".run.json"), JSON.stringify({ tag, files, dev }));
 }

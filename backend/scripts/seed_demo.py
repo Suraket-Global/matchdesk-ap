@@ -25,7 +25,7 @@ from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
-from sqlalchemy import func, select, text
+from sqlalchemy import func, select
 
 from matchdesk.core import load_settings, text_pdf
 from matchdesk.exceptions import create_alias
@@ -249,12 +249,6 @@ def main() -> int:
         capture_output=True,
     )
     engine = get_engine(settings.database_url)
-    if tag is not None:
-        # A tagged run is an automated test run from 127.0.0.1: it starts with the local sign-in
-        # counters empty, so earlier runs within the hour do not reach the per-address limit (the
-        # owner's untagged seed and production never do this; make demo-reset clears them too).
-        with global_session(engine) as s:
-            s.execute(text("delete from auth_rate_events"))
     with global_session(engine) as s:
         if s.scalar(select(Tenant).where(Tenant.name == tenant_name)) is not None:
             print(f"seed-demo: '{tenant_name}' already exists; nothing changed")

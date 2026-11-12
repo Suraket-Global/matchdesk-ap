@@ -1,7 +1,9 @@
 import { defineConfig } from "@playwright/test";
+import { E2E_API, E2E_WEB } from "./e2e/stack";
 
-// E2E-01 runs headless in the installed Google Chrome (no browser download), against the dev
-// server and the local API. `make up` must be running; the dev server is started if needed.
+// E2E-01 runs headless in the installed Google Chrome (no browser download) on its own stack:
+// database matchdesk_e2e, API on 8102 and a worker (created and dropped by global setup and
+// teardown), and a web dev server on 5174 proxied to that API. PostgreSQL and Mailpit must run.
 export default defineConfig({
   testDir: "e2e",
   timeout: 180_000,
@@ -12,7 +14,7 @@ export default defineConfig({
   globalSetup: "./e2e/global-setup.ts",
   globalTeardown: "./e2e/global-teardown.ts",
   use: {
-    baseURL: "http://127.0.0.1:5173",
+    baseURL: E2E_WEB,
     channel: "chrome",
     headless: true,
     viewport: { width: 1440, height: 900 },
@@ -20,9 +22,10 @@ export default defineConfig({
     trace: "retain-on-failure",
   },
   webServer: {
-    command: "npm run dev",
-    url: "http://127.0.0.1:5173/login",
-    reuseExistingServer: true,
+    command: "npm run dev:e2e",
+    url: `${E2E_WEB}/login`,
+    env: { MATCHDESK_API_URL: E2E_API },
+    reuseExistingServer: false,
     timeout: 60_000,
   },
 });

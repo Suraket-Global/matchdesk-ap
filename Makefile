@@ -32,7 +32,9 @@ web-build: web/node_modules
 web-test: web/node_modules
 	cd web && npm test
 
-# E2E-01 and the accessibility scan, headless in the installed Google Chrome; needs make up and make web.
+# E2E-01 and the accessibility scan, headless in the installed Google Chrome, on Playwright's own stack:
+# database matchdesk_e2e, API 8102, worker, web 5174 (backend/scripts/e2e_stack.sh). Needs PostgreSQL and Mailpit;
+# fails if any matchdesk_dev row count changed.
 web-e2e: web/node_modules
 	cd web && npm run e2e
 
