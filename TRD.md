@@ -153,11 +153,11 @@ flowchart TB
 | Module | Owns | May import |
 |---|---|---|
 | `core` | Settings, structured logging, correlation IDs, `Money` and quantity types, clock, error types | Standard library only |
-| `tenancy` | Tenant context, database session with tenant set, permission table | `core` |
+| `tenancy` | Tenant context, database session with tenant set, permission table, AES-256-GCM sealing with key id (moved from `identity` in B3 so `qbo` can seal tokens) | `core` |
 | `blobstore` | Key construction, write, read, delete, retention sweep | `core`, `tenancy` |
 | `identity` | Users, memberships, sign-in links, sessions, invitations, support grants | kernel, `audit` (sign-in, invitation and membership events in the same transaction; B2) |
-| `qbo` | Connection, token encryption, sync runs, local copies of QuickBooks records | kernel, `audit` |
-| `receiving` | Imports, column mappings, receipts | kernel, `audit` |
+| `qbo` | Connection, token encryption, sync runs, local copies of QuickBooks records | kernel, `audit`, `matching` (number normalisation only; B3) |
+| `receiving` | Imports, column mappings, receipts | kernel, `audit`, `matching` (the counting rule and normalisers), read models of `qbo` (PO lines) and `intake` (the shared `documents` table) (B3) |
 | `intake` | Batches, documents, inbound email | kernel, `audit`, `extraction` (public interface, for document processing; B1) |
 | `extraction` | Provider adapters, extraction runs, verification rules | kernel |
 | `matching` | Rule set, alias resolution, tolerances, duplicate rules, credit netting. Functions take plain data and return decisions; no database or network | `core` only |
@@ -166,7 +166,7 @@ flowchart TB
 | `audit` | Append-only audit events | kernel |
 | `api`, `worker` | Wiring only | Any domain module through its public interface |
 
-Rules, enforced by import-linter contracts (T-2.1.1; R-04): domain modules never import `api` or `worker`; `worker` never imports `api`; `exceptions` imports no `identity`, `blobstore` or `reporting`. A module imports another only through names exported from that module's top level, except an ORM read model (`<module>.models`) for the importer and target pairs listed in `backend/scripts/check_imports.py` (`exceptions` reads `qbo`, `receiving`, `intake`; `intake` reads `extraction`, `tenancy`; `api` reads `exceptions`, `intake`, `tenancy`); that rule is enforced by `check_imports.py` in `make check`, since import-linter cannot express it (B1-009). `web` talks to the backend only over HTTP.
+Rules, enforced by import-linter contracts (T-2.1.1; R-04): domain modules never import `api` or `worker`; `worker` never imports `api`; `exceptions` imports no `identity`, `blobstore` or `reporting`. A module imports another only through names exported from that module's top level, except an ORM read model (`<module>.models`) for the importer and target pairs listed in `backend/scripts/check_imports.py` (`exceptions` reads `qbo`, `receiving`, `intake`; `intake` reads `extraction`, `tenancy`, `qbo`; `receiving` reads `qbo`, `intake`; `reporting` reads `exceptions`, `intake`, `qbo`, `receiving`; `api` reads `exceptions`, `intake`, `tenancy`, `qbo`, `receiving`, `reporting`; the B3 additions are listed in verification-report-fixing.md section 13.4); that rule is enforced by `check_imports.py` in `make check`, since import-linter cannot express it (B1-009). `web` talks to the backend only over HTTP.
 
 ## 6. Runtime view
 
@@ -254,7 +254,7 @@ stateDiagram-v2
 - **Late valid completion.** If the first worker returns after its lease expired, it writes its result only if the row is still `running` for the same input hash; otherwise it discards the result. Either way exactly one result is stored and the row leaves `running`. A row stuck in `running` past twice its lease is swept back to `queued` by a reconciliation job every 5 minutes, which also raises an alert if the count is above zero for 30 minutes.
 - **Browser timeouts.** Every mutating request from the web app carries an `Idempotency-Key`. If the browser times out and retries, the server returns the stored result of the first attempt. The batch page always rebuilds from server state, so a response the browser never saw still shows up.
 - **Retries.** Transient errors (network, HTTP 429, 5xx) retry with exponential backoff and jitter: 30 s, 2 min, 10 min; then `failed` with the reason shown to the user. Permanent errors (unreadable file, password-protected PDF) fail at once.
-- **Idempotent effects.** QuickBooks records are upserted on (tenant, QuickBooks id). Receipt lines are unique on (import, row number) and imports are unique on file hash. Documents are unique on (tenant, file hash). A pending match run is unique on input fingerprint. A finished run is reused only while its inputs are identical and it is still the current result for every line in its scope; otherwise a new run is created, so a return to an earlier input state (a receipt removed, a credit voided) re-evaluates and supersedes the newer result (B1-001). Match runs of one tenant execute one at a time under an advisory lock and read their inputs after taking it (B1-011). **Stale on read (B1-001):** every read of a stored result recomputes the input fingerprint of its run's scope and compares it with the run's; if they differ (a receipt import voided, a credit removed, an alias changed, a document added on an in-scope PO), the line is returned with status `stale` and the earlier result only as `result_status`, so `matched` is never shown for inputs that changed. No background job is involved. Any later list endpoint or report must apply the same comparison.
+- **Idempotent effects.** QuickBooks records are upserted on (tenant, QuickBooks id). Receipt lines are unique on (import, row number) and imports are unique on file hash. Documents are unique on (tenant, file hash). A pending match run is unique on input fingerprint. A finished run is reused only while its inputs are identical and it is still the current result for every line in its scope; otherwise a new run is created, so a return to an earlier input state (a receipt removed, a credit voided) re-evaluates and supersedes the newer result (B1-001). Match runs of one tenant execute one at a time under an advisory lock and read their inputs after taking it (B1-011). **Stale on read (B1-001):** every read of a stored result recomputes the input fingerprint of its run's scope and compares it with the run's; if they differ (a receipt import voided, a credit removed, an alias changed, a document added on an in-scope PO), the line is returned with status `stale` and the earlier result only as `result_status`, so `matched` is never shown for inputs that changed. No background job is involved. Any later list endpoint or report must apply the same comparison. **Trigger scope (B3):** because a run's input fingerprint covers the vendor's whole document history, every trigger re-matches all uploaded invoices of the affected vendor, not only those on the affected purchase order; a narrower scope left invoices stale on read (`exceptions.triggers`). Receiving commits run inside the request in B3, not as a job (files are limited to 50,000 rows).
 
 ### 6.4 Timeouts
 
@@ -504,6 +504,8 @@ Key format: `t/{tenant_id}/{purpose}/{source}/{yyyy}/{mm}/{record_id}/{sha256}.{
 
 **As built in B2.** `blobstore` builds keys in the format above (record ID is the document ID; the extension comes from the sniffed type) and stores through one interface with two back ends selected by `MATCHDESK_BLOB_BACKEND`: a local directory, or the S3 API (`MATCHDESK_S3_*`; locally MinIO at 127.0.0.1:9000, bucket `matchdesk-dev`). The bucket is private; no public or presigned URL is issued; files leave only through `/documents/{id}/content`. `POST /intake/batches/{id}/files` sniffs PDF, PNG and JPEG and refuses files above 20 MB; page, pixel, XLSX and CSV limits and the retention sweeper are not built yet. Tested by `tests/integration/test_b2_files.py` against MinIO.
 
+**As built in B3 (2026-11-12).** Receiving files: CSV and XLSX sniffed from the bytes (`receiving.sniff_receiving`), 20 MB; XLSX opened only within the limits above (100 entries, 100 MB and 100 times expanded, no document-type declaration, 50,000 rows; `receiving/parse.py`); encrypted zip entries refused. Invoice PDFs read by the local extractor: encrypted PDFs fail permanently, more than 60 pages fail permanently, images and PDFs without a text layer go to review. Not built: the 1 GB memory and 120-second limits for parsing, pixel limits, the retention sweeper. Report exports are generated per request with `Content-Disposition` and `nosniff`, not stored.
+
 Document downloads (`/documents/{id}/content`) add `Content-Security-Policy: sandbox`, a fixed content type from the stored sniffed type, and `Content-Disposition` with a generated name. Supplier PDFs are drawn by PDF.js with script execution and dynamic code evaluation switched off. Planned tests: IT-19 (hostile and oversized files) and IT-20 (headers).
 
 ## 9. Architectural decisions
@@ -637,6 +639,11 @@ Roles: C controller, K clerk, V viewer, O operator. **Rule for the operator:** a
 | PATCH `/operator/pilot-engagements/{id}` | O | Record payment status, governing report, refund result and outcome | |
 | GET `/usage` | C | The account's own billable units by month, listable per document | |
 | GET `/healthz`, GET `/readyz` | public | Liveness; readiness (database, volume writable, migrations at head) | No detail in the public response |
+| GET `/exceptions/{id}/events` | C K V | Exception history (B3) | Insert-only events |
+| GET `/aliases/suggestions` | C K | Items suggested for a supplier code: earlier alias or SKU, then description similarity (B3; T-4.1.1 (d)) | Never applied without a person |
+| GET `/reports/backtest/{id}/refund-evaluation` | C K V | Refund criterion from the report's stored qualifying total; approved reports only (B3; T-5.1.3 (c)) | `threshold` defaults to 500.00 |
+
+**As built in B3 (2026-11-12).** Built: the QuickBooks, receiving, intake, invoice review, match-run, exception, approval, alias, tolerance and back-test report rows above, plus the three added rows (`backend/src/matchdesk/api/*_routes.py`). `PUT /tolerances/default` also carries the waiver limit and period cap. The OAuth callback answers with a redirect to the web app (`/settings/quickbooks?result=connected|refused`). Not built yet: credit decision, onboarding and the no-receiving declaration, pilot engagements, email intake, document deletion, archive export, weekly summary, audit list, support grants, operator console, usage. Verification: verification-report-fixing.md section 13.
 
 ## 13. AI function and threat model
 
@@ -653,6 +660,7 @@ Roles: C controller, K clerk, V viewer, O operator. **Rule for the operator:** a
 | Fallback | Provider unavailable: documents stay queued and retry; after attempts are exhausted the clerk may key the lines in extraction review. Matching is unaffected for documents already extracted |
 | Provider or model change | Provider, model identifier and prompt version are pinned in configuration and stored on every extraction run. A change is deployed only after the fixture set passes. Documents already extracted are not re-extracted unless a user asks |
 | Data handling | Provider must offer no-training terms; named in the pilot agreement. Model output is treated as untrusted data and is never executed or used to build queries |
+| As built in B3 (2026-11-12) | No hosted provider (needs an account): `MATCHDESK_EXTRACTOR=provider` refuses to start. `extraction.LocalPdfExtractor` (provider `local`, model `pdf-text-patterns`, prompt version `l1`) reads a PDF's text layer without network or model and fills a field only when a fixed pattern matches exactly; it lists unread fields and the gate `required_fields_read` sends such documents to review, so scanned pages always reach a person. It is a stand-in for development and the demo, not an evaluated provider; HR-01 has not run |
 
 ### 13.2 Threat model
 

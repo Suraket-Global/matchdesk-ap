@@ -2,7 +2,7 @@
 
 Canonical instructions for any coding or documentation agent working in this repository. `CLAUDE.md` adds product-specific guidance and defers to this file.
 
-**State of the repository:** the ten planning documents at the root, plus build milestone B1 (2026-11-11, authorised by the owner before the Phase 0 gate) under `backend/`: the package layout, `core`, the pure `matching` engine, migrations with row-level security, match runs, a minimal API and a worker, with unit and integration tests; and build milestone B2 (2026-11-11): emailed sign-in links, cookie sessions with anti-forgery tokens, idle and absolute limits, rate limits, invitations, memberships, operator TOTP, mail over SMTP to the local Mailpit inbox and files over the S3 API to local MinIO. Nothing is deployed; QuickBooks and extraction exist only as interfaces with fakes; no real mail or storage provider is connected. What ran, and how, is in [verification-report-fixing.md sections 9](verification-report-fixing.md#9-build-milestone-b1-2026-11-11) and [10](verification-report-fixing.md#10-build-milestone-b2-sign-in-and-local-services-2026-11-11). Commands marked **exists** in section 12 work locally; all others are still **proposed**. Round C2 (2026-11-11) added `compliance/self-check.md`: the business's own reading of the legal rules (not legal advice), with checklists, templates and red lines; by owner decision no lawyer is used for now and the gates that waited on one point to that file.
+**State of the repository:** the ten planning documents at the root, plus build milestone B1 (2026-11-11, authorised by the owner before the Phase 0 gate) under `backend/`: the package layout, `core`, the pure `matching` engine, migrations with row-level security, match runs, a minimal API and a worker, with unit and integration tests; and build milestone B2 (2026-11-11): emailed sign-in links, cookie sessions with anti-forgery tokens, idle and absolute limits, rate limits, invitations, memberships, operator TOTP, mail over SMTP to the local Mailpit inbox and files over the S3 API to local MinIO. Build milestone B3 (2026-11-12, branch `feat/b3-workflows`): every workflow through the real API on the local stack: QuickBooks connection, token sealing and resumable sync over recorded synthetic responses (shape unverified until T-1.1.1), receiving import, invoice intake with a local text-PDF extractor, extraction review, match-run triggers, the exception workflow with approvals, aliases and tolerances, and the back-test report with approval and export; `make seed-demo` loads one invented tenant. Nothing is deployed; there is no real QuickBooks, extraction, mail or storage provider (Intuit and the hosted extractor are selected by settings and refuse to run unconfigured). What ran, and how, is in [verification-report-fixing.md sections 9](verification-report-fixing.md#9-build-milestone-b1-2026-11-11), [10](verification-report-fixing.md#10-build-milestone-b2-sign-in-and-local-services-2026-11-11) and [13](verification-report-fixing.md#13-b3-workflows-2026-11-12). Commands marked **exists** in section 12 work locally; all others are still **proposed**. Round C2 (2026-11-11) added `compliance/self-check.md`: the business's own reading of the legal rules (not legal advice), with checklists, templates and red lines; by owner decision no lawyer is used for now and the gates that waited on one point to that file.
 
 ## 1. Reading order
 
@@ -55,7 +55,7 @@ If two files disagree, the authoritative file wins and the other is corrected in
 - Amounts are `Decimal` and `NUMERIC`. No binary floats in money or quantity code.
 - Every mutating endpoint accepts an idempotency key; every editable record carries a version.
 
-Utilities index (B1, B2). Search here before adding a helper:
+Utilities index (B1, B2, B3). Search here before adding a helper:
 
 | Need | Use | File |
 |---|---|---|
@@ -82,6 +82,22 @@ Utilities index (B1, B2). Search here before adding a helper:
 | Extraction interface, fake, arithmetic gates | `extraction.Extractor`, `FakeExtractor`, `verification_gates` | `extraction/provider.py` |
 | QuickBooks read interface and fake (no write method) | `qbo.QboReader`, `qbo.FakeQboReader` | `qbo/client.py` |
 | Refund calculation over exceptions | `reporting.calculate_refund` | `reporting/refund.py` |
+| Text-only PDF writer (Courier, optional draft watermark) | `core.text_pdf` | `core/pdf.py` |
+| AES-256-GCM sealing with key id (moved to the kernel in B3; `identity.secrets_box` re-exports) | `tenancy.seal`, `tenancy.unseal` | `tenancy/secrets_box.py` |
+| `If-Match` parsing, 409 with the current record, idempotency replay and storage, page limit | `api.common.if_match`, `StaleVersion`, `conflict_response`, `idempotent_replay`, `remember`, `body_hash`, `page_limit` | `api/common.py` |
+| QuickBooks reader (paged, read only), recorded fixtures, Intuit placeholder | `qbo.QboReader`, `RecordedQboReader`, `FakeQboReader`, `reader_from_settings`, `DEFAULT_FIXTURES` | `qbo/client.py` |
+| QuickBooks connection: authorise, callback, refresh, disconnect, "may we process" | `qbo.start_authorization`, `complete_callback`, `access_token`, `disconnect`, `processing_allowed`, `FakeIntuitTokenEndpoint` | `qbo/oauth.py` |
+| Sync runs (scope fingerprint, cursor per page, upserts) | `qbo.request_sync`, `execute_sync`, `make_sync_handler` | `qbo/sync.py` |
+| Receiving file sniffing and parsing within TRD 8.7 limits | `receiving.sniff_receiving`, `read_table` | `receiving/parse.py` |
+| Receiving import: create, declare, map, validate, commit, void, class B confirm, attest, late lines | `receiving.create_import`, `set_declaration`, `save_mapping`, `validate`, `preview`, `commit`, `void`, `confirm_receipt`, `attest`, `approve_late_lines` | `receiving/service.py` |
+| Counting receipt totals per PO line for read screens (feeds `matching.receipt_line_counts`) | `receiving.counting_receipt_totals` | `receiving/counting.py` |
+| Extraction output to invoice rows; vendor and PO identification | `intake.materialise`, `identify_vendor`, `link_po` | `intake/documents.py` |
+| Extraction review: describe with provenance, correct, confirm | `intake.describe_fields`, `correct`, `confirm`, `current_gates` | `intake/review.py` |
+| Local text-PDF extractor; extractor from settings | `extraction.local_pdf.LocalPdfExtractor`, `extraction.extractor_from_settings` | `extraction/local_pdf.py`, `extraction/provider.py` |
+| Match-run triggers (vendor scope) and the `match_request` job | `exceptions.request_runs`, `related_invoices`, `invoices_on_pos`, `invoices_on_po_lines`, `handle_match_request` | `exceptions/triggers.py` |
+| Resolutions, bulk, withdraw, reopen, approvals decision, late-evidence approval | `exceptions.resolve`, `bulk_resolve`, `withdraw`, `reopen`, `decide`, `request_late_receipt_approval`, `po_lines_with_open_exceptions`, `unapproved_waivers` | `exceptions/workflow.py` |
+| Aliases (create, retire, suggestions) and versioned tolerances (set, preview) | `exceptions.create_alias`, `retire_alias`, `rematch_for_alias`, `suggestions`, `set_tolerance`, `preview_tolerance` | `exceptions/rules_admin.py` |
+| Back-test report: draft, blocking checks, approve, export, refund evaluation | `reporting.create_draft`, `blocking_reasons`, `approve`, `export_pdf`, `export_csv`, `refund_evaluation`, `section_of` | `reporting/backtest.py` |
 | Pilot measurement in three separate counts: flagged discrepancy, controller-confirmed overcharge, credit recovered (C1) | `reporting.measure_findings`, `FindingOutcome` | `reporting/outcomes.py` |
 | Whether a QuickBooks Online item-receipt export row counts as class A (receiver, before the bill, not accounts-payable staff) (C1) | `receiving.item_receipt_rejection`, `QboItemReceiptRow`, `QBO_ITEM_RECEIPT_SOURCE` | `receiving/qbo_item_receipts.py` |
 | Sign-in links, session lookup and end, anti-forgery token, tenant switch, `/me` | `identity.request_login_link`, `exchange_login_token`, `load_session`, `resolve_session`, `issue_session` (fixtures), `end_session`, `csrf_for`, `csrf_matches`, `switch_tenant`, `describe_me` | `identity/auth.py` |
@@ -157,8 +173,9 @@ See `execution-plan.md` section 6 for purpose, inputs, outputs and failure behav
 
 | Command (proposed) | Purpose |
 |---|---|
-| `make up` / `make down` | Start or stop the local stack with health checks. **Exists**: starts API (port 8101) and worker directly, migrates `matchdesk_dev`, waits for `/readyz` (database, migrations, file store); needs `backend/.env` (copy `backend/.env.example`; session and token keys, MinIO settings); Mailpit (127.0.0.1:1025, UI 8025) and MinIO (127.0.0.1:9000) must be running; Compose is still proposed |
-| `make test` | Unit and integration suites. **Exists**: drops and re-migrates `matchdesk_test` (migrations 0001 to 0008), runs as `matchdesk_app`; the B2 tests use Mailpit and MinIO (they skip, and say so, when either is not running) |
+| `make up` / `make down` | Start or stop the local stack with health checks. **Exists**: checks PostgreSQL and Redis, migrates `matchdesk_dev`, starts API (port 8101) and worker directly, waits for `/readyz` (database, migrations, file store); needs `backend/.env` (copy `backend/.env.example`; session and token keys, MinIO settings); Mailpit (127.0.0.1:1025, UI 8025) and MinIO (127.0.0.1:9000) must be running; Compose is still proposed |
+| `make seed-demo` | **Exists** (B3): loads one invented tenant into `matchdesk_dev` (controller and clerk with `.invalid` addresses, a sync over the recorded QuickBooks fixtures, aliases, a committed receiving file, 12 generated text PDFs processed by the worker); refuses in production; a second run changes nothing |
+| `make test` | Unit and integration suites. **Exists**: drops and re-migrates `matchdesk_test` (migrations 0001 to 0013), runs as `matchdesk_app`; the B2 tests use Mailpit and MinIO (they skip, and say so, when either is not running) |
 | `make check` | **Exists** (added in B1): ruff, format check, mypy, import contracts, top-level import rule (`backend/scripts/check_imports.py`), float lint over the whole package (`backend/scripts/check_no_float.py`) |
 | `scripts/check_migrations` | Single head, ORM parity, manifest, lock rules. Proposed; head and parity are covered by `backend/tests/integration/test_migrations.py` |
 | `scripts/load_fixtures` | Two synthetic tenants and golden fixtures |

@@ -2,7 +2,7 @@
 
 Read [AGENTS.md](AGENTS.md) first. It is canonical for reading order, sources of truth, conventions, tenant safety, migrations, tests, Git hygiene and completion reporting. This file adds only what is specific to this product. Where the two differ, AGENTS.md wins.
 
-Build milestone B1 (2026-11-11) added the foundation and the match core under `backend/`; B2 (2026-11-11) added sign-in, sessions, invitations, local mail (Mailpit) and S3 file storage (MinIO). See AGENTS.md for the state line and which commands exist. Everything else is still proposed.
+Build milestone B1 (2026-11-11) added the foundation and the match core under `backend/`; B2 (2026-11-11) added sign-in, sessions, invitations, local mail (Mailpit) and S3 file storage (MinIO); B3 (2026-11-12) made every workflow work through the API on the local stack, without external accounts. See AGENTS.md for the state line and which commands exist. Everything else is still proposed.
 
 ## The question this product must answer
 
