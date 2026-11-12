@@ -850,3 +850,68 @@ Walked after `make demo-reset` in the built-in browser, 1440 x 900 then 375 x 81
 - Account-bound: the live QuickBooks reader (TRD.md section 11.1); a hosted extraction provider and its region highlighting; a hosted inbound email provider (only the local signed webhook is built).
 - Not account-bound, not built in B7: the "no receiving records" declaration on S-03; deleting an invoice line on S-07; pre-applying a saved receiving mapping and the seven-day removal of abandoned previews on S-05; the S-08 assignee filter; the S-10 "changed in QuickBooks" banner; the note on an inconsistent document; credit decisions; finding outcomes (`finding_outcomes`); deletion requests and archive export.
 - The weekly summary schedule runs inside the worker every minute (no external scheduler); two workers would each try, and the unique key lets only one send.
+
+## B8 2026-11-13
+
+Source: the owner's brief of 2026-11-13 (role-based redesign and financial-trust fixes; kept outside this repository). Branch `feat/b8-redesign` from `feat/b7-complete`. No migration. Evidence: [docs/screenshots/b8/](docs/screenshots/b8/README.md) (before and after on the same seeded records, state log, measurements).
+
+### B8.1 Baseline walk (before any change)
+
+Walked on the owner's demo (`matchdesk_dev`, PLAY.md already played) in the in-app browser of the Claude desktop app; both connected Chrome extensions were on other computers that cannot reach this machine's 127.0.0.1. The decision step ran on the screenshot stack, not on the demo. Findings rechecked against the checkout:
+
+| ID | Finding at the baseline | Confirmed how |
+|---|---|---|
+| B8-1 | Weekly drill-down dropped the week: S-14 linked `/exceptions?vendor=…`; the queue took its dates from the top-bar month. S-14 said 1 exception, CAD 168.00 for Fictional Fasteners; the queue showed 2, CAD 168.80 (demo) or CAD 330.00 (screenshot stack) | Browser on the demo; `before/measurements.json` |
+| B8-2 | Queue filters and sorts ran in the browser over the rows loaded so far (200 per request, cursor on the id only); the match view rebuilt its own order from one page of 200 without the month | Code: `Exceptions.tsx`, `MatchView.tsx` `queueOrder`, `exception_routes.py` |
+| B8-3 | A fresh account's coverage read "0%" or "Not measured" with no reason; the weekly summary of an empty week showed CAD 0.00 cards | Code; S-14 at the baseline |
+| B8-4 | The header said "QuickBooks connected" with a green dot in recorded-response mode; the S-04 read status lived only in page memory | Browser |
+| B8-5 | At 375 x 812 the first case's link started at 1,528 px | `before/measurements.json` |
+| B8-6 | FF-1003's receipt link sat 855 px down in a separate panel and opened the whole import, not the row | `before/measurements.json`, browser |
+
+### B8.2 Trust fixes and their tests
+
+| Fix | Test |
+|---|---|
+| Queue as one ordered set: every filter (status, type, sub-reason, supplier or none, dates, value range) and the sort applied in the database before the page is cut; keyset cursor on the full sort key with the id as tie-break; count and value of the whole scope (`api/queue.py`) | `test_b8_trust.py::test_queue_sorts_and_filters_the_whole_set_before_the_page` (230 rows: the largest amount, inserted last, leads page 1; ten equal values in id order; no row repeated or skipped across the cursor; value filter across the set; exact decimal total) and `test_type_counters_ignore_the_type_filter` |
+| Match view previous and next from `GET /exceptions/{id}/neighbours` with the same scope; works after the exception left the set | `test_neighbours_follow_the_opened_order_beyond_row_200` (row 205; last item; after resolution); Vitest `b8-trust.test.tsx` (queue to case and back); Playwright `queue-b8.spec.ts` |
+| Weekly drill-down carries `from`, `to`, supplier (or none) and status; the queue shows the active dates as a chip and keeps them on open, Next, Back, Refresh and when one filter is removed | `test_weekly_drilldown_scope_equals_the_report` (inside 7 October counted, 22 October not: 1, CAD 168.00 both sides); Vitest; Playwright |
+| Empty versus zero: measurement state on live coverage and the weekly summary; figures only when measured | `test_empty_is_not_zero`; Vitest; Playwright (empty week) |
+| QuickBooks status from the server: source Demo data, last sync with failure | `test_quickbooks_status_is_the_servers`; header and S-04 |
+| Approvals carry the lines a conversion re-matches | `test_conversion_approval_lists_the_lines_it_rematches` |
+
+No float was added; amounts stay `NUMERIC` in the database and decimal strings in the browser. No write to QuickBooks. No change to matching, `receipt_absent` or the refund calculation.
+
+### B8.3 Redesign
+
+S-08 queue, S-09 match view (ledger line, receipt row link, consequence, one decision per click, PDF fit width and expanded view), S-12 approvals, S-13 reports, S-14 weekly summary, S-05 receiving check, S-06 batch, S-07 total check, S-03 next task, S-17 audit log, S-18 operator account, header and support banner. Details in [docs/UI.md section 6b](docs/UI.md) and [App-flow.md section 7](App-flow.md#7-as-built-in-b4-2026-11-12).
+
+### B8.4 Commands and results (from `matchdesk-ap/`)
+
+| Command | Result |
+|---|---|
+| `make test` (clean `matchdesk_test`, migrations 0001 to 0017) | 283 passed (276 at B7; 7 new in `test_b8_trust.py`) |
+| `make check` (ruff, format, mypy, import contracts, top-level import rule, float lint) | passed |
+| `web/`: `npm run typecheck`, `npm run lint`, `npm run build` | passed |
+| `web/`: `npm test` (Vitest) | 59 passed (54 at B7; 5 new in `b8-trust.test.tsx`) |
+| `web/`: `npx playwright test` (own stack `matchdesk_e2e`, 8102, 5174) | 8 passed (5 at B7; 3 new in `queue-b8.spec.ts`); `matchdesk_dev` unchanged |
+| `web/`: `SHOTS=before` and `SHOTS=after npx playwright test -c playwright.shots.config.ts b8` (`matchdesk_shots`) | 16 before and 20 after screenshots, `measurements.json` each |
+| `make demo-reset`, then API, worker and web left running | see B8.6 |
+
+### B8.5 Measured, before and after (same seeded records and viewport)
+
+| Measure | Before | After |
+|---|---|---|
+| First actionable case at 375 x 812 | link at 1,528 px, not visible | case at 300 px, its Review control at 387 to 427 px, visible and clickable (Playwright: not covered, opens the case) |
+| Weekly summary 5 to 11 Oct against the queue it opens (Fictional Fasteners) | report 1, CAD 168.00; queue 2, CAD 330.00 | report 1, CAD 168.00; queue 1, CAD 168.00 |
+| FF-1003 receipt at 1440 x 900 | 855 px down, opens the whole import | 247 px down beside "Received 60 EA", opens row 4 marked |
+
+### B8.6 Walk after the change
+
+In the in-app browser on the demo (no mutation) and in installed Google Chrome through Playwright on the isolated stacks: keyboard-only (J, K, Enter opened FF-1003 with focus on its heading; the row is focused again on return), 1440, 1024 and 375 wide in light and dark with the invoice PDF on screen, the weekly drill-down, a waiver's consequence before submission, partial data (SS-5120 with no supplier), a clerk on /approvals (forbidden), and the operator's read-only visit (banner, no Resolve control, Leave the account). Live integrations: none verified; everything ran on synthetic data and recorded QuickBooks responses.
+
+### B8.7 Gaps left
+
+- Unchanged from 17.5 (account-bound and not-built items).
+- Extraction review, the receiving column step, intake upload, aliases and tolerances still ask for a wider window at phone width (reading stays possible).
+- The match view opens the PDF on the line's page only when the extractor recorded it; the local extractor records none, so it opens on page 1. The S-07 total check does not point at a region of the page (no regions are recorded).
+- The sidebar's return to the last queue lives in memory for the tab; a reload returns to the unfiltered queue (the address bar keeps the scope).

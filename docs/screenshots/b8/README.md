@@ -14,6 +14,7 @@ Before: commit of the B7 baseline (`feat/b7-complete`), before any B8 change. Af
 | `01-queue-dark-1440` | Clerk | October 2026 | same | Same, dark theme |
 | `02-ff1003-{1440,1024,375}` | Clerk | October 2026 | same | Match view of FF-1003 line 1 (Invoiced above received), opened from the queue, PDF rendered |
 | `02-ff1003-dark-1440` | Clerk | October 2026 | same | Same, dark theme, invoice PDF on screen |
+| `01-queue-dark-{1024,375}`, `02-ff1003-dark-{1024,375}` (after only) | Clerk | October 2026 | same | Dark theme at the other two widths |
 | `03-approval-{1440,1024,375}` | Controller | October 2026 | same | Approvals with the CT-25 conversion waiting (1 CS = 25 EA) |
 | `04-weekly-{1440,1024,375}` | Controller | Week of 5 Oct 2026 | same | Weekly summary, 5 to 11 October |
 | `05-weekly-to-queue-1440` | Controller | Week of 5 Oct 2026 | same | The queue after choosing Fictional Fasteners' open count on the weekly summary |
@@ -32,3 +33,11 @@ Recorded in the in-app browser of the Claude desktop app at `http://127.0.0.1:51
 - First actionable case at 375 × 812: its link starts at **1,528 px** (viewport 812 px), not visible without scrolling.
 - Weekly drill-down: report 1 exception, CAD 168.00 for Fictional Fasteners; the queue showed 2 rows, CAD 330.00 (the month, not the week).
 - FF-1003 receipt link at 1440 × 900: 855 px from the top, below the fold, in the receipts panel.
+
+## Measured (after)
+
+- First actionable case at 375 × 812: the case block starts at **300 px** and its **Review** control spans **387 to 427 px**: visible without scrolling, not covered, and it opens the case (`web/e2e/queue-b8.spec.ts`). The after harness measures the first visible case link, which is that Review control (387 px).
+- Weekly drill-down: report 1 exception, CAD 168.00 for Fictional Fasteners; the queue it opens (`from=2026-10-05&to=2026-10-11`, supplier, open and pending approval) shows 1 row and "1 exception in this scope", 168.00.
+- FF-1003 receipt link at 1440 × 900: 247 px from the top, beside "Received 60 EA" in the ledger line; it opens the receiving import with row 4 marked and a link back to the invoice.
+
+Click path to FF-1003's supporting receipt (after): Exceptions → **Review** on FF-1003 → in the first line, under "Received 60 EA", `receiving-warehouse-log.csv row 4` → the import with row 4 (PO 4471, 4 Sept 2026, R-0904, 60 EA, counts as a receipt) marked → **Back to the invoice**.

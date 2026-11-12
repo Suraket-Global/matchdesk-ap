@@ -1,0 +1,25 @@
+{
+  "phase": "after",
+  "fixture": "seed_demo.py --preload, tenant Demo Distribution (synthetic)",
+  "period": "October 2026",
+  "ff1003_receipt_link": {
+    "text": "receiving-warehouse-log.csv row 4",
+    "top_px": 247
+  },
+  "weekly_drilldown": {
+    "report": {
+      "supplier": "Fictional Fasteners Ltd",
+      "open_count": 1,
+      "open_value": "168.00"
+    },
+    "queue_url": "/exceptions?vendor=53800217-221b-4ac4-913c-65a2e260b5e1&from=2026-10-05&to=2026-10-11&src=weekly",
+    "queue_rows_shown": 1,
+    "queue_total_text": "1 exception in this scope168.00"
+  },
+  "first_mobile_case": {
+    "top_px": 387,
+    "height_px": 40,
+    "visible_without_scrolling": true,
+    "text": "Review"
+  }
+}

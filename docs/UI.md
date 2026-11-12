@@ -1,4 +1,4 @@
-# MatchDesk web UI: design system and screenshots (B6, 2026-11-12)
+# MatchDesk web UI: design system and screenshots (B6, 2026-11-12; B8, 2026-11-13)
 
 The B6 redesign of `web/` replaced the B4 look (top navigation, generic panels) with one design system and one component library. Behaviour, routes and API calls are unchanged; screen states are in [App-flow.md section 7](../App-flow.md#7-as-built-in-b4-2026-11-12). Every screenshot shows the invented demo tenant only (`make seed-demo --preload` on Playwright's own database `matchdesk_e2e`).
 
@@ -86,6 +86,29 @@ Captured by `cd web && SHOTS=after npx playwright test -c playwright.shots.confi
 
 S-14, S-18 and the new panels use the same components and tokens: figure cards (the first card carries the finding tint, as on S-13), stacked-card tables under 640 px, the form grid of S-15 for the pilot record, `grant-row` blocks for support requests, and a violet support banner (`--review-*` tokens) on every screen while an operator reads an account. The S-07 line editor replaces the wide lines table with one block per line (supplier code and description, then quantity, unit, unit price and amount), so the arithmetic fields never leave the pane.
 
+## 6b. B8 role-based redesign (2026-11-13)
+
+The same tokens and components; layout and interaction changed around the decisions each role makes. Before and after captures on the same seeded records and viewports are in [screenshots/b8/](screenshots/b8/README.md) (state log, measurements).
+
+- **Direction kept, one element added.** The arithmetic is still the hero; B8 makes it a ledger line on S-09: billed − received = excess × unit price = exposure, each operator on the border between two figures, the received figure linked to its receiving row. Strong colour stays for the exposure, primary actions and state that changes a decision; an open row in the queue carries no status badge (the queue is what is open), only pending approval, resolved or waived do.
+- **Levels.** Page title; decision summary (ledger, approval's proposed change at 24 px, validation counts at 30 px, the role's next task on S-03); source evidence (PDF, receipts, affected records); secondary metadata in 12 to 13 px muted text. Money and quantities are right-aligned in tables with tabular figures, left-aligned in the ledger where each figure stands alone.
+- **S-08.** Scope chips (dates, supplier, type, status, value range), each removable; filters in a compact bar (behind **Filters** under 640 px); type tabs with counts; the list with invoice and supplier, why it needs you, PO and item, quantity difference, amount and **Review**; the server's count and value for the whole scope in the footer. Coverage and "why counts differ" are collapsed below the list. Under 640 px each exception is a case block (document and amount, reason, supplier and PO, **Review**).
+- **S-09.** Ledger, then document, calculation and action panes (stacked under 1280 and 1024 px); "Exception queue: <scope>" crumb; Previous, position, Next from the server; the decision's consequence before submission; PDF **Fit width** and expanded view.
+- **S-12.** One card per request in four columns: proposed change, affected records, "If you approve", decision.
+- **S-13.** "Next decision" or "Governing version" line on the list; **Governing** tag; flagged, confirmed and recovered as three separate figures.
+- **S-05, S-06, S-07, S-03, S-17, S-18.** Validation counts lead; a read batch leads with "Review N invoices"; total check row (printed, lines plus tax, field, result); next task first; who changed what first; account at a glance first.
+- **Shell.** "QuickBooks: demo data" with a blue dot in recorded-response mode; the sidebar's Exceptions link returns to the last queue opened; the support banner is sticky under the top bar.
+
+| Screen | 1440 x 900 | 1024 x 768 | 375 x 812 |
+|---|---|---|---|
+| S-08 Exception queue | [before](screenshots/b8/before/01-queue-1440.png), [after](screenshots/b8/after/01-queue-1440.png) | [before](screenshots/b8/before/01-queue-1024.png), [after](screenshots/b8/after/01-queue-1024.png) | [before](screenshots/b8/before/01-queue-375.png), [after](screenshots/b8/after/01-queue-375.png) |
+| S-09 FF-1003 | [before](screenshots/b8/before/02-ff1003-1440.png), [after](screenshots/b8/after/02-ff1003-1440.png) | [before](screenshots/b8/before/02-ff1003-1024.png), [after](screenshots/b8/after/02-ff1003-1024.png) | [before](screenshots/b8/before/02-ff1003-375.png), [after](screenshots/b8/after/02-ff1003-375.png) |
+| S-12 CT-25 conversion | [before](screenshots/b8/before/03-approval-1440.png), [after](screenshots/b8/after/03-approval-1440.png) | [before](screenshots/b8/before/03-approval-1024.png), [after](screenshots/b8/after/03-approval-1024.png) | [before](screenshots/b8/before/03-approval-375.png), [after](screenshots/b8/after/03-approval-375.png) |
+| S-14 Weekly summary | [before](screenshots/b8/before/04-weekly-1440.png), [after](screenshots/b8/after/04-weekly-1440.png) | [before](screenshots/b8/before/04-weekly-1024.png), [after](screenshots/b8/after/04-weekly-1024.png) | [before](screenshots/b8/before/04-weekly-375.png), [after](screenshots/b8/after/04-weekly-375.png) |
+| S-14 to S-08 drill-down | [before](screenshots/b8/before/05-weekly-to-queue-1440.png), [after](screenshots/b8/after/05-weekly-to-queue-1440.png) | | |
+| S-18 Operator account | [before](screenshots/b8/before/06-operator-account-1440.png), [after](screenshots/b8/after/06-operator-account-1440.png) | | |
+| Dark theme, with the invoice PDF | [queue before](screenshots/b8/before/01-queue-dark-1440.png), [after](screenshots/b8/after/01-queue-dark-1440.png); [FF-1003 before](screenshots/b8/before/02-ff1003-dark-1440.png), [after](screenshots/b8/after/02-ff1003-dark-1440.png) | [FF-1003 after](screenshots/b8/after/02-ff1003-dark-1024.png) | [queue after](screenshots/b8/after/01-queue-dark-375.png), [FF-1003 after](screenshots/b8/after/02-ff1003-dark-375.png) |
+
 ## 7. Accessibility checks
 
-axe-core (WCAG 2.0 to 2.2 A and AA, serious and critical fail the run) on sign-in, batch, extraction review, exception queue, match view, approvals and report in `web/e2e/full-flow.spec.ts`, and on the operator console, weekly summary and intake with email in `web/e2e/pieces-b7.spec.ts`; the phone-width test fails if any of nine reading screens (with a back-test report) scrolls sideways or shows a list table that is not stacked into cards, and `tablesFit` fails if a table is wider than its box at 1440 px (exception queue, extraction review, report, audit log, weekly summary).
+axe-core (WCAG 2.0 to 2.2 A and AA, serious and critical fail the run) on sign-in, batch, extraction review, exception queue, match view, approvals and report in `web/e2e/full-flow.spec.ts`, and on the operator console, weekly summary and intake with email in `web/e2e/pieces-b7.spec.ts`; the phone-width test fails if any of nine reading screens (with a back-test report) scrolls sideways or shows a list table that is not stacked into cards, and `tablesFit` fails if a table is wider than its box at 1440 px (exception queue, extraction review, report, audit log, weekly summary). B8 adds `web/e2e/queue-b8.spec.ts`: the first case's Review control is inside the 375 x 812 viewport, not covered and opens the case; axe on the queue opened from the weekly summary.
