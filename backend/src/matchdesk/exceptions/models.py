@@ -124,6 +124,7 @@ class ItemAlias(TenantMixin, Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     valid_to: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    retire_reason: Mapped[str | None] = mapped_column(Text)
     version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
 
 

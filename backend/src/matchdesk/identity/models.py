@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from decimal import Decimal
 
 from sqlalchemy import (
     BigInteger,
@@ -22,17 +23,24 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import CITEXT, INET
 from sqlalchemy.orm import Mapped, mapped_column
 
-from matchdesk.tenancy import UUIDT, Base, GlobalMixin, TenantMixin, enum_check, tenant_args
+from matchdesk.tenancy import MONEY, UUIDT, Base, GlobalMixin, TenantMixin, enum_check, tenant_args
 
 ROLES = ("controller", "clerk", "viewer")
 
 
 class Tenant(GlobalMixin, Base):
     __tablename__ = "tenants"
-    __table_args__ = (CheckConstraint(enum_check("status", ("pilot", "active", "ended")), name="status"),)
+    __table_args__ = (
+        CheckConstraint(enum_check("status", ("pilot", "active", "ended")), name="status"),
+        CheckConstraint("waiver_limit >= 0 and waiver_period_cap >= waiver_limit", name="waiver_limits"),
+    )
     name: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default="pilot")
     currency: Mapped[str] = mapped_column(String(3), nullable=False, server_default="CAD")
+    # Waiver above this per exception, or above the cap over a rolling 30 days, needs the controller
+    # (schema.md 3.1; PRD MH-11 defaults [assumption]).
+    waiver_limit: Mapped[Decimal] = mapped_column(MONEY, nullable=False, server_default="100.00")
+    waiver_period_cap: Mapped[Decimal] = mapped_column(MONEY, nullable=False, server_default="500.00")
 
 
 class User(GlobalMixin, Base):

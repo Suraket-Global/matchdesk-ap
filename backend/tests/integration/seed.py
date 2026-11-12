@@ -106,6 +106,7 @@ def add_invoice(
     price: str = "4.20",
     doc_type: str = "invoice",
     references: str | None = None,
+    uom: str = "EA",
 ) -> uuid.UUID:
     data = f'%FAKE-PDF\n{{"synthetic": "{key}-{w.tenant_id}"}}'.encode()
     sha = hashlib.sha256(data).digest()
@@ -150,7 +151,7 @@ def add_invoice(
                 line_no=1,
                 supplier_item_code="W-100",
                 qty=D(qty),
-                uom="EA",
+                uom=uom,
                 unit_price=None if doc_type == "credit_note" else D(price),
                 amount=amount,
             )
@@ -212,3 +213,15 @@ def add_receipt(
                 source_row=row,
             )
         )
+
+
+def add_user(engine: Engine, w: World, role: str) -> tuple[uuid.UUID, dict[str, str]]:
+    """A second synthetic user in the same tenant; returns (user id, request headers)."""
+    with global_session(engine) as s:
+        u = User(email=f"{uuid.uuid4().hex[:8]}@example.invalid", display_name=f"Synthetic {role}")
+        s.add(u)
+        s.flush()
+        uid = u.id
+    with session(w.tenant_id, engine) as s:
+        s.add(Membership(tenant_id=w.tenant_id, user_id=uid, role=role))
+    return uid, auth_headers(issue_session(engine, uid, w.tenant_id))

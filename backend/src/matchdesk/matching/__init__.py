@@ -1,6 +1,12 @@
 """Pure rule engine (TRD section 5): plain data in, decisions out. Imports ``core`` only."""
 
-from matchdesk.matching.engine import QBO_CREDIT_LABEL, evaluate, is_covered, receipt_line_counts
+from matchdesk.matching.engine import (
+    QBO_CREDIT_LABEL,
+    alias_converts,
+    evaluate,
+    is_covered,
+    receipt_line_counts,
+)
 from matchdesk.matching.fingerprint import input_fingerprint
 from matchdesk.matching.normalise import (
     document_order_key,
@@ -65,6 +71,7 @@ __all__ = [
     "Tolerance",
     "ValueClass",
     "VerificationStatus",
+    "alias_converts",
     "document_order_key",
     "evaluate",
     "input_fingerprint",
