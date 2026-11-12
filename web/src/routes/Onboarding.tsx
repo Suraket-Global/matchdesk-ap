@@ -39,9 +39,10 @@ export function OnboardingPage() {
   const [params, setParams] = useSearchParams();
   const period = usePeriod();
   const month = params.get("month") ?? period.month;
-  const { can } = useSession();
+  const { can, role } = useSession();
   const qc = useQueryClient();
   const ob = useOnboarding();
+  const approvals = useQuery({ queryKey: ["approvals", "pending"], queryFn: () => get<Page<{ id: string }>>("/api/v1/approvals?status=pending"), enabled: can("approve") });
   const pos = useQuery({
     queryKey: ["purchase-orders"],
     queryFn: () => get<Page<PurchaseOrder>>("/api/v1/purchase-orders?limit=200"),
@@ -87,6 +88,25 @@ export function OnboardingPage() {
   const done = [ob.connected, ob.connected && poCount > 0, ob.committed.length > 0, ob.processed > 0];
   const current = done.findIndex((d) => !d);
   const cls = (i: number) => (done[i] ? "done" : i === current ? "current" : "");
+  // B8: the one next task this role can do, first on the page.
+  const waiting = approvals.data?.items.length ?? 0;
+  const next: { title: string; body: string; to: string; action: string } | null =
+    role === "controller" && waiting > 0
+      ? { title: `${plural(waiting, "approval")} waiting for you`, body: "Your clerk cannot decide these alone.", to: "/approvals", action: "Open approvals" }
+      : !ob.connected && can("connect_qbo")
+        ? { title: "Connect QuickBooks", body: "MatchDesk only reads purchase orders, bills and credits.", to: "/settings/quickbooks", action: "Connect QuickBooks" }
+        : ob.committed.length === 0 && can("upload")
+          ? {
+              title: "Load the warehouse receiving file",
+              body: "Required before any line can pass: a CSV or Excel export with PO number, PO line or item code, quantity received, date received and who received it. Without it every line is receipt absent.",
+              to: "/receiving",
+              action: "Load the receiving file",
+            }
+          : ob.files === 0 && can("upload")
+            ? { title: `Upload the invoices for ${monthName(month)}`, body: "PDF files; drag them all at once.", to: "/intake", action: "Upload invoices" }
+            : ob.processed > 0
+              ? { title: "Work the exception queue", body: "Each open exception needs a decision before the report is approved.", to: "/exceptions", action: "Open the queue" }
+              : null;
   return (
     <>
       <PageHead
@@ -100,6 +120,18 @@ export function OnboardingPage() {
           ) : undefined
         }
       />
+      {next && (
+        <section className="next-task" aria-labelledby="next-h">
+          <div>
+            <h2 id="next-h">{next.title}</h2>
+            <p>{next.body}</p>
+          </div>
+          <Link className="btn primary" to={next.to}>
+            {next.action}
+          </Link>
+        </section>
+      )}
+      {role === "controller" && <PilotCard />}
       <div className="panel panel-body">
         <Stepper
           current={current}
@@ -114,7 +146,7 @@ export function OnboardingPage() {
           {current < 0 ? "Setup is complete. Work the exception queue, then draft the back-test report." : `${done.filter(Boolean).length} of 4 done. Next: step ${current + 1}.`}
         </p>
       </div>
-      <PilotCard />
+      {role !== "controller" && <PilotCard />}
       <ol className="steps">
         <li className={cls(0)}>
           <div>

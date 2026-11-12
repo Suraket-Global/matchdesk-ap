@@ -5,6 +5,7 @@ import { ApiError, errorText, get, send } from "../api/client";
 import type { FieldSource, InvoiceDetail, InvoiceSummary, Page, Review, Vendor } from "../api/types";
 import { Banner, Dialog, ErrorState, Loading, NarrowNote, PageHead, StatusChip, toast, usePageTitle } from "../components/ui";
 import { failedChecks, type LineValues } from "../lib/checks";
+import { formatCents, sumCents, toCents } from "../lib/decimal";
 import { qty } from "../lib/decimal";
 import { time } from "../lib/format";
 
@@ -64,6 +65,37 @@ function Provenance({ src, changed, value, onHistory }: { src?: FieldSource; cha
   // field said "read").
   if (src?.source === "read" && (value ?? "") !== "") return <span className="tag">read</span>;
   return <span className="tag muted">not read</span>;
+}
+
+/** B8: the printed total, the calculated total, the value in the field and the result, side by side,
+ * so the clerk sees what a correction changes before confirming (FF-1006). */
+function TotalCheck({ printed, edited, tax, lines }: { printed: string; edited: string; tax: string; lines: string[] }) {
+  const calc = sumCents(lines) + (toCents(tax || "0") ?? 0n);
+  const field = toCents(edited || "");
+  const read = toCents(printed || "");
+  const agrees = field !== null && field === calc;
+  const changed = field !== null && read !== null && field !== read;
+  return (
+    <section className="total-check" aria-label="Total check">
+      <div>
+        <span className="k">Printed on the document</span>
+        <span className="v num">{read === null ? "Not read" : formatCents(read)}</span>
+      </div>
+      <div>
+        <span className="k">Lines + tax</span>
+        <span className="v num">{formatCents(calc)}</span>
+      </div>
+      <div className={changed ? "edited" : ""}>
+        <span className="k">Total field{changed ? " (edited)" : ""}</span>
+        <span className="v num">{field === null ? "Empty" : formatCents(field)}</span>
+      </div>
+      <div className={agrees ? "ok" : "bad"} role="status">
+        <span className="k">Result</span>
+        <span className="v">{agrees ? "Adds up" : field === null ? "No total" : `Differs by ${formatCents(field > calc ? field - calc : calc - field)}`}</span>
+        {changed && <span className="n">You changed the total from {formatCents(read!)} to {formatCents(field!)}.</span>}
+      </div>
+    </section>
+  );
 }
 
 /** S-07: the document beside the fields; failed checks in words at the top; drafts on the server. */
@@ -293,6 +325,7 @@ export function ReviewPage() {
               </p>
             )}
           </div>
+          <TotalCheck printed={asRead.header.total ?? ""} edited={header.total ?? ""} tax={header.tax_total ?? ""} lines={lines.map((l) => l.amount)} />
           <div className="panel">
             <div className="panel-head">
               <h2>Header</h2>

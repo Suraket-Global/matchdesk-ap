@@ -3336,3 +3336,163 @@ details.fold > summary {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* B8 S-07: printed total, calculated total, the field, and the result in one row. */
+.total-check {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+.total-check > div {
+  display: grid;
+  gap: 2px;
+  align-content: start;
+  padding: var(--s-3) var(--s-4);
+  border-right: 1px solid var(--border);
+}
+.total-check > div:last-child {
+  border-right: 0;
+}
+.total-check .k {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+.total-check .v {
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.total-check .n {
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+}
+.total-check .edited {
+  background: var(--info-bg);
+}
+.total-check .ok .v {
+  color: var(--success-fg);
+}
+.total-check .bad .v {
+  color: var(--danger-fg);
+}
+@media (max-width: 639px) {
+  .total-check {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* B8 S-06: after reading, the batch leads with what needs a person. */
+.batch-lead {
+  margin: var(--s-4) 0;
+  padding: var(--s-4);
+  border: 1px solid var(--review-border);
+  border-left: 4px solid var(--review-fg);
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+.batch-lead h2 {
+  margin: 0 0 var(--s-1);
+  font-size: var(--fs-xl);
+}
+.batch-group {
+  margin: var(--s-4) 0;
+}
+.batch-group h2 {
+  font-size: var(--fs-lg);
+  margin-bottom: var(--s-2);
+}
+details.fold {
+  margin-top: var(--s-3);
+}
+
+/* B8 S-03: the role's next task first. */
+.next-task {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3) var(--s-6);
+  margin-bottom: var(--s-4);
+  padding: var(--s-4) var(--s-5);
+  border: 1px solid var(--accent);
+  border-radius: var(--r-md);
+  background: var(--accent-soft);
+}
+.next-task h2 {
+  margin: 0 0 var(--s-1);
+  font-size: var(--fs-lg);
+}
+.next-task p {
+  margin: 0;
+  max-width: 70ch;
+}
+
+/* B8 S-18: the account at a glance before any editing control. */
+.op-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 0 0 var(--s-4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+.op-summary > div {
+  display: grid;
+  gap: var(--s-1);
+  align-content: start;
+  justify-items: start;
+  padding: var(--s-3) var(--s-4);
+  border-right: 1px solid var(--border);
+}
+.op-summary > div:last-child {
+  border-right: 0;
+}
+.op-summary dt {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+.op-summary dd {
+  margin: 0;
+  font-size: var(--fs-lg);
+  font-weight: 600;
+}
+.op-summary dd.ok {
+  color: var(--success-fg);
+}
+.op-summary dd.warn {
+  color: var(--warning-fg);
+}
+.op-summary dd.review {
+  color: var(--review-fg);
+}
+.op-summary .n {
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+@media (max-width: 1023px) {
+  .op-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .op-summary > div {
+    border-bottom: 1px solid var(--border);
+  }
+}
+@media (max-width: 639px) {
+  .op-summary {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* B8: the read-only support visit stays in view on every screen, with its exit. */
+.support-banner {
+  position: sticky;
+  top: var(--topbar-h);
+  z-index: 19;
+}
+.support-banner .btn {
+  border-color: var(--review-fg);
+  color: var(--review-fg);
+  font-weight: 600;
+}

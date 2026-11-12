@@ -231,9 +231,14 @@ export function IntakeListPage() {
   );
 }
 
-function fileAction(f: BatchFile) {
+function fileAction(f: BatchFile, primary = false) {
   const inv = f.invoices[0];
-  if (f.displayed_state === "needs review" && inv) return <Link to={`/invoices/${inv.id}/review`}>Review extraction</Link>;
+  if (f.displayed_state === "needs review" && inv)
+    return (
+      <Link className={primary ? "btn small primary" : undefined} to={`/invoices/${inv.id}/review`}>
+        Review extraction
+      </Link>
+    );
   if (f.displayed_state === "ready" && inv) return <Link to={`/invoices/${inv.id}`}>Open match view</Link>;
   if (f.displayed_state === "duplicate file") return <span className="muted">Same file as one already uploaded</span>;
   return null;
@@ -270,6 +275,7 @@ export function BatchPage() {
   const done = t.queued + t.processing === 0;
   const names = new Map<string, string>();
   (b.files ?? []).forEach((f) => names.set(f.id, f.original_name ?? "file"));
+  const byState = (st: string) => (b.files ?? []).filter((f) => f.displayed_state === st);
   return (
     <>
       <PageHead
@@ -294,17 +300,67 @@ export function BatchPage() {
       <p className="muted">{sentence(t)}</p>
       <ThrottledStatus text={sentence(t)} final={done} />
       <TotalsBar totals={t} />
-      {t["needs review"] > 0 && (
-        <Banner tone="draft">
-          <p>
-            {plural(t["needs review"], "document")} could not be checked automatically. Open each one and confirm or correct what was read.
-          </p>
-        </Banner>
+      {!done || !(b.files ?? []).length ? (
+        <>
+          {can("upload") && <DropZone onFiles={(f) => start(f, batchId)} disabled={busy} />}
+          <PendingList pending={pending} />
+          <FileTable files={b.files ?? []} names={names} caption="Files in this batch" />
+        </>
+      ) : (
+        <>
+          {/* B8: once the batch is read, the work comes first; ready files and provenance stay a click away. */}
+          {byState("needs review").length > 0 ? (
+            <section className="batch-lead" aria-labelledby="todo-h">
+              <h2 id="todo-h">
+                Review {plural(byState("needs review").length, "invoice")}
+              </h2>
+              <p className="muted">These could not be checked automatically. Open each one and confirm or correct what was read.</p>
+              <FileTable files={byState("needs review")} names={names} caption="Invoices to review" primary />
+            </section>
+          ) : (
+            <Banner tone="ok">Every file in this batch is read. Nothing needs review.</Banner>
+          )}
+          {byState("failed").length > 0 && (
+            <section className="batch-group" aria-labelledby="failed-h">
+              <h2 id="failed-h">{plural(byState("failed").length, "file")} could not be read</h2>
+              <FileTable files={byState("failed")} names={names} caption="Files that failed" />
+            </section>
+          )}
+          {byState("duplicate file").length > 0 && (
+            <section className="batch-group" aria-labelledby="dup-h">
+              <h2 id="dup-h">{plural(byState("duplicate file").length, "duplicate file")}</h2>
+              <p className="muted small">Byte-identical to a file already uploaded; not read again and not counted.</p>
+              <FileTable files={byState("duplicate file")} names={names} caption="Duplicate files" />
+            </section>
+          )}
+          <details className="panel fold">
+            <summary>
+              {plural(byState("ready").length, "file")} ready and matched
+            </summary>
+            <FileTable files={byState("ready")} names={names} caption="Ready files" />
+          </details>
+          {can("upload") && (
+            <details className="panel fold">
+              <summary>Add files to this batch</summary>
+              <div className="panel-body">
+                <DropZone onFiles={(f) => start(f, batchId)} disabled={busy} />
+                <PendingList pending={pending} />
+              </div>
+            </details>
+          )}
+        </>
       )}
-      {can("upload") && <DropZone onFiles={(f) => start(f, batchId)} disabled={busy} />}
-      <PendingList pending={pending} />
+    </>
+  );
+}
+
+/** The files of a batch with their state, supplier, document and next step. */
+function FileTable({ files, names, caption, primary = false }: { files: BatchFile[]; names: Map<string, string>; caption: string; primary?: boolean }) {
+  if (!files.length) return <p className="muted panel-body">None.</p>;
+  return (
       <div className="table-wrap">
         <table className="stack-sm">
+          <caption className="sr-only">{caption}</caption>
           <thead>
             <tr>
               <th scope="col">File</th>
@@ -315,7 +371,7 @@ export function BatchPage() {
             </tr>
           </thead>
           <tbody>
-            {[...(b.files ?? [])]
+            {[...files]
               .sort((x, y) => (x.original_name ?? "").localeCompare(y.original_name ?? "", undefined, { numeric: true }) || x.id.localeCompare(y.id))
               .map((f) => (
               <tr key={f.id}>
@@ -352,13 +408,12 @@ export function BatchPage() {
                   ))}
                   {f.invoices.length > 1 && <div className="muted small">{f.invoices.length} documents in this file</div>}
                 </td>
-                <td data-label="Next">{fileAction(f)}</td>
+                <td data-label="Next">{fileAction(f, primary)}</td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
-    </>
   );
 }
 

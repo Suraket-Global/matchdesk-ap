@@ -135,50 +135,55 @@ function AuditTable({ rows }: { rows: AuditEvent[] }) {
         <caption className="sr-only">Audit events</caption>
         <thead>
           <tr>
-            <th scope="col">Time</th>
-            <th scope="col">Who</th>
-            <th scope="col">What happened</th>
-            <th scope="col">Changes</th>
+            <th scope="col">Who changed what</th>
+            <th scope="col">Record</th>
+            <th scope="col">Before and after</th>
           </tr>
         </thead>
         <tbody>
           {rows.map((e) => {
             const cs = changes(e.before, e.after);
             const isOpen = open.has(e.id);
-            const shown = isOpen ? cs : cs.slice(0, 2);
+            const shown = cs;
             return (
               <Fragment key={e.id}>
                 <tr>
-                  <td data-label="Time" className="nowrap">{when(e.occurred_at)}</td>
-                  <td data-label="Who">{e.actor_name ?? (e.actor_type === "job" || e.actor_type === "system" ? "MatchDesk" : "Operator")}</td>
-                  <td data-label="What happened">
-                    <span className="cell-main">{actionWord(e.action)}</span>
-                    <span className="cell-sub">
-                      {entityWord(e.entity_type)}
-                      {e.entity_id && (
-                        <>
-                          {" · "}
-                          <Link to={`/audit?record=${e.entity_id}`}>history of this record</Link>
-                        </>
-                      )}
+                  <td data-label="Who changed what">
+                    {/* B8: one readable sentence first; the detailed values follow on request. */}
+                    <span className="cell-main">
+                      {e.actor_name ?? (e.actor_type === "job" || e.actor_type === "system" ? "MatchDesk" : "Operator")}: {actionWord(e.action).toLowerCase()}
                     </span>
+                    <span className="cell-sub">{when(e.occurred_at)}</span>
                   </td>
-                  <td data-label="Changes" className="audit-changes">
+                  <td data-label="Record">
+                    <span className="cell-main">{entityWord(e.entity_type)}</span>
+                    {e.entity_id && (
+                      <span className="cell-sub">
+                        <Link to={`/audit?record=${e.entity_id}`}>History of this record</Link>
+                      </span>
+                    )}
+                  </td>
+                  <td data-label="Before and after" className="audit-changes">
                     {cs.length === 0 ? (
                       <span className="muted">No values recorded</span>
                     ) : (
-                      <ul>
-                        {shown.map((c) => (
-                          <li key={c.key}>
-                            <ChangeText c={c} />
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                    {cs.length > 2 && (
-                      <button type="button" className="btn small ghost" aria-expanded={isOpen} onClick={() => toggle(e.id)}>
-                        {isOpen ? "Show fewer" : `Show all ${cs.length} changes`}
-                      </button>
+                      <>
+                        <span className="small">
+                          {cs.length === 1 ? "1 value" : `${cs.length} values`}: {cs.map((c) => c.label.toLowerCase()).join(", ")}
+                        </span>
+                        {isOpen && (
+                          <ul>
+                            {shown.map((c) => (
+                              <li key={c.key}>
+                                <ChangeText c={c} />
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                        <button type="button" className="btn small ghost" aria-expanded={isOpen} onClick={() => toggle(e.id)}>
+                          {isOpen ? "Hide the values" : "Show before and after"}
+                        </button>
+                      </>
                     )}
                   </td>
                 </tr>

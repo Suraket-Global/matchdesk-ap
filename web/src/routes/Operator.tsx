@@ -184,10 +184,46 @@ function TenantDetail() {
         crumbs={<Link to="/operator/tenants">Operator console</Link>}
         lede={`Account created ${when(t.created_at)}. Intake address: ${t.intake_address ?? "not set"}.`}
       />
+      {/* B8: payment, pilot and support access read first; editing comes after. */}
+      <dl className="op-summary" aria-label="Account at a glance">
+        <div>
+          <dt>Payment</dt>
+          <dd className={p?.payment_status === "paid" ? "ok" : "warn"}>{p ? PAYMENT_WORDS[p.payment_status] ?? p.payment_status : "No pilot record"}</dd>
+          {p && <span className="n">{cad(p.price)} pilot</span>}
+        </div>
+        <div>
+          <dt>Pilot</dt>
+          <dd>{p ? `${day(p.period_start)} to ${day(p.period_end)}` : "Not set"}</dd>
+          {p && (
+            <span className="n">
+              {p.outcome ? OUTCOME_WORDS[p.outcome] : "Outcome not decided"}
+              {p.governing_report_id ? `; governing report chosen, ${p.refund_due ? "refund applies" : "no refund"}` : "; no governing report yet"}
+            </span>
+          )}
+        </div>
+        <div>
+          <dt>Support access</dt>
+          <dd className={active ? "review" : ""}>{active ? `Active until ${when(active.ends_at)}` : (t.grants ?? []).some((g) => g.status === "requested") ? "Requested, waiting" : "None"}</dd>
+          {active ? (
+            <button className="btn small primary" disabled={enter.isPending} onClick={() => enter.mutate(active.id)}>
+              <Eye size={15} aria-hidden="true" />
+              Open the account, read only
+            </button>
+          ) : (
+            <a className="n" href="#access-h">
+              Ask for access
+            </a>
+          )}
+        </div>
+        <div>
+          <dt>Billable units</dt>
+          <dd className="num">{t.usage_units}</dd>
+        </div>
+      </dl>
       <div className="operator-grid">
         <section className="panel" aria-labelledby="pilot-h">
           <div className="panel-head">
-            <h2 id="pilot-h">Pilot record</h2>
+            <h2 id="pilot-h">Edit the pilot record</h2>
             {p && <span className="muted small">Version {p.version}</span>}
           </div>
           <form
@@ -324,10 +360,6 @@ function TenantDetail() {
                     <StatusChip status="active" /> Granted by {active.granted_by_name ?? "a controller"} until {when(active.ends_at)}.
                     <div className="small muted">Read only. Every visit is in the account&apos;s audit log.</div>
                   </div>
-                  <button className="btn small primary" disabled={enter.isPending} onClick={() => enter.mutate(active.id)}>
-                    <Eye size={15} aria-hidden="true" />
-                    Open the account, read only
-                  </button>
                 </div>
               ) : (
                 <p style={{ margin: 0 }} className="muted">
