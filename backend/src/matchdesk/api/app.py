@@ -37,6 +37,7 @@ from matchdesk.api.invoice_routes import register_invoice_routes
 from matchdesk.api.limits import MAX_FILE_BYTES, MAX_UPLOAD_FILE_BYTES, BodyLimitMiddleware
 from matchdesk.api.qbo_routes import register_qbo_routes
 from matchdesk.api.receiving_routes import register_receiving_routes
+from matchdesk.api.report_routes import register_report_routes
 from matchdesk.core import (
     ConflictError,
     ForbiddenError,
@@ -147,6 +148,7 @@ def create_app(mailer: Mailer | None = None, qbo_token_endpoint: TokenEndpoint |
     register_receiving_routes(app, engine())
     register_invoice_routes(app, engine())
     register_exception_routes(app, engine())
+    register_report_routes(app, engine())
     # Outermost of the application's own middleware: refuses oversize bodies before anything reads them.
     app.add_middleware(BodyLimitMiddleware)
 

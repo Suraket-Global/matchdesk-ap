@@ -13,6 +13,7 @@ def load_all_models() -> type[Base]:
     import matchdesk.intake.models
     import matchdesk.qbo.models
     import matchdesk.receiving.models
+    import matchdesk.reporting.models
     import matchdesk.tenancy.models  # noqa: F401
 
     return Base
