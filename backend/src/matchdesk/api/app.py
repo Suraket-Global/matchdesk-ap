@@ -34,6 +34,7 @@ from matchdesk.api.common import (
 )
 from matchdesk.api.limits import MAX_FILE_BYTES, MAX_UPLOAD_FILE_BYTES, BodyLimitMiddleware
 from matchdesk.api.qbo_routes import register_qbo_routes
+from matchdesk.api.receiving_routes import register_receiving_routes
 from matchdesk.core import (
     ConflictError,
     ForbiddenError,
@@ -141,6 +142,7 @@ def create_app(mailer: Mailer | None = None, qbo_token_endpoint: TokenEndpoint |
     except QboNotConfiguredError:  # Intuit selected but unconfigured: connect answers 503
         qbo_endpoint = _Unconfigured()
     register_qbo_routes(app, settings, engine(), qbo_endpoint)
+    register_receiving_routes(app, engine())
     # Outermost of the application's own middleware: refuses oversize bodies before anything reads them.
     app.add_middleware(BodyLimitMiddleware)
 

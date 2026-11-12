@@ -18,7 +18,13 @@ PKG = ROOT / "src" / "matchdesk"
 
 MODEL_IMPORTS: dict[str, set[str]] = {
     "exceptions": {"qbo", "receiving", "intake"},  # assemble match inputs (TRD 5, B1)
-    "intake": {"extraction", "tenancy"},  # extraction runs; idempotency keys
+    "intake": {
+        "extraction",
+        "tenancy",
+        "qbo",
+    },  # extraction runs; idempotency keys; vendor and PO lookup (B3)
+    "receiving": {"qbo", "intake"},  # PO lines to map rows to; the shared documents table (B3)
+    "reporting": {"exceptions", "intake", "qbo", "receiving"},  # frozen report snapshot (B3)
     "api": {"exceptions", "intake", "tenancy", "qbo", "receiving", "reporting"},  # read endpoints (B3)
 }
 EXEMPT = {"schema_registry"}

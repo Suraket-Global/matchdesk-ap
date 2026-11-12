@@ -13,6 +13,7 @@ from matchdesk.exceptions.triggers import (
     related_invoices,
     request_runs,
 )
+from matchdesk.exceptions.workflow import po_lines_with_open_exceptions, request_late_receipt_approval
 
 __all__ = [
     "MATCH_REQUEST_TASK",
@@ -24,8 +25,10 @@ __all__ = [
     "handle_match_request",
     "invoices_on_po_lines",
     "invoices_on_pos",
+    "po_lines_with_open_exceptions",
     "related_invoices",
     "rematch_alias",
+    "request_late_receipt_approval",
     "request_run",
     "request_runs",
     "stale_runs",

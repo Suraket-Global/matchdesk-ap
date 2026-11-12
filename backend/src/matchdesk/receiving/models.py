@@ -11,12 +11,14 @@ from sqlalchemy import (
     CheckConstraint,
     Date,
     DateTime,
+    ForeignKey,
     Index,
     Integer,
     LargeBinary,
     Text,
     UniqueConstraint,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from matchdesk.tenancy import QTY, UUIDT, Base, TenantMixin, enum_check, tenant_args, tfk
@@ -27,10 +29,36 @@ IMPORT_STATES = ("draft", "queued", "running", "succeeded", "failed", "voided")
 SOURCE_TYPES = ("spreadsheet", "delivery_document", "qbo_item_receipt_export")
 
 
+class ReceivingMapping(TenantMixin, Base):
+    """A saved column mapping: target field -> source column header (schema.md 3.3)."""
+
+    __tablename__ = "receiving_mappings"
+    __table_args__ = tenant_args(UniqueConstraint("tenant_id", "name"))
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    columns: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(UUIDT, ForeignKey("users.id"))
+
+
+class ReceivingAttestation(TenantMixin, Base):
+    """The controller's attestation of the account's receiving evidence and, for QuickBooks item
+    receipts, the accounts-payable users whose receipts are not independent (C1; T-3.2.1). The
+    latest row is in force; rows are never updated."""
+
+    __tablename__ = "receiving_attestations"
+    __table_args__ = tenant_args(
+        CheckConstraint(enum_check("evidence_class", ("A", "B", "C")), name="evidence_class")
+    )
+    evidence_class: Mapped[str] = mapped_column(Text, nullable=False)
+    source_description: Mapped[str] = mapped_column(Text, nullable=False)
+    ap_staff: Mapped[list] = mapped_column(JSONB, nullable=False, server_default="[]")
+    attested_by: Mapped[uuid.UUID] = mapped_column(UUIDT, ForeignKey("users.id"), nullable=False)
+
+
 class ReceivingImportRow(TenantMixin, Base):
     __tablename__ = "receiving_imports"
     __table_args__ = tenant_args(
         tfk("document_id", "documents"),
+        tfk("mapping_id", "receiving_mappings"),
         CheckConstraint(enum_check("evidence_class", ("A", "B", "C")), name="evidence_class"),
         CheckConstraint(enum_check("source_type", SOURCE_TYPES), name="source_type"),
         CheckConstraint(
@@ -61,6 +89,19 @@ class ReceivingImportRow(TenantMixin, Base):
     state_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     committed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     voided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    kept_by_name: Mapped[str | None] = mapped_column(Text)
+    mapping_id: Mapped[uuid.UUID | None] = mapped_column(UUIDT)
+    column_map: Mapped[dict | None] = mapped_column(JSONB)
+    rows_total: Mapped[int | None] = mapped_column(Integer)
+    rows_valid: Mapped[int | None] = mapped_column(Integer)
+    rows_rejected: Mapped[int | None] = mapped_column(Integer)
+    # Row number and reason, plus only the offending value (schema.md 3.3).
+    rejected_rows: Mapped[list | None] = mapped_column(JSONB)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(UUIDT, ForeignKey("users.id"))
+    committed_by: Mapped[uuid.UUID | None] = mapped_column(UUIDT, ForeignKey("users.id"))
+    voided_by: Mapped[uuid.UUID | None] = mapped_column(UUIDT, ForeignKey("users.id"))
+    void_reason: Mapped[str | None] = mapped_column(Text)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class ReceiptRow(TenantMixin, Base):
@@ -73,6 +114,10 @@ class ReceiptRow(TenantMixin, Base):
     received_date: Mapped[date] = mapped_column(Date, nullable=False)
     receiver_marks_present: Mapped[bool | None] = mapped_column(Boolean)
     receiver_name: Mapped[str | None] = mapped_column(Text)
+    receiver_ref: Mapped[str | None] = mapped_column(Text)
+    source_page: Mapped[int | None] = mapped_column(Integer)
+    confirmed_by: Mapped[uuid.UUID | None] = mapped_column(UUIDT, ForeignKey("users.id"))
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
 
 

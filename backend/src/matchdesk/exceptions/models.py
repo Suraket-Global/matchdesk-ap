@@ -347,3 +347,73 @@ class ExceptionEvent(TenantMixin, Base):
     to_status: Mapped[str | None] = mapped_column(Text)
     detail: Mapped[dict | None] = mapped_column(JSONB)
     match_run_id: Mapped[uuid.UUID | None] = mapped_column(UUIDT)
+
+
+class Approval(TenantMixin, Base):
+    """A decision only the controller makes: a waiver above the limits, an alias conversion, or late
+    receiving evidence for one import (schema.md 3.6; MH-10, MH-11)."""
+
+    __tablename__ = "approvals"
+    __table_args__ = tenant_args(
+        tfk("exception_id", "exceptions"),
+        tfk("alias_id", "item_aliases"),
+        tfk("receiving_import_id", "receiving_imports"),
+        CheckConstraint(
+            enum_check("subject_type", ("waiver", "alias_conversion", "late_receipt")), name="subject_type"
+        ),
+        CheckConstraint(
+            enum_check("status", ("pending", "approved", "returned", "withdrawn")), name="status"
+        ),
+        CheckConstraint(
+            "reason is null or " + enum_check("reason", ("above_item_limit", "above_period_cap")),
+            name="reason",
+        ),
+        CheckConstraint(
+            "(exception_id is not null)::int + (alias_id is not null)::int "
+            "+ (receiving_import_id is not null)::int = 1",
+            name="one_subject",
+        ),
+        CheckConstraint(
+            "(subject_type = 'waiver') = (exception_id is not null) "
+            "and (subject_type = 'alias_conversion') = (alias_id is not null) "
+            "and (subject_type = 'late_receipt') = (receiving_import_id is not null)",
+            name="subject_matches_type",
+        ),
+        Index(
+            "uq_approvals_pending_exception",
+            "tenant_id",
+            "exception_id",
+            unique=True,
+            postgresql_where="status = 'pending' and exception_id is not null",
+        ),
+        Index(
+            "uq_approvals_pending_alias",
+            "tenant_id",
+            "alias_id",
+            unique=True,
+            postgresql_where="status = 'pending' and alias_id is not null",
+        ),
+        Index(
+            "uq_approvals_pending_import",
+            "tenant_id",
+            "receiving_import_id",
+            unique=True,
+            postgresql_where="status = 'pending' and receiving_import_id is not null",
+        ),
+    )
+    subject_type: Mapped[str] = mapped_column(Text, nullable=False)
+    exception_id: Mapped[uuid.UUID | None] = mapped_column(UUIDT)
+    alias_id: Mapped[uuid.UUID | None] = mapped_column(UUIDT)
+    receiving_import_id: Mapped[uuid.UUID | None] = mapped_column(UUIDT)
+    reason: Mapped[str | None] = mapped_column(Text)
+    requested_by: Mapped[uuid.UUID] = mapped_column(UUIDT, ForeignKey("users.id"), nullable=False)
+    amount: Mapped[Decimal | None] = mapped_column(MONEY)
+    # The resolution the requester asked for (waiver subjects): applied on approval.
+    requested_resolution: Mapped[str | None] = mapped_column(Text)
+    requested_note: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="pending")
+    decided_by: Mapped[uuid.UUID | None] = mapped_column(UUIDT, ForeignKey("users.id"))
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    decision_note: Mapped[str | None] = mapped_column(Text)
+    self_approved: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
