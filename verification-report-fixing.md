@@ -763,3 +763,40 @@ Source: the independent review of B3 and B4 (two read-only reviewers, kept outsi
 - The refund threshold is the server's 500.00 until `pilot_engagements` exists.
 - A few minor fixes (note reset, PdfViewer, polling, `next`) are covered by code reading and the browser walk, not by a dedicated test.
 - Commits: some minor fixes sit in the "web major" and "App-flow" commits because they touched the same files.
+
+## 16. B6 polish 2026-11-12
+
+Source: an outside QA run on `feat/b4-fixes` (0eb643e) and the owner's judgement that the UI looked amateur. Branch `feat/b6-polish` from `feat/b4-fixes`. No migration was added. Design summary and before/after screenshots: [docs/UI.md](docs/UI.md).
+
+### 16.1 Outside QA findings
+
+| ID | Finding (short) | Outcome | Regression test |
+|---|---|---|---|
+| QA-1 | An invoice whose footer says "Please request a credit note for returned items" was read as `credit_note` with no unread field (the classifier searched the whole text) | Fixed: `extraction.local_pdf.document_type` decides from a heading among the first six non-empty lines ("INVOICE", "TAX INVOICE", "CREDIT NOTE", "CREDIT MEMO") and labelled fields ("Invoice No/Date/Total", "Credit Note No/Date", "Credit Total", "Re Invoice"); free text is never evidence. Conflicting or absent evidence leaves `doc_type` unread, so `required_fields_read` fails and the document goes to review | `backend/tests/unit/test_b3_units.py`: `test_invoice_with_a_credit_note_footer_stays_an_invoice`, `test_true_credit_note_is_read_as_a_credit_note`, `test_the_pair_of_one_invoice_and_its_credit_note_is_told_apart`, `test_conflicting_or_absent_type_evidence_leaves_the_type_unread` |
+| QA-2 | Browser QA polluted the dev/demo database: `seed_demo.py --tag` deleted every `auth_rate_events` row and Playwright tenants stayed in `matchdesk_dev` | Fixed: Playwright's global setup runs `backend/scripts/e2e_stack.sh up` (creates `matchdesk_e2e` from scratch, migrates, starts an API on 8102 and a worker with a local file folder), seeds there, and the web dev server for the run listens on 5174 proxied to that API; teardown stops both and drops the database. The seed script deletes nothing (the `auth_rate_events` delete is gone; section 15's "tagged test seeds empty it too" no longer holds) | `web/e2e/global-teardown.ts` fails the run if any table's row count in `matchdesk_dev` differs from before (every run prints "matchdesk_dev unchanged … auth_rate_events included"); `backend/tests/integration/test_b6_seed_isolation.py` (a tagged seed keeps another address's rate events and adds only its own tenant; the seed script contains no delete) |
+| QA-3 | `IntuitQboReader.page()` raises `QboNotConfiguredError` | Kept on purpose (not faked). AGENTS.md, docs/PLAY.md and the S-04 screen now say the live connection needs the owner's Intuit developer account and the sandbox check T-1.1.1, and what step remains; the precise TODO list is TRD.md section 11.1 | `test_intuit_mode_is_selected_by_settings_and_refuses_without_an_account` (existing) |
+
+### 16.2 Redesign
+
+One token file (`web/src/styles/tokens.css`: petrol brand scale, graphite neutrals, success, warning, danger, info and review roles, 4/8 px spacing, Inter type scale with tabular figures, radii, shadows, focus ring, light and dark), one component library (`web/src/components/`, 22 Vitest tests in `library.test.tsx`), a grouped collapsible sidebar with counts, a top bar with company, period, QuickBooks status and user menu, and reworked sign-in, onboarding, exception queue, match view, report and intake screens. All other screens take the new look through the same classes. Icons: `lucide-react` 0.468.0 pinned. Behaviour, routes and API calls are unchanged; the B4 Vitest and Playwright selectors still hold except where noted in App-flow.md section 7.
+
+Found and fixed while redesigning: a screen-reader-only label inside a scrolling table was positioned against the page and made `/settings/users` scroll sideways at 375 px (fixed by making each table box the containing block; the phone-width test now names the element that sticks out); the sidebar count was first part of the link's name ("Exceptions 10 open"), now a description; group headings in the sidebar failed contrast (4.2:1, now 6.7:1).
+
+### 16.3 Commands and results (from `matchdesk-ap/`)
+
+| Command | Result |
+|---|---|
+| `make test` (clean `matchdesk_test`, migrations 0001 to 0016) | 255 passed (249 before) |
+| `make check` | passed |
+| `web/`: `npm run typecheck`, `npm run lint` (now also `shots/`), `npm run build` | passed |
+| `web/`: `npm test` (Vitest) | 45 passed (23 before) |
+| `web/`: `npx playwright test` (own stack) | 4 passed; `matchdesk_dev` unchanged |
+| `web/`: `SHOTS=after npx playwright test -c playwright.shots.config.ts` | 40 screenshots in `docs/screenshots/after/`; 38 before shots taken with the same harness on 2e99ddb |
+| `docs/PLAY.md` walked in the built-in browser (1440 x 900) as clerk and controller after `make demo-reset` | See 16.4 |
+
+### 16.4 Gaps left
+
+- The live QuickBooks reader and token endpoint (TRD.md section 11.1).
+- Per-file upload progress is shown as waiting, uploading, received or refused; byte-level progress is not measured (the client sends each file in one request).
+- The period selector is held in memory per tab (the app keeps nothing in browser storage); a reload starts again at last month.
+- Dark theme is checked on S-08 and S-09 screenshots and by token contrast, not by an axe run in dark mode.

@@ -98,3 +98,15 @@ test("screens at 375x812", async ({ browser }) => {
   // The second walk creates a second draft for the same month; that is fine on the throwaway stack.
   await walk(browser, "mobile");
 });
+
+test("dark theme at 1440x900", async ({ browser }) => {
+  if (process.env.SHOTS === "before") test.skip();
+  const ctx = await browser.newContext({ viewport: SIZES.desktop, colorScheme: "dark" });
+  const page = await ctx.newPage();
+  await signIn(page, "clerk.demo@example.invalid");
+  const all = await api<{ items: { invoice_id: string; id: string; invoice_line_id: string | null; type: string }[] }>(page, "/api/v1/exceptions?limit=200&status=open,pending_approval");
+  const e = all.items.find((x) => x.type === "qty_over_received") ?? all.items[0];
+  await shoot(page, "20-exceptions-dark", "/exceptions", "desktop");
+  await shoot(page, "21-match-view-dark", `/invoices/${e.invoice_id}?line=${e.invoice_line_id ?? ""}&exc=${e.id}`, "desktop");
+  await ctx.close();
+});
