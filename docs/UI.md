@@ -1,4 +1,4 @@
-# MatchDesk web UI: design system and screenshots (B6, 2026-11-12; B8, 2026-11-13)
+# MatchDesk web UI: design system and screenshots (B6, 2026-11-12; B8 and B9, 2026-11-13)
 
 The B6 redesign of `web/` replaced the B4 look (top navigation, generic panels) with one design system and one component library. Behaviour, routes and API calls are unchanged; screen states are in [App-flow.md section 7](../App-flow.md#7-as-built-in-b4-2026-11-12). Every screenshot shows the invented demo tenant only (`make seed-demo --preload` on Playwright's own database `matchdesk_e2e`).
 
@@ -108,6 +108,27 @@ The same tokens and components; layout and interaction changed around the decisi
 | S-14 to S-08 drill-down | [before](screenshots/b8/before/05-weekly-to-queue-1440.png), [after](screenshots/b8/after/05-weekly-to-queue-1440.png) | | |
 | S-18 Operator account | [before](screenshots/b8/before/06-operator-account-1440.png), [after](screenshots/b8/after/06-operator-account-1440.png) | | |
 | Dark theme, with the invoice PDF | [queue before](screenshots/b8/before/01-queue-dark-1440.png), [after](screenshots/b8/after/01-queue-dark-1440.png); [FF-1003 before](screenshots/b8/before/02-ff1003-dark-1440.png), [after](screenshots/b8/after/02-ff1003-dark-1440.png) | [FF-1003 after](screenshots/b8/after/02-ff1003-dark-1024.png) | [queue after](screenshots/b8/after/01-queue-dark-375.png), [FF-1003 after](screenshots/b8/after/02-ff1003-dark-375.png) |
+
+## 6c. B9 remaining pieces (2026-11-13)
+
+No new tokens or components: the new controls use Banner, Dialog, the `.consequence` note of B8 and the stacked-card tables. Each irreversible step has a dialog that states its effect first and puts focus on the safe button (Record this statement, Remove line N, Request deletion with the account name typed, Schedule deletion). The controller's credit and duplicate decisions sit in the S-09 action panel in place of the resolution codes, with what each choice does in words; a clerk sees that the case waits for the controller. The S-10 banner gives each changed line's old and new values. Since B9 no screen says "Open in a wider window": S-07, the S-05 column step, S-06 upload, S-11 and S-15 are worked at 375 px (fields stacked, the document below the fields, **Choose files** instead of dragging).
+
+| Screen | 1440 x 900 | 375 x 812 |
+|---|---|---|
+| S-03 no receiving records | [b9](screenshots/b9/no-receiving-1440.png) | |
+| S-07 extraction review | | [b9](screenshots/b9/review-375.png) |
+| S-05 column step | | [b9](screenshots/b9/receiving-columns-375.png) |
+| S-06 intake upload | | [b9](screenshots/b9/intake-375.png) |
+| S-11 aliases | | [b9](screenshots/b9/aliases-375.png) |
+| S-15 tolerances | | [b9](screenshots/b9/tolerances-375.png) |
+| S-08 assignee | [b9](screenshots/b9/queue-assignee-1440.png) | |
+| S-10 changed in QuickBooks | [b9](screenshots/b9/po-changed-1440.png) | |
+| S-09 credit decision | [b9](screenshots/b9/credit-decision-1440.png) | |
+| S-13 finding outcomes | [b9](screenshots/b9/report-outcomes-1440.png) | |
+| S-16 account data | [b9](screenshots/b9/account-data-1440.png) | |
+| S-18 deletion requests | [b9](screenshots/b9/operator-deletion-1440.png) | |
+
+Captured by `cd web && B9_SHOTS=1 npx playwright test` on Playwright's own stack (`matchdesk_e2e`), light theme.
 
 ## 7. Accessibility checks
 

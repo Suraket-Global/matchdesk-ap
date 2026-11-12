@@ -915,3 +915,47 @@ In the in-app browser on the demo (no mutation) and in installed Google Chrome t
 - Extraction review, the receiving column step, intake upload, aliases and tolerances still ask for a wider window at phone width (reading stays possible).
 - The match view opens the PDF on the line's page only when the extractor recorded it; the local extractor records none, so it opens on page 1. The S-07 total check does not point at a region of the page (no regions are recorded).
 - The sidebar's return to the last queue lives in memory for the tab; a reload returns to the unfiltered queue (the address bar keeps the scope).
+
+## B9 2026-11-13
+
+Source: the owner's request of 2026-11-13 to build everything left that needs no outside account (brief kept outside this repository). Branch `feat/b9-remaining` from `feat/b8-redesign`. Migrations 0018 and 0019. Account-bound items stay out: the live Intuit reader, a hosted extractor with region highlighting, a hosted inbound email provider.
+
+### B9.1 Items and their tests
+
+| Item | What was built | Tests |
+|---|---|---|
+| S-03 no receiving records | Controller records "We have no warehouse receiving records" (`no_receiving_declarations`); audited; step 3 reads "None kept"; coverage state `no_receiving_records` (a measured 0 %) on S-05, S-08 and S-13 instead of "awaiting receiving"; report totals and PDF state it. Lines stay `receipt_absent` (never a pass, CLAUDE.md false pass 2); refused while an import counts; committing an import withdraws it (audited). Also: S-03 names the attestation and lists "earlier invoices needed" | `test_b9_remaining.py::test_no_receiving_declaration_is_recorded_and_never_a_pass`, `test_onboarding_status_names_the_attestation_and_the_earlier_invoices_needed`; Vitest S-03; Playwright fresh-account declaration |
+| S-07 delete a line | Soft removal (`invoice_lines.removed_*`) with who, when, why; gates re-run; earlier results kept, current one retired; only before confirmation; number never reused; every match input, gate, count and screen reads live lines | `test_remove_line_is_soft_reruns_gates_and_only_before_confirmation`; Vitest S-07 (two tests) |
+| S-07 inconsistent note | Required with "The document itself does not add up"; stored on the invoice, in the audit event, report section 6 and the PDF | `test_inconsistent_note_is_kept_shown_and_reported`, updated `test_inconsistent_confirmation_needs_explicit_acceptance`; Vitest |
+| S-05 mappings and drafts | `GET /receiving/mappings`; a saved mapping whose columns fit the file is pre-applied (rows still checked only on request); drafts removed after 7 days by the worker (file deleted through `blobstore`, audited) | `test_saved_mapping_is_read_and_pre_applied`, `test_abandoned_drafts_are_removed_after_seven_days_with_a_frozen_clock` (`FixedClock`) |
+| S-08 assignee | `exceptions.assigned_to` (index built concurrently, 0019); assign or unassign (event `assigned`, audited); `assignee` (`me`, `none`, member) in the server scope, keyset cursor and neighbours; kept in the URL; bulk assign | `test_assignee_filter_is_in_the_scope_cursor_and_neighbours`; Vitest; Playwright assignee and reload |
+| S-10 changed in QuickBooks | The sync records `po_line_changes` (before and after) for changed or removed lines; S-10 banner when matched lines changed, with when they were matched again; proved on recorded responses (`fixtures/qbo/recorded-changed/`, `make demo-po-change`) | `test_changed_in_quickbooks_banner_from_recorded_responses`; Vitest S-10; Playwright S-10 |
+| Credit and duplicate decisions | `POST /exceptions/{id}/credit-decision` and `/duplicate-decision` (controller); the credit decision is a rule-engine input: credited nets that one credit with that one exception, once; not credited is a finding again and never re-flagged by that credit; undecided stays open, not a finding | `test_credit_decision_nets_once_and_not_credited_is_a_finding`, `test_duplicate_decision_endpoint_is_controller_only`; `tests/unit/test_b9_units.py` (4, order independence included); Vitest; Playwright S-09 |
+| Finding outcomes | `finding_outcomes` insert-only with trigger rules (governing version only, confirmation ≤ finding, recovery needs and ≤ confirmation, a credit note or reference); S-13 section 8 and the three counts kept apart; report figures unchanged | `test_finding_outcomes_follow_the_governing_report_and_stay_separate`; Vitest S-13; Playwright S-13 |
+| Archive and deletion | Archive ZIP (originals and CSVs incl. audit log) built by the worker, downloadable 24 hours, audited; account deletion request (name typed), operator schedules (30 days' notice [assumption]) or declines on S-18, controller may cancel; when due the worker deletes files, then `purge_tenant` deletes every row and writes `deletion_ledger`; the app role cannot purge early nor delete insert-only rows | `test_archive_export_holds_records_and_originals_and_expires`, `test_account_deletion_request_operator_schedule_cancel_and_execute`; Vitest S-16; Playwright archive, request, schedule, cancel |
+| Phone width | S-07, S-05 column step, S-06 upload, S-11, S-15 worked at 375 x 812; "Open in a wider window" removed | Playwright five screens at 375 (no sideways scroll, controls visible) |
+| Queue link after reload | Sidebar Exceptions link kept in sessionStorage (queue path and scope keys only; try/catch, memory fallback) | Vitest (two tests); Playwright reload |
+| S-12 late evidence | Lists the exceptions open on its PO lines with their value | `test_late_evidence_approval_lists_the_open_exceptions_it_lets_the_rematch_see` |
+
+No float added; no write to QuickBooks; no change to the `receipt_absent` guards; approved reports stay immutable (outcomes are separate rows).
+
+### B9.2 Commands and results (from `matchdesk-ap/`)
+
+| Command | Result |
+|---|---|
+| `make test` (clean `matchdesk_test`, migrations 0001 to 0019) | 306 passed (283 at B8) |
+| `make check` | passed |
+| `web/`: `npm run typecheck`, `npm run lint`, `npm run build` | passed |
+| `web/`: `npm test` (Vitest) | 72 passed (59 at B8; 13 new in `b9-remaining.test.tsx`) |
+| `web/`: `B9_SHOTS=1 npx playwright test` (own stack `matchdesk_e2e`) | 14 passed (8 at B8; 6 new in `remaining-b9.spec.ts`); `matchdesk_dev` unchanged; 12 screenshots in `docs/screenshots/b9/`. Two earlier runs that day had one timeout each while the screenshot stack and the in-app browser ran on the same machine (once B7's "Email now" dialog, once a sign-in); both passed on the next run with nothing changed |
+| `make demo-reset`, then API, worker and web left running | done |
+
+### B9.3 Walk
+
+In the in-app browser on the screenshot stack (`matchdesk_shots`, a tagged synthetic tenant), at 1440 x 900 and 375 x 812: SS-5110 line 2 removed with a reason ("Lines + tax = 758.00, document total 783.00"), confirmed with the note, note shown on the match view; `po-change` on that stack: PO 4471 banner "Line 1: Ordered 100 → 80", matched again; FF-1003 "Possibly credited in QuickBooks" (VC-DEMO-9), **Credited**, then "Credited in QuickBooks (VC-DEMO-9), decided by the controller", not qualifying; the five former wide-only screens, S-03, S-05, S-08, S-10, S-12 and S-16 at 375 with no sideways scroll. The remaining features were walked through Playwright in installed Chrome (screenshots in `docs/screenshots/b9/`).
+
+### B9.4 Gaps left
+
+- Account-bound, unchanged: live QuickBooks reader (T-1.1.1), hosted extractor and region highlighting, hosted inbound email provider.
+- Not built, not account-bound and not in this request: deleting a single document (`POST /documents/{id}/deletion-requests`), `GET /usage` for the controller, draggable pane dividers on S-09 (a B6 layout choice).
+- The account purge relies on a security-definer function owned by the migration role; its execution was tested on the local database only. Backups keep deleted data up to 56 days (schema.md 8).

@@ -181,7 +181,7 @@ test("B9 S-09 credit decision on the possibly credited case, S-13 outcomes on th
   await page.goto(`/reports/backtest/${approved.id}`);
   await page.getByRole("button", { name: /Make version \d+ the governing version/ }).click();
   await page.getByRole("button", { name: "Make it governing" }).click();
-  const outcomes = page.getByRole("region", { name: "8. What happened to the flagged discrepancies" }).or(page.locator("section[aria-labelledby=outcomes-h]"));
+  const outcomes = page.getByRole("region", { name: "8. What happened to the flagged discrepancies" });
   await outcomes.getByRole("button", { name: "Record confirmation" }).first().click();
   await page.getByRole("dialog").getByRole("button", { name: "Record" }).click();
   await expect(page.getByText("Confirmation recorded.")).toBeVisible();
