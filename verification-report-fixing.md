@@ -661,7 +661,7 @@ Owner request 2026-11-12: build the screens with the design skills and tools, us
 | `make web-check` (`npm run typecheck`, `lint`, `test`, `build`) | type check and ESLint clean; Vitest 11 passed (2 files); build to `web/dist` with no inline script, Mailpit note absent from the bundle |
 | `make web-e2e` (Playwright 1.53, installed Chrome, headless; dev server and local API) | 3 passed: E2E-01 full flow, role and not-found check, phone-width check |
 | `vite preview` with the TRD 8.7 headers, match view with a PDF | rendered, no Content-Security-Policy violation in the console |
-| `make demo-reset` then the PLAY.md script in the in-app browser, as clerk and controller | completed: receiving 7 rows imported and 1 rejected, 13 files (10 ready, 2 review, 1 duplicate), two extractions corrected, an exception waived, conversion and late evidence approved, October report approved and exported |
+| `make demo-reset`, then the PLAY.md steps in the in-app browser as clerk and controller, with invoices loaded before receiving | completed: receiving 7 rows imported and 1 rejected, 13 files (10 ready, 2 review, 1 duplicate), two extractions corrected, an exception waived, conversion and late evidence approved, October report approved and exported |
 
 ### 14.4 Tests that ran (new in B4)
 
