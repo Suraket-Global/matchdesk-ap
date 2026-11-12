@@ -58,6 +58,8 @@ test("E2E-01 clerk loads the month and resolves, controller approves and exports
   await page.getByRole("link", { name: "Exceptions", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Exception queue" })).toBeVisible();
   await expect(page.locator("tbody tr").first()).toBeVisible();
+  // W3: the coverage strip is live before any report draft exists.
+  await expect(page.locator(".coverage")).toContainText(/Receipt coverage \d+(\.\d+)?% of invoiced PO lines/);
   await axe(page, "exception queue");
   await page.getByRole("button", { name: /No purchase order/ }).click();
   await expect(page).toHaveURL(/type=no_po/);
@@ -69,13 +71,19 @@ test("E2E-01 clerk loads the month and resolves, controller approves and exports
   await page.locator("#res-note").fill("PO 4999 does not exist; trivial amount (synthetic).");
   await page.getByRole("button", { name: "Resolve and next" }).click();
   await expect(page.getByRole("heading", { name: "Exception queue" })).toBeVisible();
+  // The type filter stays visible and says what it filters, after its last item went (review, minor).
+  await expect(page.getByRole("button", { name: /No purchase order/ })).toBeVisible();
+  await expect(page.getByText('No open exceptions of type "No purchase order".')).toBeVisible();
 
   // The match view never counts the QuickBooks billed quantity as received (DD-06).
   await page.goto("/exceptions?type=qty_over_received");
   await page.getByRole("link", { name: "FF-1003" }).click();
   await expect(page.locator(".workings .sentence")).toContainText("Received to date 60 EA.");
-  await expect(page.locator(".workings .sentence")).toContainText("Excess 40 × 4.2 = 168.00.");
+  await expect(page.locator(".workings .sentence")).toContainText("Excess 40 × 4.20 = 168.00.");
   await expect(page.getByText("receiving-warehouse-log.csv row 4")).toBeVisible();
+  // W1: a ?from= that is not a path inside the app is ignored.
+  await page.goto(`${page.url().split("&from=")[0]}&from=${encodeURIComponent("javascript:alert(1)")}`);
+  await expect(page.getByRole("link", { name: "Exception queue" })).toHaveAttribute("href", "/exceptions");
 
   await signOut(page, "Demo Clerk");
 
@@ -111,6 +119,13 @@ test("E2E-01 clerk loads the month and resolves, controller approves and exports
   await dialog.getByRole("checkbox").check();
   await dialog.getByRole("button", { name: /^Approve version/ }).click();
   await expect(page.getByText(/APPROVED by Demo Controller/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Refresh draft" })).toHaveCount(0); // review, minor
+  // W2: the list and the report give the same flagged-discrepancy figure under the same words.
+  const flagged = (await page.locator(".cards > div").first().locator(".big").innerText()).replace("CAD ", "").trim();
+  await page.getByRole("link", { name: "Back-test reports" }).click();
+  await expect(page.getByRole("columnheader", { name: /Flagged discrepancies/ })).toBeVisible();
+  await expect(page.getByRole("row", { name: /Approved/ }).getByRole("cell", { name: flagged, exact: true })).toBeVisible();
+  await page.goBack();
   await expect(page.getByText(/Qualifying discrepancies in this version: CAD [\d,]+\.\d\d\. Threshold CAD 500\.00\./)).toBeVisible();
   const approvedPdf = page.waitForEvent("download");
   await page.getByRole("button", { name: "Export PDF" }).click();
@@ -118,6 +133,12 @@ test("E2E-01 clerk loads the month and resolves, controller approves and exports
   const csv = page.waitForEvent("download");
   await page.getByRole("button", { name: "Export CSV" }).click();
   expect((await csv).suggestedFilename()).toMatch(/\.csv$/);
+
+  // App-flow S-16 and S-05 columns (review).
+  await page.goto("/settings/users");
+  await expect(page.getByRole("columnheader", { name: "Last sign-in" })).toBeVisible();
+  await page.goto("/receiving");
+  await expect(page.getByRole("columnheader", { name: "Rows waiting for controller approval" })).toBeVisible();
 
   // S-17: the audit log shows what happened, read only.
   await page.goto("/audit");
@@ -132,8 +153,9 @@ test("a clerk who opens /approvals sees forbidden, and an unknown route is not f
   await expect(page.getByRole("heading", { name: "Your role does not include this page" })).toBeVisible();
   await page.goto("/no/such/page");
   await expect(page.getByRole("heading", { name: "Not found" })).toBeVisible();
+  // An unknown record is the not-found page (S-19), not an error banner (review, minor).
   await page.goto("/invoices/00000000-0000-0000-0000-000000000000");
-  await expect(page.getByText(/Not found\. It may have been removed/)).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Not found" })).toBeVisible();
 });
 
 test("phone width keeps the reading screens usable without sideways scrolling", async ({ browser }) => {
@@ -148,4 +170,19 @@ test("phone width keeps the reading screens usable without sideways scrolling", 
     expect(overflow, p).toBeLessThanOrEqual(1);
   }
   await ctx.close();
+});
+
+test("an expired session goes to sign-in once and shows nothing of the old session", async ({ page, context }) => {
+  // Review W8: a cached user after expiry sent sign-in back to the app, which sent it back again.
+  const { tag } = run();
+  await signIn(page, `clerk.${tag}@example.invalid`);
+  await expect(page.locator("main h1")).toBeVisible();
+  await context.clearCookies(); // the server no longer knows this browser
+  await page.getByRole("link", { name: "Invoices", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "You are signed out." })).toBeVisible();
+  await page.getByRole("link", { name: "Sign in" }).click();
+  await expect(page.getByLabel("Work email")).toBeVisible();
+  await page.waitForTimeout(1000);
+  await expect(page.getByLabel("Work email")).toBeVisible(); // still here: no loop
+  await expect(page.locator("header.topbar")).toHaveCount(0);
 });

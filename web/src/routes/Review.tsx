@@ -50,8 +50,8 @@ function fromReview(r: Review): { header: Header; lines: EditLine[] } {
   return { header, lines };
 }
 
-function Provenance({ src, onHistory }: { src?: FieldSource; onHistory: () => void }) {
-  if (src?.source === "edited")
+function Provenance({ src, changed, onHistory }: { src?: FieldSource; changed?: boolean; onHistory: () => void }) {
+  if (src?.source === "edited" || changed)
     return (
       <span>
         <span className="tag edited">edited</span>{" "}
@@ -87,6 +87,9 @@ export function ReviewPage() {
   const [history, setHistory] = useState<{ label: string; original: unknown } | null>(null);
   const summary = useRef<HTMLDivElement>(null);
   const loadedFor = useRef<string | null>(null);
+  // Counts edits, so a draft save that finishes after more typing does not mark that typing saved
+  // (review W8).
+  const edits = useRef(0);
 
   useEffect(() => {
     const r = q.data?.review;
@@ -150,12 +153,13 @@ export function ReviewPage() {
 
   const saveDraft = useCallback(async () => {
     if (!dirty) return;
+    const at = edits.current;
     try {
       const r = await send<Review>("PATCH", `/api/v1/invoices/${invoiceId}/extraction`, payload(true), { ifMatch: version });
       setVersion(r.version);
       loadedFor.current = `${invoiceId}:${r.version}`;
       setSavedAt(new Date().toISOString());
-      setDirty(false);
+      if (edits.current === at) setDirty(false);
     } catch (err) {
       if (!onConflict(err)) setError(`Draft not saved: ${errorText(err)} Your values are still here; try again.`);
     }
@@ -175,7 +179,12 @@ export function ReviewPage() {
 
   async function confirmAndMatch() {
     setError(null);
-    if (checks.length && !accept) {
+    if (checks.length > arithmetic.length) {
+      setError("Fill in what is missing above before confirming.");
+      summary.current?.focus();
+      return;
+    }
+    if (arithmetic.length && !accept) {
       setError("The checks above do not pass. Correct the values, or tick that the document itself does not add up.");
       summary.current?.focus();
       return;
@@ -208,13 +217,22 @@ export function ReviewPage() {
   const inv = q.data!;
   const r = inv.review;
   const set = (k: string, v: string) => {
+    edits.current += 1;
     setHeader((h) => ({ ...h, [k]: v }));
     setDirty(true);
   };
   const setLine = (i: number, k: string, v: string) => {
+    edits.current += 1;
     setLines((ls) => ls.map((l, j) => (j === i ? { ...l, [k]: v } : l)));
     setDirty(true);
   };
+  // The values as read, to tag a field "edited" as soon as it differs or is held in the server
+  // draft, not only after confirmation (review W4; S-07).
+  const asRead = fromReview(r);
+  const readLine = (no: number) => asRead.lines.find((l) => l.line_no === no);
+  // Only the arithmetic checks can be accepted as "the document does not add up"; a missing
+  // supplier, number, date or line has to be filled in (review, minor).
+  const arithmetic = checks.filter((c) => /^Line \d+:|^Lines /.test(c));
   const next = (queue.data?.items ?? []).find((i) => i.id !== invoiceId);
   return (
     <>
@@ -284,7 +302,11 @@ export function ReviewPage() {
                   <div className="field" key={f.key}>
                     <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
                       <label htmlFor={`h-${f.key}`}>{f.label}</label>
-                      <Provenance src={src} onHistory={() => setHistory({ label: f.label, original: src?.original })} />
+                      <Provenance
+                        src={src}
+                        changed={(header[f.key] ?? "") !== (asRead.header[f.key] ?? "")}
+                        onHistory={() => setHistory({ label: f.label, original: src?.source === "edited" ? src.original : asRead.header[f.key] })}
+                      />
                     </span>
                     {f.key === "doc_type" ? (
                       <select id={`h-${f.key}`} value={header[f.key] ?? ""} onChange={(e) => set(f.key, e.target.value)}>
@@ -367,10 +389,19 @@ export function ReviewPage() {
                               value={l[k] ?? ""}
                               onChange={(e) => setLine(i, k, e.target.value)}
                             />
-                            {src[k]?.source === "edited" && (
-                              <button type="button" className="btn small ghost" onClick={() => setHistory({ label: `Line ${l.line_no} ${LINE_LABELS[k]}`, original: src[k]?.original })}>
-                                History
-                              </button>
+                            {(src[k]?.source === "edited" || (readLine(l.line_no) && (l[k] ?? "") !== (readLine(l.line_no)?.[k] ?? ""))) && (
+                              <span>
+                                <span className="tag edited">edited</span>{" "}
+                                <button
+                                  type="button"
+                                  className="btn small ghost"
+                                  onClick={() =>
+                                    setHistory({ label: `Line ${l.line_no} ${LINE_LABELS[k]}`, original: src[k]?.source === "edited" ? src[k]?.original : readLine(l.line_no)?.[k] })
+                                  }
+                                >
+                                  History
+                                </button>
+                              </span>
                             )}
                           </td>
                         ))}
@@ -384,7 +415,7 @@ export function ReviewPage() {
               Deleting a line is not built yet. Correct a misread line's values instead.
             </p>
           </div>
-          {checks.length > 0 && (
+          {arithmetic.length > 0 && (
             <div className="panel panel-body">
               <label className="choice">
                 <input type="checkbox" checked={accept} onChange={(e) => setAccept(e.target.checked)} />

@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import uuid
 from collections import Counter
-from datetime import datetime
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Annotated, Any, Literal
 
@@ -345,7 +345,27 @@ def register_exception_routes(app: FastAPI, engine: Engine) -> None:
         h = body_hash(body.model_dump(mode="json"))
         with session(p.tenant_id, engine) as s:
             if idempotency_key and idempotent_replay(s, p, idempotency_key, h) is not None:
-                raise HTTPException(409, "This bulk request was already applied; reload the queue")
+                # A retry of an applied request (same key, same body) answers with what happened,
+                # read from the exceptions now, instead of an error (B3/B4 review W8).
+                now_rows = {
+                    e.id: e
+                    for e in s.scalars(
+                        select(ExceptionRow).where(ExceptionRow.id.in_([i.id for i in body.items]))
+                    )
+                }
+                replay = []
+                for i in body.items:
+                    e = now_rows.get(i.id)
+                    st = e.status if e is not None else "missing"
+                    done = st in ("resolved", "waived", "pending_approval")
+                    replay.append(
+                        {
+                            "id": str(i.id),
+                            "result": st if done else "skipped",
+                            "reason": None if done else f"status {st}",
+                        }
+                    )
+                return {"results": replay, "replayed": True}
             limit_, cap = _limits(s, p.tenant_id)
             try:
                 results = bulk_resolve(
@@ -538,12 +558,17 @@ def register_exception_routes(app: FastAPI, engine: Engine) -> None:
     def post_ack(p: Auth) -> dict[str, Any]:
         require(p, "approve")
         with session(p.tenant_id, engine) as s:
-            ids = [
-                str(a)
-                for a in s.scalars(
-                    select(ItemAlias.id).where(ItemAlias.status == "active", ItemAlias.approved_by.is_(None))
-                ).all()
-            ]
+            rows = s.scalars(
+                select(ItemAlias).where(
+                    ItemAlias.status == "active",
+                    ItemAlias.approved_by.is_(None),
+                    ItemAlias.reviewed_at.is_(None),
+                )
+            ).all()
+            now = datetime.now(UTC)
+            for a in rows:
+                a.reviewed_by, a.reviewed_at = p.user_id, now  # W5: the list empties
+            ids = [str(a.id) for a in rows]
             write_audit(
                 s,
                 p.tenant_id,

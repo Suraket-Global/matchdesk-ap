@@ -19,6 +19,21 @@ export class ApiError extends Error {
 
 let csrfToken: string | null = null;
 let lastContact = Date.now();
+let lastInput = Date.now();
+// A request made while nobody has touched the keyboard or pointer for a minute is a background
+// refresh (polling). It says so to the server and does not count as activity, so the 60-minute
+// idle sign-out still happens on an unattended screen (review W8).
+const ACTIVE_MS = 60_000;
+if (typeof window !== "undefined") {
+  for (const ev of ["pointerdown", "keydown"]) window.addEventListener(ev, () => (lastInput = Date.now()), { capture: true, passive: true });
+}
+export function isBackground(now = Date.now()): boolean {
+  return now - lastInput > ACTIVE_MS;
+}
+/** For tests: pretend the last keyboard or pointer input happened at `at`. */
+export function setLastInput(at: number): void {
+  lastInput = at;
+}
 
 /** When the server last saw this browser; the 60-minute idle limit runs from here. */
 export function lastServerContact(): number {
@@ -69,7 +84,7 @@ async function request(
       signal: ctrl.signal,
     });
     emit("online");
-    if (res.status !== 401) lastContact = Date.now();
+    if (res.status !== 401 && headers["X-Background-Request"] !== "1") lastContact = Date.now();
     return res;
   } catch (err) {
     emit("offline");
@@ -96,7 +111,9 @@ async function problem(res: Response): Promise<ApiError> {
 }
 
 export async function get<T>(path: string): Promise<T> {
-  const res = await request("GET", path, null, { Accept: "application/json" });
+  const headers: Record<string, string> = { Accept: "application/json" };
+  if (isBackground()) headers["X-Background-Request"] = "1";
+  const res = await request("GET", path, null, headers);
   if (!res.ok) throw await problem(res);
   return (await res.json()) as T;
 }
@@ -155,6 +172,8 @@ export async function documentBytes(documentId: string): Promise<ArrayBuffer> {
 
 export function errorText(err: unknown): string {
   if (err instanceof ApiError) {
+    if (err.status === 403 && /anti-forgery|cross-site/i.test(err.title))
+      return "This page's security token is out of date. Reload the page and try again.";
     if (err.status === 403) return "Your role does not allow this. Ask your controller.";
     if (err.status === 404) return "Not found. It may have been removed, or it belongs to another account.";
     if (err.status === 429) return "Too many requests. Try again in a few minutes.";

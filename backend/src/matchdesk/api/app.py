@@ -111,7 +111,10 @@ def create_app(mailer: Mailer | None = None, qbo_token_endpoint: TokenEndpoint |
             # Authenticate before the body is parsed or validated, so an anonymous caller gets
             # 401 and learns nothing about the request shape (B1-010). Only the cookie counts.
             token = request.cookies.get(SESSION_COOKIE)
-            ctx = await run_in_threadpool(load_session, engine(), token) if token else None
+            # A background refresh (the web app's polling) is not activity: it does not reset the idle
+            # timer, so an unattended screen is still signed out after 60 minutes (B3/B4 review W8).
+            touch = request.headers.get("X-Background-Request") != "1"
+            ctx = await run_in_threadpool(load_session, engine(), token, None, touch) if token else None
             denied = None
             if ctx is None:
                 denied = problem(401, "Not signed in")

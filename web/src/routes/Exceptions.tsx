@@ -2,13 +2,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { errorText, get, send } from "../api/client";
-import type { Batch, ExceptionItem, ExceptionPage, Page, Report, Vendor } from "../api/types";
+import type { Batch, Coverage, ExceptionItem, ExceptionPage, Page, Vendor } from "../api/types";
 import { useSession } from "../app/session";
 import { useKeys } from "../app/shortcuts";
-import { Dialog, Empty, ErrorState, Loading, PageHead, StatusChip, usePageTitle } from "../components/ui";
+import { Dialog, Empty, ErrorState, Loading, NarrowNote, PageHead, StatusChip, usePageTitle } from "../components/ui";
 import { cad, cadCents, compareDecimal, formatCents, money, qty, sumCents, toCents } from "../lib/decimal";
-import { ageDays, ageText, lastMonth, monthName, plural } from "../lib/format";
-import { EXCEPTION_STATUS, RESOLUTION_CODES, RESOLUTION_HINTS, SUB_REASONS, typeWord } from "../lib/words";
+import { ageDays, ageText, lastMonth, monthName, monthRange, plural } from "../lib/format";
+import { EXCEPTION_STATUS, RESOLUTION_CODES, RESOLUTION_HINTS, SUB_REASONS, typeWord, zeroCounted } from "../lib/words";
 
 const STATUS_OPTIONS: [string, string][] = [
   ["open,pending_approval", "Open and pending approval"],
@@ -63,7 +63,13 @@ export function ExceptionsPage() {
     refetchInterval: 15_000,
   });
   const vendors = useQuery({ queryKey: ["vendors"], queryFn: () => get<Page<Vendor>>("/api/v1/vendors") });
-  const reports = useQuery({ queryKey: ["reports"], queryFn: () => get<Page<Report>>("/api/v1/reports/backtest?limit=200") });
+  const month = lastMonth();
+  // Live coverage for the test month, from the current results; no report draft needed (review W3).
+  const coverage = useQuery({
+    queryKey: ["coverage", month],
+    queryFn: () => get<Coverage>(`/api/v1/coverage?period_start=${monthRange(month).start}&period_end=${monthRange(month).end}`),
+    refetchInterval: 15_000,
+  });
   const absentAll = useQuery({
     queryKey: ["exceptions", "absent"],
     queryFn: () => get<ExceptionPage>("/api/v1/exceptions?limit=200&type=receipt_absent&status=open,pending_approval,resolved"),
@@ -98,12 +104,16 @@ export function ExceptionsPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sel, rows.length]);
+  const hrefFor = (e: ExceptionItem) => {
+    const p = new URLSearchParams(params);
+    p.set("sel", e.id);
+    return `/invoices/${e.invoice_id}?line=${e.invoice_line_id ?? ""}&exc=${e.id}&from=${encodeURIComponent(`/exceptions?${p}`)}`;
+  };
   const open = (e: ExceptionItem) => {
     const p = new URLSearchParams(params);
     p.set("sel", e.id);
     setParams(p, { replace: true });
-    const from = `/exceptions?${p}`;
-    navigate(`/invoices/${e.invoice_id}?line=${e.invoice_line_id ?? ""}&exc=${e.id}&from=${encodeURIComponent(from)}`);
+    navigate(hrefFor(e));
   };
   const toggle = (id: string) =>
     setSelected((s) => {
@@ -132,9 +142,11 @@ export function ExceptionsPage() {
   const chosen = rows.filter((r) => selected.has(r.id));
   const chosenTypes = new Set(chosen.map((c) => c.type));
 
-  // Coverage strip (design.md 3): from the latest report for the test month, and the open receipt-absent lines.
-  const month = lastMonth();
-  const report = [...(reports.data?.items ?? [])].filter((r) => r.period_start.startsWith(month)).sort((a, b) => b.version_no - a.version_no)[0];
+  // Coverage strip (design.md 3): live figures for the test month and the open receipt-absent lines.
+  // One denominator (invoiced PO item lines) for every percentage on it (review W2).
+  const cov = coverage.data && coverage.data.item_lines > 0 ? coverage.data : null;
+  const pctText = (v: string | null | undefined) => `${money(v).replace(/\.00$/, "")}%`;
+  const viaA = cov ? formatCents((toCents(cov.receipt_coverage_pct) ?? 0n) - (toCents(cov.coverage_class_b_pct) ?? 0n)) : "0";
   const absent = (absentAll.data?.items ?? []).filter((e) => e.status !== "auto_closed");
   const notReceived = absent.filter((e) => e.sub_reason === "not_received");
   const unverified = absent.filter((e) => e.sub_reason !== "not_received");
@@ -151,20 +163,19 @@ export function ExceptionsPage() {
           </Link>
         }
       />
+      <NarrowNote />
       <div className="coverage" role="note">
         <span>
-          Receipt coverage{" "}
-          <strong>
-            {report ? `${money(report.receipt_coverage_pct).replace(/\.00$/, "")}%` : "not measured yet"}
-          </strong>
-          {report && ` (warehouse log ${money(report.coverage_class_a_pct).replace(/\.00$/, "")}%, signed delivery documents ${money(report.coverage_class_b_pct).replace(/\.00$/, "")}%)`}
+          Receipt coverage <strong>{cov ? pctText(cov.receipt_coverage_pct) : "not measured yet"}</strong>
+          {cov && ` of invoiced PO lines (warehouse log ${pctText(viaA)}, signed delivery documents ${pctText(cov.coverage_class_b_pct)})`}
         </span>
-        {report && (
+        {cov && (
           <span className="meter" aria-hidden="true">
-            <span className="a" style={{ width: `${report.coverage_class_a_pct}%` }} />
-            <span className="b" style={{ width: `${report.coverage_class_b_pct}%` }} />
+            <span className="a" style={{ width: `${viaA}%` }} />
+            <span className="b" style={{ width: `${cov.coverage_class_b_pct}%` }} />
           </span>
         )}
+        {cov && <span>Complete warehouse log covers {pctText(cov.coverage_class_a_pct)}</span>}
         <span>
           Not received: <strong>{plural(notReceived.length, "line")}, {cadCents(sumCents(notReceived.map(value)))}</strong>
         </span>
@@ -178,7 +189,7 @@ export function ExceptionsPage() {
           <span className="n">{Object.values(counters).reduce((a, b) => a + b, 0)}</span>
           <span className="t">All types</span>
         </button>
-        {Object.entries(counters)
+        {Object.entries({ ...(type ? { [type]: 0 } : {}), ...counters })
           .sort((a, b) => b[1] - a[1])
           .map(([t, n]) => (
             <button key={t} className="counter" aria-pressed={type === t} onClick={() => setParam("type", type === t ? "" : t)}>
@@ -246,9 +257,23 @@ export function ExceptionsPage() {
               </p>
             </Empty>
           ) : (
-            <Empty title={status.startsWith("open") ? `No open exceptions for ${monthName(month)}.` : "No exceptions match these filters."}>
+            <Empty
+              title={
+                type
+                  ? `No ${status.startsWith("open") ? "open " : ""}exceptions of type "${typeWord(type)}".`
+                  : status.startsWith("open") && !vendor && !min && !max
+                    ? `No open exceptions for ${monthName(month)}.`
+                    : "No exceptions match these filters."
+              }
+            >
               <p>
-                <Link to="/reports">Open the back-test report</Link>
+                {type || vendor || min || max ? (
+                  <button type="button" className="btn small" onClick={() => setParams(new URLSearchParams(status === "open,pending_approval" ? {} : { status }))}>
+                    Clear the filters
+                  </button>
+                ) : (
+                  <Link to="/reports">Open the back-test report</Link>
+                )}
               </p>
             </Empty>
           )}
@@ -309,7 +334,7 @@ export function ExceptionsPage() {
                   </td>
                   <td>{e.vendor_name ?? <span className="muted">Not identified</span>}</td>
                   <td>
-                    <Link to={`/invoices/${e.invoice_id}?line=${e.invoice_line_id ?? ""}&exc=${e.id}`} onClick={(ev) => { ev.preventDefault(); open(e); }}>
+                    <Link to={hrefFor(e)} onClick={(ev) => { ev.preventDefault(); open(e); }}>
                       {e.doc_number ?? "No number"}
                     </Link>
                     {e.line_no ? <span className="muted"> line {e.line_no}</span> : null}
@@ -317,7 +342,10 @@ export function ExceptionsPage() {
                   <td>{e.po_number}</td>
                   <td>{e.supplier_item_code}</td>
                   <td className="num">{qty(e.variance_qty)}</td>
-                  <td className="num">{money(value(e))}</td>
+                  <td className="num">
+                    {money(value(e))}
+                    {zeroCounted(e) && <div className="small muted">counted under another exception</div>}
+                  </td>
                   <td>{ageText(e.raised_at)}</td>
                   <td>{chipFor(e)}</td>
                 </tr>
@@ -349,7 +377,10 @@ interface BulkResult {
   reason?: string;
 }
 
-function BulkDialog({ items, onClose }: { items: ExceptionItem[]; onClose: (done: boolean) => void }) {
+export function BulkDialog({ items: chosenNow, onClose }: { items: ExceptionItem[]; onClose: (done: boolean) => void }) {
+  // The rows as chosen when the dialog opened: after the run they leave the open queue, and the
+  // per-item results must still name them (review W6).
+  const [items] = useState(chosenNow);
   const qc = useQueryClient();
   const { role } = useSession();
   const t = items[0]?.type;

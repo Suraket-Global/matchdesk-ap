@@ -7,7 +7,7 @@ import { useSession } from "../app/session";
 import { Banner, Dialog, Empty, ErrorState, Loading, PageHead, StatusChip, toast, usePageTitle } from "../components/ui";
 import { cad, cadCents, formatCents, money, sumCents } from "../lib/decimal";
 import { day, lastMonth, monthName, monthRange, plural, when } from "../lib/format";
-import { typeWord } from "../lib/words";
+import { typeWord, zeroCounted } from "../lib/words";
 
 type Finding = NonNullable<Report["findings"]>[number];
 
@@ -75,7 +75,8 @@ export function ReportsPage() {
                 <th scope="col">Period</th>
                 <th scope="col" className="num">Version</th>
                 <th scope="col">Status</th>
-                <th scope="col" className="num">Findings (CAD)</th>
+                <th scope="col" className="num">Flagged discrepancies (CAD)</th>
+                <th scope="col" className="num">of which not received</th>
                 <th scope="col" className="num">Unverified (CAD)</th>
                 <th scope="col">Data cut-off</th>
               </tr>
@@ -93,7 +94,8 @@ export function ReportsPage() {
                     <StatusChip status={reportStatus(r)} />
                     {r.is_stale && r.status === "approved" && <div className="small muted">Out of date</div>}
                   </td>
-                  <td className="num">{money(r.findings_amount)}</td>
+                  <td className="num">{formatCents(sumCents([r.findings_amount, r.not_received_amount]))}</td>
+                  <td className="num">{money(r.not_received_amount)}</td>
                   <td className="num">{money(r.unverified_amount)}</td>
                   <td>{when(r.data_cutoff_at)}</td>
                 </tr>
@@ -142,7 +144,12 @@ function FindingsTable({ rows, caption, showPaid = true }: { rows: Finding[]; ca
                 <td>{s.supplier_item_code}</td>
                 {showPaid && <td>{f.paid_status === "unknown" ? "Not known" : f.paid_status === "paid" ? "Already paid" : "Not yet paid"}</td>}
                 <td>{s.resolution_code === "confirmed_overbilling" ? "Yes" : <span className="muted">Not yet</span>}</td>
-                <td className="num">{money(f.amount)}</td>
+                <td className="num">
+                  {money(f.amount)}
+                  {zeroCounted({ reported_amount: f.amount, variance_amount: s.variance_amount ?? null }) && (
+                    <div className="small muted">counted under another exception on this line</div>
+                  )}
+                </td>
               </tr>
             );
           })}
@@ -219,6 +226,9 @@ export function ReportPage() {
   const unverified = f.filter((x) => x.section === "unverified");
   const waived = f.filter((x) => x.section === "waived");
   const open = f.filter((x) => x.section === "open");
+  // Every exception of this version still open (or waiting for approval), whatever its section:
+  // the same count the queue shows (review W2).
+  const stillOpen = f.filter((x) => ["open", "pending_approval"].includes(String((x.snapshot as Record<string, unknown>).status)));
   const flaggedCount = findings.length + notReceived.length;
   const flagged = sumCents([...findings, ...notReceived].map((x) => x.amount));
   const confirmed = [...findings, ...notReceived].filter((x) => (x.snapshot as Record<string, unknown>).resolution_code === "confirmed_overbilling");
@@ -245,9 +255,9 @@ export function ReportPage() {
             <button className="btn" onClick={() => exportAs("csv")} disabled={!!exporting}>
               {exporting === "csv" ? "Preparing your file…" : "Export CSV"}
             </button>
-            {can("draft_report") && r.status !== "superseded" && (
+            {can("draft_report") && (r.status === "draft" || (r.status === "approved" && r.is_stale)) && (
               <button className="btn" onClick={() => refresh.mutate()} disabled={refresh.isPending}>
-                {refresh.isPending ? "Generating…" : "Refresh draft"}
+                {refresh.isPending ? "Generating…" : r.status === "draft" ? "Refresh draft" : "Create a new draft version"}
               </button>
             )}
             {can("approve_report") && r.status === "draft" && (
@@ -313,7 +323,7 @@ export function ReportPage() {
           <span className="small">{plural(flaggedCount, "item")}</span>
         </div>
         <div>
-          <span className="muted small">Not received</span>
+          <span className="muted small">of which not received</span>
           <span className="big">{cad(r.not_received_amount)}</span>
           <span className="small">{plural(S.not_received?.count ?? 0, "line")}</span>
         </div>
@@ -325,7 +335,7 @@ export function ReportPage() {
         <div>
           <span className="muted small">Receipt coverage</span>
           <span className="big">{pct(r.receipt_coverage_pct)}</span>
-          <span className="small">of invoiced PO lines</span>
+          <span className="small">of invoiced PO lines have a counting receipt</span>
         </div>
       </div>
       <p>
@@ -413,10 +423,15 @@ export function ReportPage() {
       <section>
         <h2>3. Receipt coverage and what could not be checked</h2>
         <dl className="facts">
-          <dt>Coverage by warehouse record (A)</dt>
-          <dd>{pct(r.coverage_class_a_pct)}</dd>
-          <dt>Coverage by signed delivery document (B)</dt>
+          <dt>Invoiced PO lines with a counting receipt</dt>
+          <dd>{pct(r.receipt_coverage_pct)}</dd>
+          <dt>of which from a signed delivery document (B)</dt>
           <dd>{pct(r.coverage_class_b_pct)}</dd>
+          <dt>Invoiced PO lines inside a complete warehouse log (A)</dt>
+          <dd>
+            {pct(r.coverage_class_a_pct)}
+            <div className="small muted">Includes lines the log shows as not received, so it can be higher than receipt coverage.</div>
+          </dd>
           <dt>Lines with supplier slips only</dt>
           <dd>{r.class_c_only_lines}</dd>
           <dt>Unverified</dt>
@@ -495,7 +510,7 @@ export function ReportPage() {
         <p>
           Approve version {r.version_no} of the {monthName(r.period_start.slice(0, 7))} back-test. Findings {cadCents(flagged)}, of which not received{" "}
           {cad(r.not_received_amount)}. Unverified because no receiving evidence: {cad(r.unverified_amount)} on {plural(S.unverified?.count ?? 0, "item")}.{" "}
-          {plural(open.length, "exception")} still open will be listed as open. Approved figures cannot be changed; later corrections create a new version.
+          {plural(stillOpen.length, "exception")} still open {stillOpen.length === 1 ? "is" : "are"} listed with their status. Approved figures cannot be changed; later corrections create a new version.
         </p>
         <label className="choice">
           <input type="checkbox" checked={reviewed} onChange={(e) => setReviewed(e.target.checked)} />

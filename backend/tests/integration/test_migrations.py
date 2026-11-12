@@ -27,7 +27,7 @@ def _alembic(*args: str) -> subprocess.CompletedProcess[str]:
 
 def test_single_head(migrated):  # type: ignore[no-untyped-def]
     heads = [ln for ln in _alembic("heads").stdout.splitlines() if ln.strip()]
-    assert len(heads) == 1 and heads[0].startswith("0015")
+    assert len(heads) == 1 and heads[0].startswith("0016")
 
 
 def test_orm_parity(migrated):  # type: ignore[no-untyped-def]

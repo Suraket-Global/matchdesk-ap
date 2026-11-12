@@ -63,11 +63,18 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   useEffect(
     () =>
       onConnectionEvent((kind) => {
-        if (kind === "expired") setExpired(true);
+        if (kind === "expired") {
+          // The server ended the session: forget who was signed in and everything read with it, so
+          // sign-in does not loop on a cached user and the next person sees nothing (review W8).
+          setExpired(true);
+          setCsrfToken(null);
+          qc.removeQueries({ predicate: (q) => q.queryKey[0] !== "me" });
+          qc.setQueryData(["me"], null);
+        }
         if (kind === "offline") setOffline(true);
         if (kind === "online") setOffline(false);
       }),
-    [],
+    [qc],
   );
   const signedIn = useCallback(
     (fresh: Me) => {

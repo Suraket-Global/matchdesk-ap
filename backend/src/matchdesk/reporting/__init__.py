@@ -10,6 +10,7 @@ from matchdesk.reporting.backtest import (
     export_csv,
     export_pdf,
     findings_of,
+    live_coverage,
     refund_evaluation,
     section_of,
 )
@@ -36,6 +37,7 @@ __all__ = [
     "export_csv",
     "export_pdf",
     "findings_of",
+    "live_coverage",
     "measure_findings",
     "refund_evaluation",
     "section_of",

@@ -225,10 +225,7 @@ def create_draft(
             )
         )
     item = [(lm, ln) for lm, ln in matches if lm.line_kind == "item"]
-    covered = sum(1 for lm, _ln in item if lm.covered)
-    with_receipt = sum(1 for lm, _ln in item if lm.receipt_line_count > 0)
-    class_b_lines = _class_b_lines(s, [lm.po_line_id for lm, _ln in item if lm.po_line_id])
-    class_b = sum(1 for lm, _ln in item if lm.po_line_id in class_b_lines and lm.receipt_line_count > 0)
+    cov = _coverage(s, item)
     history = s.scalar(
         select(func.min(InvoiceRow.doc_date)).where(
             InvoiceRow.purchase_order_id.in_({i.purchase_order_id for i in invoices if i.purchase_order_id})
@@ -248,9 +245,9 @@ def create_draft(
         "stale_lines": sum(1 for lm, _ln in matches if stale.get(lm.match_run_id)),
     }
     report.history_read_from = history
-    report.receipt_coverage_pct = _pct(with_receipt, len(item))
-    report.coverage_class_a_pct = _pct(covered, len(item))
-    report.coverage_class_b_pct = _pct(class_b, len(item))
+    report.receipt_coverage_pct = cov["receipt_coverage_pct"]
+    report.coverage_class_a_pct = cov["coverage_class_a_pct"]
+    report.coverage_class_b_pct = cov["coverage_class_b_pct"]
     report.class_c_only_lines = sum(
         1
         for e in excs
@@ -275,6 +272,35 @@ def create_draft(
         after={"version": report.version_no, "qualifying": str(report.qualifying_amount)},
     )
     return report
+
+
+def _coverage(s: Session, item: list[tuple[LineMatch, InvoiceLineRow]]) -> dict[str, Decimal | None]:
+    """Receipt coverage over invoiced PO item lines, one denominator for all three figures:
+    lines with a counting receipt, lines inside a declared-complete warehouse log (class A), and
+    lines with a counting receipt from a signed delivery document (class B)."""
+    covered = sum(1 for lm, _ln in item if lm.covered)
+    with_receipt = sum(1 for lm, _ln in item if lm.receipt_line_count > 0)
+    class_b_lines = _class_b_lines(s, [lm.po_line_id for lm, _ln in item if lm.po_line_id])
+    class_b = sum(1 for lm, _ln in item if lm.po_line_id in class_b_lines and lm.receipt_line_count > 0)
+    return {
+        "receipt_coverage_pct": _pct(with_receipt, len(item)),
+        "coverage_class_a_pct": _pct(covered, len(item)),
+        "coverage_class_b_pct": _pct(class_b, len(item)),
+    }
+
+
+def live_coverage(s: Session, start: date, end: date) -> dict[str, Any]:
+    """The coverage figures of a draft, computed from the current results now (S-08 strip; B3/B4
+    review W3: the strip no longer waits for a report draft)."""
+    ids = [i.id for i in _period_invoices(s, start, end)]
+    item = [(lm, ln) for lm, ln in _current_matches(s, ids) if lm.line_kind == "item"]
+    cov = _coverage(s, item)
+    return {
+        "period_start": start.isoformat(),
+        "period_end": end.isoformat(),
+        "item_lines": len(item),
+        **{k: (str(v) if v is not None else None) for k, v in cov.items()},
+    }
 
 
 def _class_b_lines(s: Session, po_line_ids: list[uuid.UUID]) -> set[uuid.UUID]:

@@ -54,6 +54,7 @@ def describe_alias(a: ItemAlias) -> dict[str, Any]:
         "valid_from": a.valid_from.isoformat() if a.valid_from else None,
         "valid_to": a.valid_to.isoformat() if a.valid_to else None,
         "retire_reason": a.retire_reason,
+        "reviewed_at": a.reviewed_at.isoformat() if a.reviewed_at else None,
         "version": a.version,
     }
 

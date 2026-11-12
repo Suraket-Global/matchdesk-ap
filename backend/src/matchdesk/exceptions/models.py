@@ -126,6 +126,9 @@ class ItemAlias(TenantMixin, Base):
     valid_to: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     retire_reason: Mapped[str | None] = mapped_column(Text)
     version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+    # The controller's acknowledgement of a new 1-to-1 alias on S-12 (B3/B4 review W5).
+    reviewed_by: Mapped[uuid.UUID | None] = mapped_column(UUIDT, ForeignKey("users.id"))
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class ToleranceRule(TenantMixin, Base):

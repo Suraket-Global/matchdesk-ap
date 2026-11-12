@@ -524,3 +524,178 @@ def test_m7_minor_import_class_above_the_attested_class_is_not_committed(app_eng
     assert commit(staged("C", 2)) == 200
     attest(app_engine, w, "A")
     assert commit(a) == 200
+
+
+# --- web findings that needed the API -------------------------------------------------------------
+
+
+def test_w3_coverage_is_live_without_a_report_draft(app_engine, client):  # type: ignore[no-untyped-def]
+    w = make_tenant(app_engine, "Fictional Distributor RV-W3")
+    add_receipt(app_engine, w, "100", date(2026, 9, 28))
+    inv = add_invoice(app_engine, w, "w3", "INV-W3", date(2026, 10, 6), "100")
+    match(client, app_engine, w.headers, [inv])
+    r = client.get("/api/v1/coverage", params=OCT, headers=w.headers)
+    assert r.status_code == 200, r.text  # was 404: the strip waited for a report
+    assert r.json()["item_lines"] == 1 and r.json()["receipt_coverage_pct"] == "100.00"
+    assert client.get("/api/v1/reports/backtest", headers=w.headers).json()["items"] == []
+
+
+def test_w5_mark_reviewed_empties_the_new_alias_list(app_engine, client):  # type: ignore[no-untyped-def]
+    w = make_tenant(app_engine, "Fictional Distributor RV-W5", role="controller")
+    waiting = [
+        a
+        for a in client.get("/api/v1/aliases?status=active", headers=w.headers).json()["items"]
+        if not a["reviewed_at"]
+    ]
+    assert len(waiting) == 1
+    first = client.post("/api/v1/aliases/review-acknowledgement", headers=w.headers).json()
+    assert first["acknowledged"] == 1
+    after = client.get("/api/v1/aliases?status=active", headers=w.headers).json()["items"]
+    assert all(a["reviewed_at"] for a in after)
+    assert (
+        client.post("/api/v1/aliases/review-acknowledgement", headers=w.headers).json()["acknowledged"] == 0
+    )
+
+
+def test_w8_background_requests_do_not_reset_the_idle_timer(app_engine, client):  # type: ignore[no-untyped-def]
+    w = make_tenant(app_engine, "Fictional Distributor RV-W8")
+    from matchdesk.tenancy import global_session
+
+    with global_session(app_engine) as s:
+        s.execute(
+            text("update sessions set last_seen_at = now() - interval '30 minutes' where user_id = :u"),
+            {"u": w.user_id},
+        )
+    assert (
+        client.get("/api/v1/exceptions", headers={**w.headers, "X-Background-Request": "1"}).status_code
+        == 200
+    )
+    with global_session(app_engine) as s:
+        idle = s.scalar(
+            text("select now() - last_seen_at from sessions where user_id = :u"), {"u": w.user_id}
+        )
+    assert idle.total_seconds() >= 29 * 60  # polling is not activity
+    assert client.get("/api/v1/exceptions", headers=w.headers).status_code == 200
+    with global_session(app_engine) as s:
+        idle = s.scalar(
+            text("select now() - last_seen_at from sessions where user_id = :u"), {"u": w.user_id}
+        )
+    assert idle.total_seconds() < 60
+
+
+def test_w8_bulk_retry_with_the_same_key_reports_what_was_applied(app_engine, client):  # type: ignore[no-untyped-def]
+    w = make_tenant(app_engine, "Fictional Distributor RV-W8b")
+    inv = add_invoice(app_engine, w, "w8", "INV-W8", date(2026, 10, 6), "10", price="4.50")
+    match(client, app_engine, w.headers, [inv])
+    pv = queue(client, w.headers, type="price_variance", status="open")
+    body = {
+        "items": [{"id": e["id"], "version": e["version"]} for e in pv],
+        "code": "source_corrected",
+        "note": None,
+    }
+    h = {**w.headers, "Idempotency-Key": f"bulk-{uuid.uuid4()}"}
+    first = client.post("/api/v1/exceptions/bulk-resolutions", json=body, headers=h)
+    again = client.post("/api/v1/exceptions/bulk-resolutions", json=body, headers=h)
+    assert first.status_code == 200 and again.status_code == 200, again.text  # was 409, shown as a failure
+    assert [r["result"] for r in again.json()["results"]] == ["resolved"]
+
+
+def test_w7_engine_flags_over_ordered_only_cumulatively(app_engine, client):  # type: ignore[no-untyped-def]
+    """Review W7 asked whether the engine raises qty_over_ordered wrongly (FF-1006). It does not: a
+    line alone under the ordered quantity is not flagged; the same line after an earlier invoice for
+    the full order is, because MatchDesk counts cumulatively (MH-06). The fix is in the words."""
+    w = make_tenant(app_engine, "Fictional Distributor RV-W7")
+    add_receipt(app_engine, w, "100", date(2026, 9, 28))
+    alone = add_invoice(app_engine, w, "w7a", "INV-W7A", date(2026, 10, 6), "10")
+    match(client, app_engine, w.headers, [alone])
+    assert not queue(client, w.headers, type="qty_over_ordered")
+    w2 = make_tenant(app_engine, "Fictional Distributor RV-W7b")
+    add_receipt(app_engine, w2, "100", date(2026, 9, 28))
+    full = add_invoice(app_engine, w2, "w7f", "INV-W7F", date(2026, 10, 5), "100")
+    more = add_invoice(app_engine, w2, "w7m", "INV-W7M", date(2026, 10, 6), "10")
+    match(client, app_engine, w2.headers, [full, more])
+    over = queue(client, w2.headers, type="qty_over_ordered")
+    assert [e["doc_number"] for e in over] == ["INV-W7M"] and over[0]["variance_qty"].startswith("10")
+
+
+def test_appflow_s05_s16_columns_and_receipt_lines_name_the_po_line(app_engine, client):  # type: ignore[no-untyped-def]
+    from .seed import attest
+
+    w = make_tenant(app_engine, "Fictional Distributor RV-AF", role="controller")
+    attest(app_engine, w)
+    data = b"PO,Line,Qty,UOM,Received\n4471,2,5,EA,2026-10-01\n"
+    imp = upload(client, w, data, name="af.csv").json()["id"]
+    client.put(
+        f"/api/v1/receiving/imports/{imp}/mapping",
+        json={
+            "columns": {
+                "po_number": "PO",
+                "line_no": "Line",
+                "qty_received": "Qty",
+                "received_date": "Received",
+                "uom": "UOM",
+            }
+        },
+        headers=w.headers,
+    )
+    assert client.post(f"/api/v1/receiving/imports/{imp}/commit", headers=w.headers).status_code == 200
+    listed = client.get("/api/v1/receiving/imports", headers=w.headers).json()["items"]
+    assert listed[0]["late_lines_waiting"] == 0
+    detail = client.get(f"/api/v1/receiving/imports/{imp}", headers=w.headers).json()
+    ln = detail["receipts"][0]["lines"][0]
+    assert ln["po_line_no"] == 2 and ln["uom"] == "EA"
+    users = client.get("/api/v1/users", headers=w.headers).json()["items"]
+    assert "last_sign_in_at" in users[0]
+
+
+def test_appflow_s01_link_carries_the_address_in_the_fragment(app_engine):  # type: ignore[no-untyped-def]
+    from . import b2_helpers as b2
+
+    if not b2.mailpit_up():
+        pytest.skip("Mailpit is not running on 127.0.0.1:8025")
+    w = make_tenant(app_engine, "Fictional Distributor RV-S01")
+    with session(w.tenant_id, app_engine) as s:
+        address = s.scalar(text("select email from users where id = :u"), {"u": w.user_id})
+    c = b2.client()
+    assert c.post("/api/v1/auth/login-links", json={"email": address}).status_code in (200, 202)
+    found = b2.wait_for_messages(address)
+    text_ = b2.message_text(found[0]["ID"])
+    assert f"#t={b2.token_from(text_)}&e={address.replace('@', '%40')}" in text_
+    b2.delete_messages_to(address)
+
+
+def test_appflow_s06_s09_duplicate_links_original_and_billed_quantity_is_shown(app_engine, client):  # type: ignore[no-untyped-def]
+    w = make_tenant(app_engine, "Fictional Distributor RV-S06")
+    add_receipt(app_engine, w, "100", date(2026, 9, 28))
+    inv = add_invoice(app_engine, w, "s9", "INV-S9", date(2026, 10, 6), "10")
+    with session(w.tenant_id, app_engine) as s:
+        bill = s.scalar(
+            text(
+                "insert into qbo_bills (tenant_id, txn_type, qbo_id, vendor_id, doc_number, doc_number_norm, "
+                "txn_date, total, balance, paid_status, synced_at) values (:t, 'bill', 'B9', :v, 'B-9', 'b9', "
+                "'2026-10-01', 42, 0, 'paid', now()) returning id"
+            ),
+            {"t": w.tenant_id, "v": w.vendor_id},
+        )
+        s.execute(
+            text(
+                "insert into qbo_bill_lines (tenant_id, qbo_bill_id, qty, amount, po_line_id) "
+                "values (:t, :b, 10, 42, :pl)"
+            ),
+            {"t": w.tenant_id, "b": bill, "pl": w.po_line_id},
+        )
+    match(client, app_engine, w.headers, [inv])
+    body = client.get(f"/api/v1/invoices/{inv}", headers=w.headers).json()
+    assert body["lines"][0]["purchase_order"]["qbo_billed_qty"] == "10"  # shown greyed, never a receipt
+    bid = client.post("/api/v1/intake/batches", headers=w.headers).json()["id"]
+    for name in ("a.pdf", "a copy.pdf"):
+        r = client.post(
+            f"/api/v1/intake/batches/{bid}/files",
+            files={"file": (name, b"%PDF-1.4 synthetic s06", "application/pdf")},
+            headers={**w.headers, "Idempotency-Key": f"s06-{name}"},
+        )
+        assert r.status_code in (200, 201), r.text
+    drain(app_engine)
+    batch = client.get(f"/api/v1/intake/batches/{bid}", headers=w.headers).json()
+    dup = [f for f in batch["files"] if f["duplicate_of_document_id"]]
+    assert dup and "duplicate_of_invoice_id" in dup[0]

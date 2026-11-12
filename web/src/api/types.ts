@@ -259,6 +259,7 @@ export interface BatchFile {
   byte_size: number;
   mime_type: string;
   duplicate_of_document_id: string | null;
+  duplicate_of_invoice_id?: string | null;
   original_name: string | null;
   invoices: { id: string; doc_type: string; doc_number: string | null; vendor_name: string | null; verification_status: string }[];
 }
@@ -277,6 +278,7 @@ export interface ReceivingImport {
   rows_total: number | null;
   rows_valid: number | null;
   rows_rejected: number | null;
+  late_lines_waiting?: number;
   rejected_rows: { row: number; reason: string; [k: string]: unknown }[] | null;
   committed_at: string | null;
   voided_at: string | null;
@@ -295,7 +297,7 @@ export interface ReceivingImport {
     receiver_marks_present: boolean | null;
     receiver_name: string | null;
     version: number;
-    lines: { id: string; po_line_id: string; qty_received: string; source_row: number; added_after_exception: boolean; late_approved: boolean }[];
+    lines: { id: string; po_line_id: string; po_line_no?: number | null; uom?: string | null; qty_received: string; source_row: number; added_after_exception: boolean; late_approved: boolean }[];
   }[];
   late_lines?: number;
   match_run_id?: string | null;
@@ -316,6 +318,7 @@ export interface Alias {
   status: string;
   approved_by: string | null;
   approved_by_name?: string | null;
+  reviewed_at?: string | null;
   created_by_name?: string | null;
   valid_from: string | null;
   valid_to: string | null;
@@ -409,6 +412,7 @@ export interface UserRow {
   display_name: string | null;
   role: string;
   status: string;
+  last_sign_in_at?: string | null;
 }
 
 export interface Invitation {
@@ -467,4 +471,13 @@ export interface Item {
   sku: string | null;
   name: string;
   purchase_uom: string | null;
+}
+
+export interface Coverage {
+  period_start: string;
+  period_end: string;
+  item_lines: number;
+  receipt_coverage_pct: string | null;
+  coverage_class_a_pct: string | null;
+  coverage_class_b_pct: string | null;
 }

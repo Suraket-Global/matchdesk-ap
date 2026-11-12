@@ -4,10 +4,10 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, errorText, get, send } from "../api/client";
 import type { ExceptionItem, ExceptionPage, InvoiceDetail, InvoiceLine } from "../api/types";
 import { useSession } from "../app/session";
-import { Banner, ErrorState, Loading, StatusChip, toast, usePageTitle } from "../components/ui";
-import { cad, compareDecimal, money, qty, toCents } from "../lib/decimal";
-import { day } from "../lib/format";
-import { CONTROLLER_ONLY_CODES, RESOLUTION_CODES, RESOLUTION_HINTS, SUB_REASONS, typeWord } from "../lib/words";
+import { Banner, ErrorState, Loading, NarrowNote, StatusChip, toast, usePageTitle } from "../components/ui";
+import { cad, compareDecimal, money, price, qty, toCents } from "../lib/decimal";
+import { day, safePath } from "../lib/format";
+import { CONTROLLER_ONLY_CODES, RESOLUTION_CODES, RESOLUTION_HINTS, SUB_REASONS, typeWord, zeroCounted } from "../lib/words";
 import { chipFor } from "./Exceptions";
 
 const PdfViewer = lazy(() => import("../components/PdfViewer"));
@@ -49,7 +49,8 @@ export function MatchViewPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { can, role } = useSession();
-  const fromUrl = params.get("from") ?? "/exceptions";
+  // Only a path inside the app: never a full URL or javascript: (review W1, same rule as ?next=).
+  const fromUrl = safePath(params.get("from"), "/exceptions");
   const fromParams = new URLSearchParams(fromUrl.split("?")[1] ?? "");
   const q = useQuery({
     queryKey: ["invoice", invoiceId],
@@ -84,6 +85,7 @@ export function MatchViewPage() {
   const [msg, setMsg] = useState<{ tone: "warn" | "error" | "ok"; text: string } | null>(null);
   useEffect(() => {
     setCode("");
+    setNote(""); // a note typed for one exception never carries to the next (review, minor)
     setMsg(null);
   }, [current?.id]);
   const loadedId = q.data?.id;
@@ -200,6 +202,7 @@ export function MatchViewPage() {
           </button>
         </div>
       </div>
+      <NarrowNote />
       {inv.stale && (
         <Banner tone="draft" role="status">
           Matching… Inputs changed since the last result; the new result appears here without a reload.
@@ -210,11 +213,12 @@ export function MatchViewPage() {
           This document is waiting for extraction review. <Link to={`/invoices/${inv.id}/review`}>Review the extraction</Link>
         </Banner>
       )}
-      {docExcs.length > 0 && (
+      {docExcs.length > 0 && !inv.stale && (
         <Banner tone="warn">
           {docExcs.map((e) => (
             <p key={e.id}>
-              {typeWord(e.type)}: {chipFor(e)}
+              {typeWord(e.type)}
+              {money(e.reported_amount ?? e.variance_amount) ? ` (${cad(e.reported_amount ?? e.variance_amount)})` : ""} {chipFor(e)}
             </p>
           ))}
         </Banner>
@@ -252,7 +256,7 @@ export function MatchViewPage() {
                   {qty(line.qty)} {line.uom}
                 </dd>
                 <dt>Unit price</dt>
-                <dd>{qty(line.unit_price)}</dd>
+                <dd>{price(line.unit_price)}</dd>
                 <dt>Amount</dt>
                 <dd>{cad(line.amount)}</dd>
               </dl>
@@ -275,7 +279,7 @@ export function MatchViewPage() {
                   {qty(po.qty_ordered)} {po.uom}
                 </dd>
                 <dt>PO price</dt>
-                <dd>{qty(po.unit_price)}</dd>
+                <dd>{price(po.unit_price)}</dd>
                 <dt>Our item</dt>
                 <dd>{[po.item_sku, po.item_name].filter(Boolean).join(" · ") || po.description}</dd>
                 <dt>Alias</dt>
@@ -387,10 +391,16 @@ export function MatchViewPage() {
                 {lineChip(line, inv.exceptions)}{" "}
                 {lineExcs.map((e) => (
                   <span key={e.id} style={{ marginLeft: 6 }}>
-                    {typeWord(e.type)} {money(e.reported_amount ?? e.variance_amount) && `(${cad(e.reported_amount ?? e.variance_amount)})`}
+                    {typeWord(e.type)} {zeroCounted(e) ? `(by ${qty(e.variance_qty)})` : money(e.reported_amount ?? e.variance_amount) && `(${cad(e.reported_amount ?? e.variance_amount)})`}
                   </span>
                 ))}
               </div>
+            )}
+            {lineExcs.some(zeroCounted) && (
+              <p className="small">
+                The line's amount is counted once, under {typeWord(lineExcs.find((e) => !zeroCounted(e))?.type ?? "").toLowerCase() || "another exception"}; the other exceptions on
+                it are listed with their quantity and add nothing to the total.
+              </p>
             )}
             <p className="sentence">{m ? m.calculation : "This line has no match result yet."}</p>
             {absent && current?.sub_reason && <p>{ABSENT_TEXT[current.sub_reason]?.(amount ?? "0") ?? SUB_REASONS[current.sub_reason]}</p>}
@@ -410,11 +420,11 @@ export function MatchViewPage() {
                 </div>
                 <div>
                   <dt>PO price</dt>
-                  <dd>{qty(m.po_unit_price)}</dd>
+                  <dd>{price(m.po_unit_price)}</dd>
                 </div>
                 <div>
                   <dt>Invoice price</dt>
-                  <dd>{qty(m.invoice_unit_price_po_uom)}</dd>
+                  <dd>{price(m.invoice_unit_price_po_uom)}</dd>
                 </div>
               </dl>
             )}
@@ -430,7 +440,7 @@ export function MatchViewPage() {
           <div className="inner">
             <div style={{ minWidth: 220 }}>
               <strong>{typeWord(current.type)}</strong> {chipFor(current)}
-              <div className="small muted">{amount ? `Value ${cad(amount)}` : ""}</div>
+              <div className="small muted">{zeroCounted(current) ? "Adds nothing: the line's amount is counted under another exception" : amount ? `Value ${cad(amount)}` : ""}</div>
             </div>
             {msg && (
               <p className={msg.tone === "error" ? "error-text" : "muted"} role="alert" style={{ flexBasis: "100%", margin: 0 }}>

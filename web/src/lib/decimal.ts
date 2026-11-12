@@ -108,3 +108,11 @@ function scale(n: bigint, decimals: number, places: number): string {
   const out = d === 0 ? s : `${s.slice(0, -d)}.${s.slice(-d)}`;
   return out;
 }
+
+/** A unit price: trailing zeros beyond the cents are dropped, the cents are kept ("4.20", "0.075"). */
+export function price(value: string | null | undefined): string {
+  const s = qty(value);
+  if (!s) return s;
+  const [i, f = ""] = s.split(".");
+  return `${i}.${f.padEnd(2, "0")}`;
+}

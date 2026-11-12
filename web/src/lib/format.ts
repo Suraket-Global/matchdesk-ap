@@ -57,3 +57,12 @@ export function monthName(ym: string): string {
   const [y, m] = ym.split("-").map((p) => Number(p));
   return new Intl.DateTimeFormat("en-CA", { month: "long", year: "numeric" }).format(new Date(y, m - 1, 1));
 }
+
+/** A same-site path to go back to, or the fallback. Refuses absolute URLs, `//host`, backslashes and
+ * `javascript:` (used for `?next=` after sign-in and `?from=` on the match view; review W1). */
+export function safePath(value: string | null | undefined, fallback = "/"): string {
+  if (!value || !value.startsWith("/") || value.startsWith("//") || value.startsWith("/\\")) return fallback;
+  // eslint-disable-next-line no-control-regex -- refusing control characters is the point
+  if (/[\u0000-\u001f\\]/.test(value)) return fallback;
+  return value;
+}

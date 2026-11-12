@@ -48,8 +48,8 @@ function SignedIn() {
   const location = useLocation();
   if (loading) return <Loading label="Signing in" />;
   const back = location.pathname + location.search;
-  if (!me) return <Navigate to={`/login?next=${encodeURIComponent(back)}`} replace />;
   if (expired) return <Navigate to={`/signed-out?expired=1&next=${encodeURIComponent(back)}`} replace />;
+  if (!me) return <Navigate to={`/login?next=${encodeURIComponent(back)}`} replace />;
   if (me.user.is_operator && !me.active_tenant_id)
     return (
       <Shell>
@@ -278,12 +278,12 @@ function IdleGuard() {
       const left = lastServerContact() + IDLE - Date.now();
       if (left <= 0) {
         window.clearInterval(t);
-        qc.setQueryData(["me"], null);
         navigate(`/signed-out?expired=1&next=${encodeURIComponent(location.pathname + location.search)}`);
+        void signOut(); // ends the server session and clears every cached read (review W8)
       } else if (left <= 2 * 60_000) setWarn(true);
     }, 5_000);
     return () => window.clearInterval(t);
-  }, [navigate, qc, me]);
+  }, [navigate, qc, me, signOut]);
   return (
     <Dialog
       open={warn}

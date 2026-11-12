@@ -6,7 +6,7 @@ import type { Alias, Approval, ExceptionPage, Page, ReceivingImport } from "../a
 import { Dialog, Empty, ErrorState, Field, Loading, PageHead, toast, usePageTitle } from "../components/ui";
 import { cad } from "../lib/decimal";
 import { multiply, qty } from "../lib/decimal";
-import { when } from "../lib/format";
+import { plural, when } from "../lib/format";
 import { typeWord, EVIDENCE_CLASSES } from "../lib/words";
 
 function sentence(a: Approval): string {
@@ -60,7 +60,10 @@ export function ApprovalsPage() {
   });
   const ack = useMutation({
     mutationFn: () => send<{ acknowledged: number }>("POST", "/api/v1/aliases/review-acknowledgement"),
-    onSuccess: (r) => toast(`${r.acknowledged} new aliases marked reviewed.`),
+    onSuccess: (r) => {
+      qc.invalidateQueries({ queryKey: ["aliases"] }); // the list empties (review W5)
+      toast(`${plural(r.acknowledged, "new alias", "new aliases")} marked reviewed.`);
+    },
   });
   if (q.isLoading) return <Loading />;
   if (q.error) return <ErrorState error={q.error} retry={() => q.refetch()} />;
@@ -71,13 +74,13 @@ export function ApprovalsPage() {
     ["late_receipt", "Late receiving evidence", items.filter((a) => a.subject_type === "late_receipt")],
   ];
   const conflict = decide.error instanceof ApiError && decide.error.status === 409;
-  const newAliases = (aliases.data?.items ?? []).filter((a) => !a.approved_by && /^1(\.0+)?$/.test(a.conversion_factor));
+  const newAliases = (aliases.data?.items ?? []).filter((a) => !a.approved_by && !a.reviewed_at && /^1(\.0+)?$/.test(a.conversion_factor));
   return (
     <>
       <PageHead title="Approvals" lede="Approve or return what your clerk cannot decide alone." />
       {items.length === 0 && (
         <div className="panel" style={{ marginBottom: 16 }}>
-          <Empty title="Nothing is waiting for you." />
+          <Empty title={newAliases.length ? "No approvals are waiting. New aliases are waiting for your review below." : "Nothing is waiting for you."} />
         </div>
       )}
       <div className="stack">

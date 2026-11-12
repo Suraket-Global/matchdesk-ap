@@ -49,6 +49,15 @@ def register_report_routes(app: FastAPI, engine: Engine) -> None:
                 "blocking": reporting.blocking_reasons(s, r.period_start, r.period_end),
             }
 
+    @app.get("/api/v1/coverage")
+    def get_coverage(p: Auth, period_start: date, period_end: date) -> dict[str, Any]:
+        """Receipt coverage of a period from the current results (S-08 strip; B3/B4 review W3)."""
+        require(p, "read")
+        if period_end < period_start:
+            raise HTTPException(422, "the period ends before it starts")
+        with session(p.tenant_id, engine) as s:
+            return reporting.live_coverage(s, period_start, period_end)
+
     @app.get("/api/v1/reports/backtest")
     def list_reports(p: Auth, cursor: uuid.UUID | None = None, limit: int | None = None) -> dict[str, Any]:
         require(p, "read")
