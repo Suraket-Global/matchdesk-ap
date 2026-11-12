@@ -56,7 +56,7 @@ You see the **Onboarding checklist**: QuickBooks is connected and 7 purchase ord
 
 1. Choose **Intake** in the sidebar.
 2. Drag all 13 files from `play-files/invoices/` onto the box (or **Choose files** and select them all).
-3. You land on the batch. The six counts always add up to 13. Within a few seconds: "13 files read: **10 ready, 2 need review, 0 failed, 1 duplicate**." Files are listed in name order. Of the two identical FF-1002 files, the one uploaded second is the duplicate. Files are sent in name order, so `FF-1002 copy.pdf` goes first and `FF-1002.pdf` is marked **Duplicate file**: "Same as FF-1002 copy.pdf", linked to the original's match view.
+3. You land on the batch. The six counts always add up to 13. Within a few seconds: "13 files read: **10 ready, 2 need review, 0 failed, 1 duplicate**." Files are listed in name order. Of the two identical FF-1002 files, the one that arrives second (four files are sent at a time) is marked **Duplicate file**, "Same as …" the other, linked to the original's match view.
 
 ## 4. Fix what was misread
 

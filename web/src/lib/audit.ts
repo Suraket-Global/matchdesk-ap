@@ -59,6 +59,8 @@ const ACTION: Record<string, string> = {
   "waiver_limits.changed": "Waiver limits changed",
   "pilot.created": "Pilot record created",
   "pilot.updated": "Pilot record changed",
+  "pilot.governing_set": "Governing report version chosen",
+  "support_grant.declined": "Support access declined",
   "support_grant.requested": "Support access requested",
   "support_grant.granted": "Support access granted",
   "support_grant.ended": "Support access ended",

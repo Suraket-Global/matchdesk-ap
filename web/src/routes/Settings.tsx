@@ -439,7 +439,7 @@ function SupportAccessPanel() {
           <div key={g.id} className="grant-row">
             <div>
               <StatusChip status={g.status} />{" "}
-              <strong>{g.requested_by_name ?? "MatchDesk support"}</strong> asks for {hoursWord(g.hours_requested)} of read-only access.
+              <strong>{g.requested_by_name ?? "MatchDesk support"}</strong> {g.status === "active" ? "has" : "asks for"} {hoursWord(g.hours_requested)} of read-only access.
               <div className="small muted">
                 Reason: {g.reason}. Asked {when(g.requested_at)}
                 {g.status === "active" ? `; granted by ${g.granted_by_name ?? "a controller"}, ends ${when(g.ends_at)}` : ""}.
