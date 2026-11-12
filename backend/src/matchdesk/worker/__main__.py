@@ -12,9 +12,15 @@ from matchdesk.exceptions import MATCH_REQUEST_TASK, MATCH_RUN_TASK, execute_run
 from matchdesk.extraction import extractor_from_settings
 from matchdesk.intake import PROCESS_DOCUMENT_TASK, make_handler
 from matchdesk.qbo import SYNC_TASK, make_sync_handler, reader_from_settings
+from matchdesk.schema_registry import load_all_models
 from matchdesk.tenancy import claim, get_engine, run_claimed
 
 log = get_logger("matchdesk.worker")
+
+# Every ORM model must be registered before the first flush: a standalone worker that never imported
+# the identity models could not resolve the tenants foreign key of extraction_runs and left uploaded
+# documents stuck in "running" (found in B4 when files were uploaded through the web app).
+load_all_models()
 
 
 def handlers(engine: Any) -> dict[str, Any]:

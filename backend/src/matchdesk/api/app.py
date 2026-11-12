@@ -402,7 +402,13 @@ def create_app(mailer: Mailer | None = None, qbo_token_endpoint: TokenEndpoint |
         if len(data) > MAX_FILE_BYTES[mime]:
             raise HTTPException(413, "File is larger than 20 MB")
         name = (file.filename or "")[:255] or None
-        return await run_in_threadpool(_store_file, p, batch_id, idempotency_key, data, mime, name)
+        try:
+            return await run_in_threadpool(_store_file, p, batch_id, idempotency_key, data, mime, name)
+        except IntegrityError:
+            # Two byte-identical files uploaded at the same moment (the web app sends four at a
+            # time): the loser of the unique-file race retries once and is stored as a duplicate
+            # file of the winner, instead of failing with 500 (B4).
+            return await run_in_threadpool(_store_file, p, batch_id, idempotency_key, data, mime, name)
 
     def _store_file(
         p: Principal, batch_id: uuid.UUID, key: str, data: bytes, mime: str, name: str | None

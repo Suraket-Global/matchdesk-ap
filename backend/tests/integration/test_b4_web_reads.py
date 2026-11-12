@@ -168,3 +168,26 @@ def test_receiving_import_keeps_the_file_name(app_engine, client):  # type: igno
         data={"evidence_class": "A"},
     )
     assert again.status_code in (201, 409)  # a draft is not live yet; a committed file would be 409
+
+
+def test_identical_files_uploaded_at_once_become_one_document_and_a_duplicate(app_engine, client):  # type: ignore[no-untyped-def]
+    from concurrent.futures import ThreadPoolExecutor
+
+    w = make_tenant(app_engine, "Fictional Distributor B4-9")
+    batch = client.post("/api/v1/intake/batches", headers=w.headers).json()["id"]
+    data = b"%PDF-1.4\n% synthetic identical upload B4-9\n%%EOF\n"
+
+    def put(n: int) -> int:
+        r = client.post(
+            f"/api/v1/intake/batches/{batch}/files",
+            headers={**w.headers, "Idempotency-Key": f"race-{n}"},
+            files={"file": (f"copy-{n}.pdf", data, "application/pdf")},
+        )
+        return r.status_code
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        codes = list(pool.map(put, range(4)))
+    assert codes == [201, 201, 201, 201]
+    files = client.get(f"/api/v1/intake/batches/{batch}", headers=w.headers).json()["files"]
+    states = sorted(f["state"] for f in files)
+    assert len(files) == 4 and states.count("duplicate_file") == 3

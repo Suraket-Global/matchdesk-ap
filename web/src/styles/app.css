@@ -907,16 +907,16 @@ dialog.modal::backdrop {
   align-items: start;
   padding-bottom: 96px;
 }
-.pane-doc {
+.match-grid > .pane-doc {
   grid-area: doc;
 }
-.pane-po {
+.match-grid > .pane-po {
   grid-area: po;
 }
-.pane-rec {
+.match-grid > .pane-rec {
   grid-area: rec;
 }
-.pane-calc {
+.match-grid > .pane-calc {
   grid-area: calc;
 }
 @media (max-width: 1439px) {

@@ -5,7 +5,7 @@ import { download, errorText, get, send } from "../api/client";
 import type { Page, Refund, Report } from "../api/types";
 import { useSession } from "../app/session";
 import { Banner, Dialog, Empty, ErrorState, Loading, PageHead, StatusChip, toast, usePageTitle } from "../components/ui";
-import { cad, formatCents, money, sumCents } from "../lib/decimal";
+import { cad, cadCents, formatCents, money, sumCents } from "../lib/decimal";
 import { day, lastMonth, monthName, monthRange, plural, when } from "../lib/format";
 import { typeWord } from "../lib/words";
 
@@ -166,6 +166,12 @@ export function ReportPage() {
   const navigate = useNavigate();
   const q = useQuery({ queryKey: ["report", reportId], queryFn: () => get<Report>(`/api/v1/reports/backtest/${reportId}`) });
   const r = q.data;
+  const users = useQuery({
+    queryKey: ["users"],
+    queryFn: () => get<Page<{ user_id: string; display_name: string | null; email: string }>>("/api/v1/users"),
+    enabled: can("manage_users") && !!r?.approved_by,
+  });
+  const approver = users.data?.items.find((u) => u.user_id === r?.approved_by);
   usePageTitle("Back-test report", r ? `${monthName(r.period_start.slice(0, 7))} v${r.version_no}` : null);
   const list = useQuery({ queryKey: ["reports"], queryFn: () => get<Page<Report>>("/api/v1/reports/backtest?limit=200") });
   const refund = useQuery({
@@ -214,10 +220,10 @@ export function ReportPage() {
   const waived = f.filter((x) => x.section === "waived");
   const open = f.filter((x) => x.section === "open");
   const flaggedCount = findings.length + notReceived.length;
-  const flagged = formatCents(sumCents([...findings, ...notReceived].map((x) => x.amount)));
+  const flagged = sumCents([...findings, ...notReceived].map((x) => x.amount));
   const confirmed = [...findings, ...notReceived].filter((x) => (x.snapshot as Record<string, unknown>).resolution_code === "confirmed_overbilling");
   const byType = new Map<string, Finding[]>();
-  for (const x of [...findings, ...notReceived]) byType.set(x.type, [...(byType.get(x.type) ?? []), x]);
+  for (const x of findings) byType.set(x.type, [...(byType.get(x.type) ?? []), x]);
   const bySupplier = new Map<string, Finding[]>();
   for (const x of [...findings, ...notReceived]) {
     const v = String((x.snapshot as Record<string, unknown>).vendor_name ?? "Unknown");
@@ -230,7 +236,7 @@ export function ReportPage() {
       <PageHead
         title={`Back-test ${monthName(r.period_start.slice(0, 7))}`}
         crumbs={<Link to="/reports">Back-test reports</Link>}
-        lede={`${day(r.period_start)} to ${day(r.period_end)}. Data cut-off ${when(r.data_cutoff_at)}.`}
+        lede={`${day(r.period_start)} to ${day(r.period_end)}. Data cut-off: ${when(r.data_cutoff_at)}`}
         actions={
           <>
             <button className="btn" onClick={() => exportAs("pdf")} disabled={!!exporting}>
@@ -263,7 +269,7 @@ export function ReportPage() {
         <Banner tone="approved">
           <p>
             <strong>
-              APPROVED on {when(r.approved_at)} · version {r.version_no}
+              APPROVED{approver ? ` by ${approver.display_name || approver.email}` : ""} on {when(r.approved_at)} · version {r.version_no}
             </strong>
             {r.is_stale && " · lines were re-matched after approval; refresh to create a new draft version."}
           </p>
@@ -303,7 +309,7 @@ export function ReportPage() {
       <div className="cards">
         <div>
           <span className="muted small">Flagged discrepancies</span>
-          <span className="big">{cad(flagged)}</span>
+          <span className="big">{cadCents(flagged)}</span>
           <span className="small">{plural(flaggedCount, "item")}</span>
         </div>
         <div>
@@ -323,8 +329,8 @@ export function ReportPage() {
         </div>
       </div>
       <p>
-        Flagged discrepancies {flaggedCount}, {cad(flagged)}. Confirmed overcharges by the controller {confirmed.length},{" "}
-        {cad(formatCents(sumCents(confirmed.map((c) => c.amount))))}. Credit actually recovered: not recorded yet.
+        Flagged discrepancies {flaggedCount}, {cadCents(flagged)}. Confirmed overcharges by the controller {confirmed.length},{" "}
+        {cadCents(sumCents(confirmed.map((c) => c.amount)))}. Credit actually recovered: not recorded yet.
       </p>
 
       <section>
@@ -487,7 +493,7 @@ export function ReportPage() {
           </div>
         )}
         <p>
-          Approve version {r.version_no} of the {monthName(r.period_start.slice(0, 7))} back-test. Findings {cad(r.findings_amount)}, of which not received{" "}
+          Approve version {r.version_no} of the {monthName(r.period_start.slice(0, 7))} back-test. Findings {cadCents(flagged)}, of which not received{" "}
           {cad(r.not_received_amount)}. Unverified because no receiving evidence: {cad(r.unverified_amount)} on {plural(S.unverified?.count ?? 0, "item")}.{" "}
           {plural(open.length, "exception")} still open will be listed as open. Approved figures cannot be changed; later corrections create a new version.
         </p>

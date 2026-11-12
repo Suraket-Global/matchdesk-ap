@@ -127,3 +127,32 @@ def test_it07_batch_states_sum_and_retry_touches_only_failures(app_engine):  # t
         assert s.execute(text("select count(*) from documents")).scalar() == count
         assert batch_summary(s, batch.id)["file_count"] == 240
     assert uuid.UUID(str(batch.id))
+
+
+def test_unexpected_failure_after_the_lease_releases_the_document(app_engine, monkeypatch):  # type: ignore[no-untyped-def]
+    """B4 regression: an error while storing a result left the document "running" and the job's
+    retry skipped it, so the batch never finished. The document goes to retry_wait and the retry
+    processes it."""
+    from matchdesk.intake import process_document
+    from matchdesk.intake import service as svc
+
+    w = make_tenant(app_engine, "Fictional Distributor B4-lease")
+    with session(w.tenant_id, app_engine) as s:
+        batch = create_batch(s, w.tenant_id)
+        doc = add_file(s, w.tenant_id, w.user_id, batch.id, "k", fake_pdf(77))
+        doc_id = doc.id
+    real = svc.materialise
+    calls = {"n": 0}
+
+    def flaky(*a, **k):  # type: ignore[no-untyped-def]
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("synthetic failure while storing the result")
+        return real(*a, **k)
+
+    monkeypatch.setattr(svc, "materialise", flaky)
+    with pytest.raises(RuntimeError):
+        process_document(app_engine, w.tenant_id, doc_id, FakeExtractor())
+    with session(w.tenant_id, app_engine) as s:
+        assert s.get(DocumentRow, doc_id).state == "retry_wait"  # type: ignore[union-attr]
+    assert process_document(app_engine, w.tenant_id, doc_id, FakeExtractor()) == "succeeded"

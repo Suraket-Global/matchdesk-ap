@@ -255,7 +255,14 @@ def process_document(
         extracted = extractor.extract(data)
     except (ExtractionPermanentError, ExtractionTransientError) as exc:
         return complete(engine, tenant_id, document_id, sha, None, exc)
-    return complete(engine, tenant_id, document_id, sha, extracted)
+    try:
+        return complete(engine, tenant_id, document_id, sha, extracted)
+    except Exception as exc:
+        # An unexpected failure after the lease was taken must not leave the document "running"
+        # until the lease expires while the job's retry skips it (B4): release it as retry_wait
+        # (or failed after the last attempt) and let the job wrapper retry.
+        complete(engine, tenant_id, document_id, sha, None, ExtractionTransientError(type(exc).__name__))
+        raise
 
 
 def make_handler(engine: Engine, extractor: Extractor) -> Any:

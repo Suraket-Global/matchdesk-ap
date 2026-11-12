@@ -6,7 +6,7 @@ import type { Batch, ExceptionItem, ExceptionPage, Page, Report, Vendor } from "
 import { useSession } from "../app/session";
 import { useKeys } from "../app/shortcuts";
 import { Dialog, Empty, ErrorState, Loading, PageHead, StatusChip, usePageTitle } from "../components/ui";
-import { cad, compareDecimal, formatCents, money, qty, sumCents, toCents } from "../lib/decimal";
+import { cad, cadCents, compareDecimal, formatCents, money, qty, sumCents, toCents } from "../lib/decimal";
 import { ageDays, ageText, lastMonth, monthName, plural } from "../lib/format";
 import { EXCEPTION_STATUS, RESOLUTION_CODES, RESOLUTION_HINTS, SUB_REASONS, typeWord } from "../lib/words";
 
@@ -166,10 +166,10 @@ export function ExceptionsPage() {
           </span>
         )}
         <span>
-          Not received: <strong>{plural(notReceived.length, "line")}, {cad(formatCents(sumCents(notReceived.map(value))))}</strong>
+          Not received: <strong>{plural(notReceived.length, "line")}, {cadCents(sumCents(notReceived.map(value)))}</strong>
         </span>
         <span>
-          Unverified: <strong>{plural(unverified.length, "line")}, {cad(formatCents(sumCents(unverified.map(value))))}</strong>
+          Unverified: <strong>{plural(unverified.length, "line")}, {cadCents(sumCents(unverified.map(value)))}</strong>
         </span>
         <Link to="/receiving">Receiving imports</Link>
       </div>
@@ -396,7 +396,7 @@ function BulkDialog({ items, onClose }: { items: ExceptionItem[]; onClose: (done
       {!res && (
         <>
           <p>
-            {plural(items.length, "item")} of type <strong>{typeWord(t)}</strong>, total value <strong>{cad(formatCents(total))}</strong>.
+            {plural(items.length, "item")} of type <strong>{typeWord(t)}</strong>, total value <strong>{cadCents(total)}</strong>.
           </p>
           {t === "receipt_absent" && <p className="muted">A receipt-absent exception cannot be waived in bulk.</p>}
           <fieldset>

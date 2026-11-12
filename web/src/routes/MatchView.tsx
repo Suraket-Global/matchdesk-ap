@@ -86,9 +86,11 @@ export function MatchViewPage() {
     setCode("");
     setMsg(null);
   }, [current?.id]);
+  const loadedId = q.data?.id;
   useEffect(() => {
-    heading.current?.focus();
-  }, [invoiceId, lineId]);
+    // "Resolve and next" and route changes put focus on the exception's heading.
+    if (loadedId) heading.current?.focus();
+  }, [loadedId, lineId]);
 
   const order = useMemo(() => queueOrder(queue.data?.items ?? [], fromParams), [queue.data, fromUrl]); // eslint-disable-line react-hooks/exhaustive-deps
   const idx = current ? order.findIndex((e) => e.id === current.id) : -1;

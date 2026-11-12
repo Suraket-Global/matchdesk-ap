@@ -41,6 +41,11 @@ export function cad(value: string | null | undefined): string {
   return m ? `CAD ${m}` : "";
 }
 
+/** "CAD 1,234.50" from integer cents. */
+export function cadCents(cents: bigint): string {
+  return `CAD ${formatCents(cents)}`;
+}
+
 /** A quantity string without trailing zeros: "60.0000" -> "60", "12.500" -> "12.5". */
 export function qty(value: string | null | undefined): string {
   if (value === null || value === undefined || value === "") return "";
