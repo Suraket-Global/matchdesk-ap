@@ -1,4 +1,5 @@
-import { E2E_MAILPIT } from "../e2e/stack";
+import { E2E_API, E2E_MAILPIT } from "../e2e/stack";
+import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { expect, test, type Browser, type Page } from "@playwright/test";
 import { ROOT } from "../e2e/stack";
@@ -32,6 +33,34 @@ async function signIn(page: Page, email: string): Promise<void> {
   await expect(page.locator("header.topbar")).toBeVisible();
 }
 
+const PY = path.join(ROOT, "backend/.venv/bin/python");
+const SHOTS_DB = "postgresql+psycopg://matchdesk_app@localhost:5432/matchdesk_shots";
+
+function backend(script: string, ...args: string[]): string {
+  return execFileSync(PY, [path.join(ROOT, "backend/scripts", script), ...args], {
+    cwd: path.join(ROOT, "backend"),
+    env: { ...process.env, MATCHDESK_DATABASE_URL: SHOTS_DB, MATCHDESK_API_URL: E2E_API },
+  }).toString();
+}
+
+let lastStep = -1;
+
+/** The operator signs in with a one-time code (S-18); a code is used once, so wait for a new step. */
+async function signInOperator(page: Page): Promise<void> {
+  const email = "operator.demo@example.invalid";
+  await page.goto("/login");
+  await page.getByLabel("Work email").fill(email);
+  const asked = Date.now();
+  await page.getByRole("button", { name: "Email me a sign-in link" }).click();
+  await page.goto(await link(email, asked));
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  while (Math.floor(Date.now() / 30_000) === lastStep) await new Promise((r) => setTimeout(r, 1000));
+  lastStep = Math.floor(Date.now() / 30_000);
+  await page.getByLabel("One-time code from your authenticator app").fill(backend("operator_code.py", email).split(" ")[0]);
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Operator console" })).toBeVisible();
+}
+
 async function api<T>(page: Page, url: string): Promise<T> {
   return page.evaluate(async (u) => (await fetch(u, { credentials: "same-origin" })).json(), url) as Promise<T>;
 }
@@ -47,6 +76,7 @@ async function shoot(page: Page, name: string, url: string, size: keyof typeof S
 async function walk(browser: Browser, size: keyof typeof SIZES): Promise<void> {
   const ctx = await browser.newContext({ viewport: SIZES[size] });
   const page = await ctx.newPage();
+  if (size === "desktop") backend("demo_email.py"); // one emailed invoice accepted, one held (S-06)
   await shoot(page, "01-sign-in", "/login", size);
   await signIn(page, "clerk.demo@example.invalid");
   type P<T> = { items: T[] };
@@ -89,8 +119,14 @@ async function walk(browser: Browser, size: keyof typeof SIZES): Promise<void> {
     ["17-users", "/settings/users"],
     ["18-audit", "/audit"],
     ["19-settings", "/settings"],
+    ["22-weekly", "/reports/weekly?week=2026-10-05"],
   ] as [string, string][])
     await shoot(page, name, url, size);
+  await ctx.clearCookies();
+  await signInOperator(page);
+  const tenants = await api<P<{ id: string }>>(page, "/api/v1/operator/tenants");
+  await shoot(page, "23-operator-console", "/operator/tenants", size);
+  await shoot(page, "24-operator-account", `/operator/tenants/${tenants.items[0].id}`, size);
   await ctx.close();
 }
 

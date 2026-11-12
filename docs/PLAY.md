@@ -2,7 +2,7 @@
 
 A step-by-step script to use the whole product yourself, first as the **clerk**, then as the **controller**. Everything is invented: the company, suppliers, purchase orders, invoices and people. Nothing leaves this computer; no real QuickBooks, mail or storage account is used.
 
-Time needed: about 20 minutes.
+Time needed: about 30 minutes.
 
 ## 0. Start
 
@@ -14,12 +14,15 @@ make demo-reset    # empties the local demo database and loads the demo company 
 make web           # the web app on http://127.0.0.1:5173 (leave this running)
 ```
 
-`make demo-reset` prints the two people you can sign in as:
+`make demo-reset` prints the three people you can sign in as:
 
 | Person | Email | Role |
 |---|---|---|
 | Demo Clerk | `clerk.demo@example.invalid` | Clerk: uploads, corrects, resolves |
 | Demo Controller | `controller.demo@example.invalid` | Controller: approves, signs the report |
+| Demo Operator | `operator.demo@example.invalid` | MatchDesk staff: pilot records and support access (section 9) |
+
+The operator also needs a one-time code. `make demo-reset` prints a TOTP secret for an authenticator app (local demo only, invented), or run `make operator-code` to print the current code.
 
 It also writes the files you will upload into **`play-files/`** in the `matchdesk-ap` folder:
 
@@ -53,7 +56,7 @@ You see the **Onboarding checklist**: QuickBooks is connected and 7 purchase ord
 
 1. Choose **Intake** in the sidebar.
 2. Drag all 13 files from `play-files/invoices/` onto the box (or **Choose files** and select them all).
-3. You land on the batch. The six counts always add up to 13. Within a few seconds: **10 ready, 2 need review, 0 failed, 1 duplicate file**. Of the two identical FF-1002 files, the one uploaded second is the duplicate. Files are sent in name order, so `FF-1002 copy.pdf` goes first and `FF-1002.pdf` is marked **Duplicate file**: "Same as FF-1002 copy.pdf", linked to the original's match view.
+3. You land on the batch. The six counts always add up to 13. Within a few seconds: "13 files read: **10 ready, 2 need review, 0 failed, 1 duplicate**." Files are listed in name order. Of the two identical FF-1002 files, the one uploaded second is the duplicate. Files are sent in name order, so `FF-1002 copy.pdf` goes first and `FF-1002.pdf` is marked **Duplicate file**: "Same as FF-1002 copy.pdf", linked to the original's match view.
 
 ## 4. Fix what was misread
 
@@ -86,24 +89,33 @@ Sign in with `controller.demo@example.invalid` as in step 1. Because approvals a
 1. Choose **Reports**, keep **Test month: October 2026**, and choose **Create draft for October 2026**.
 2. The violet banner says **DRAFT · version 1 · figures may change**. Read the cards (flagged discrepancies, of which not received, unverified, receipt coverage) and the seven sections. "Flagged discrepancies" always means findings plus not received, on this page and in the list of reports. If anything changes after the draft's data cut-off (a resolution, a re-match), approval is refused until you choose **Refresh draft**. If a yellow box lists what blocks approval (for example a re-match still running), wait a moment and choose **Refresh draft**.
 3. **Export PDF** downloads the draft with DRAFT on every page.
-4. Choose **Approve version N**. The dialog restates findings, not received and unverified totals; tick "I have reviewed the waived items" and approve. The banner turns dark: **APPROVED by Demo Controller**, and **Refresh draft** is gone (a new draft version is offered only if lines are re-matched later). Section 7 now shows the refund calculation on this approved version against the CAD 500.00 threshold.
-5. **Export PDF** and **Export CSV** download the approved version.
+4. Choose **Approve version N**. The dialog restates the figures with one label each: "Flagged discrepancies CAD … (findings CAD … + not received CAD …)", unverified, and how many items are still open in the queue; tick "I have reviewed the waived items" and approve. The banner turns dark: **APPROVED by Demo Controller**, and **Refresh draft** is gone (a new draft version is offered only if results change after the data cut-off; an identical one is refused). Section 7 shows the pilot terms and the refund calculation on this version against the threshold of the signed terms (CAD 500.00).
+5. In section 7 choose **Make version N the governing version**. The dialog says this is decided once; confirm. Section 7 now reads "This version" with the stored refund result, and **Getting started** shows it under Pilot terms. It cannot be changed later.
+6. **Export PDF** and **Export CSV** download the approved version. The CSV uses the same words as the screen (flagged discrepancies, findings, not received; Yes or No; types and statuses in words).
 
 ## 8. Look around
 
 - **Tolerances** (sidebar, Setup): change a tolerance; before saving, MatchDesk says how many lines would be re-matched. A missing receiving record is always an exception, whatever the tolerance.
-- **Users** (sidebar, Setup): invite a viewer (the invitation arrives in Mailpit).
+- **Users and access** (sidebar, Setup): invite a viewer (the invitation arrives in Mailpit).
 - **Audit log** (sidebar, Setup): every change with who, when, before and after; export as CSV.
 - **QuickBooks** (sidebar, Setup; or the QuickBooks status in the top bar): the recorded-response mode is labelled; "Read now" reads the invented data again.
 - Sign in as the clerk and open `http://127.0.0.1:5173/approvals`: "Your role does not include this page."
 - Make the window narrow (phone width): the sidebar folds behind the menu button; checklist, approvals, reports and settings stay usable and wide tables become cards; work screens say "Open in a wider window to work on this."
 - Choose **Theme** in the menu under your name to switch between light and dark, and the **Period** in the top bar to change the month the screens start from.
 
+## 9. Weekly summary, email intake, operator and support access (B7)
+
+1. **Weekly summary** (sidebar, Review), as the controller: choose the week of 5 October 2026 (the date box or the arrows). One row per supplier: documents, lines, how many passed every check, flagged discrepancies, open exceptions and their value. The open count and value are the exception queue's for the same week and supplier. **Email this week now** sends the totals and a link (no supplier, price or line) to the controllers: open Mailpit to read it. The same email goes out by itself every Monday morning for the week before.
+2. **Invoices by email**: in a terminal run `make demo-email`. It posts two invented, signed emails to the account's intake address `demo-invoices@intake.matchdesk.invalid`. Open **Intake**: under **Invoices by email**, one from `billing@fictional-fasteners.example` (an allowed sender) is already in a new batch (source Email); one from `accounts@unknown-supplier.example` is **Held for you**. Choose **Release into a batch** (or **Discard**). As the controller you can allow another sender or a whole domain.
+3. **Operator console**: sign out, then sign in as `operator.demo@example.invalid`. After the link, the page asks for the one-time code: run `make operator-code` and type it. You see **Operator console**: the demo account with its pilot, payment, billable units (one per invoice or credit note, in the month it was first read) and support access. Open the account: edit the **Pilot record** (for example the signed-terms reference) and **Save pilot record**. Under **Support access**, give a reason and **Ask for support access**. You cannot open any of the account's documents.
+4. **Grant it**: sign in as the controller, **Users and access** (sidebar, Setup): the request is there with its length and reason. **Grant 1 day**; the dialog says what it allows. The audit log records the request and the grant.
+5. **Read only visit**: sign in as the operator again (a new one-time code), open the account and choose **Open the account, read only**. A violet banner on every screen says "Support access, read only" and until when; nothing can be changed. **Leave the account** returns to the console. As the controller, **End access now** ends it at once.
+
 ## Not built yet (the screens say so)
 
 - **Live QuickBooks.** The demo reads recorded, invented QuickBooks responses. The live connection is not built: it needs the owner's Intuit developer account and the sandbox check T-1.1.1 (`execution-plan.md`). The step that remains: the owner opens the Intuit developer account and sandbox company, T-1.1.1 records the real responses, then the live reader is written from them (TODO list in `TRD.md` section 11.1). Until then `MATCHDESK_QBO_MODE=intuit` refuses to start a sync, and the QuickBooks screen (S-04) says so.
-
-Weekly summary (S-14), operator console (S-18), support access grants, pilot terms record, the "we have no receiving records" choice, email intake, deleting an invoice line in review.
+- **Hosted email provider.** Email intake works with the local signed webhook (`make demo-email`). A real inbound address needs an email provider account; `MATCHDESK_INBOUND_PROVIDER` set to a provider refuses until then.
+- Not built, no outside account needed: the "we have no receiving records" choice on Getting started, deleting an invoice line in review.
 
 ## Start again
 

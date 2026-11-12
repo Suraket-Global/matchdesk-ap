@@ -800,3 +800,53 @@ Found and fixed while redesigning: a screen-reader-only label inside a scrolling
 - Per-file upload progress is shown as waiting, uploading, received or refused; byte-level progress is not measured (the client sends each file in one request).
 - The period selector is held in memory per tab (the app keeps nothing in browser storage); a reload starts again at last month.
 - Dark theme is checked on S-08 and S-09 screenshots and by token contrast, not by an axe run in dark mode.
+
+## 17. B7 2026-11-13
+
+Source: the read-only A-to-Z review of `feat/b6-polish` (2026-11-13; kept outside this repository) and the B7 brief. Branch `feat/b7-complete` from `feat/b6-polish`. Migration 0017. Part 1 fixes every review finding with a regression test; Part 2 builds the last four pieces.
+
+### 17.1 Review findings
+
+| ID | Finding (short) | Outcome | Regression test |
+|---|---|---|---|
+| M1 | Match view stayed "Not matched yet" after the first confirm: `stale` was false when a line had no result, so polling stopped | Fixed: `GET /invoices/{id}` reads as pending while a run covering the invoice is queued or running, or while a matchable invoice has a line without a current result; the banner says "Matching… The result appears here without a reload." | `test_b7_review_fixes.py::test_m1_*` |
+| M2 | Exception queue table 1231 px in 1146 px at 1440: Status clipped | Fixed: tighter cell padding, supplier names wrap, sub-reasons wrap; no clipped column at 1280 and above | Playwright `tablesFit` on S-08 at 1440 |
+| M3 | Review lines table 929 px in 564 px: quantity, unit, price, amount off-screen | Fixed: one block per line; the four arithmetic fields always in view | Playwright `tablesFit` and "Line 1 Unit price" visible on S-07 |
+| M4 | Approve dialog "8 exceptions still open", CSV 8 `open`, section 5 "None" | Fixed: one meaning each. Section 5 is "Undecided items" (possible duplicates, possible credits, waiting for approval); the dialog says how many items are still open in the queue and are reported in their sections with their queue status, and how many are undecided; the table column shows the queue status | Visual and Playwright E2E-01 dialog text |
+| M5 | "Findings" 1,037.30 in the dialog and 927.30 in the CSV | Fixed: "Flagged discrepancies CAD … (findings CAD … + not received CAD …)" in the dialog, card and PDF; CSV columns `flagged_discrepancies`, `findings`, `not_received`, `unverified`, `qualifying_total_for_refund`; API `flagged_amount` | `test_m5_csv_labels_match_the_screen` |
+| M6 | New draft allowed after approval with nothing changed | Fixed in the back end: `create_draft` refuses with 409 when an approved version exists and nothing changed after its cut-off (`changed_since_cutoff`); the screen offers "Create a new draft version" only then; the governing version is chosen once (Part 2) | `test_m6_no_identical_draft_after_approval`; E2E-01 |
+| M7 | Audit log overflow, raw JSON and UUID arrays, empty Before column, internal names | Fixed: Time, Who, What happened (action and record in words, history link), Changes ("before → after" per field, identifiers counted as records, dates formatted), first two changes with "Show all" | Vitest `b7-review.test.tsx` (M7); Playwright `tablesFit` and no identifier on S-17 |
+| M8 | Phone width: Invoices, Receiving imports, report flagged table overflowed instead of cards | Fixed: those tables and Users, Invitations, Aliases, Approvals and Purchase order stack into labelled cards | Playwright `cardsAtPhoneWidth` on nine screens at 375 |
+| M9 | "Credit note number will be sent on request" yielded `credit_note` | Fixed: a type label counts only with ":" or "#" and a value after it | `tests/unit/test_b7_review.py` |
+| Minors | Focus after dialogs; bulk dialog pre-selected a code; "read" tag on fields not read; tolerances form; two coverage figures unexplained; date formats; CSV booleans and codes; batch "Reading…" after done, file order, duplicate supplier "Not known yet"; report "By type" order and flagged table order; internal text on customer screens; QuickBooks screen silent in Intuit mode; "Recently approved"; match-view breadcrumb; "Confirmed. Matching…" toast; report width; queue ignored the period, report month read on mount; e2e and screenshots shared Mailpit, database and ports | All fixed. Dates show as "3 Oct 2026" everywhere the app formats them; native date inputs follow the browser's locale and the CSV keeps ISO 8601 on purpose (spreadsheets read it as a date). Each harness now has its own database, ports and Mailpit | Vitest `b7-review.test.tsx`, `review-fixes.test.tsx` (bulk dialog starts empty); Playwright batch text |
+
+### 17.2 Pieces built
+
+| Piece | What | Tests |
+|---|---|---|
+| Pilot record (T-5.1.3) | `pilot_engagements` per tenant (price, period, refund condition and threshold, signed-terms reference and signer, payment, outcome, version); edited by the operator; shown on S-03 and S-13. A controller chooses the governing approved version once; the refund is evaluated then from that version's stored qualifying total against the record's threshold and stored (trigger refuses changes). The refund evaluation endpoint uses the record's threshold, never the request's. `usage_events`: one unit per invoice or credit note in the Pacific month of first extraction | `test_b7_pieces.py`: pilot and governing version, IT-26; `test_b7_units.py` |
+| Weekly summary S-14 (T-5.1.4) | Per supplier for one week; Monday email (worker schedule, `weekly_summary_hour`, once per week) and "Email this week now"; email has totals and a link only | IT-25 and the Monday job in `test_b7_pieces.py`; Vitest; Playwright |
+| Operator console S-18 (T-5.1.5) | Accounts, pilot record form, billable units by month, support-access request; grant, decline, end on S-16; read-only support session with banner; operator TOTP sign-in as built in B2 | IT-29 (two tests) in `test_b7_pieces.py`; `test_tenancy.py` allow-list; Vitest; Playwright |
+| Email intake (T-3.3.4) | Signed webhook (HMAC over timestamp and body, five-minute window, provider by settings), allowed senders, held messages with release and discard, attachments into an email batch, idempotent on message id, raw message deleted after 7 days; `make demo-email` | IT-12 in `test_b7_pieces.py`; `test_b7_units.py`; Playwright |
+
+### 17.3 Commands and results (from `matchdesk-ap/`)
+
+| Command | Result |
+|---|---|
+| `make test` (clean `matchdesk_test`, migrations 0001 to 0017) | 276 passed (255 before) |
+| `make check` | passed |
+| `web/`: `npm run typecheck`, `npm run lint`, `npm run build` | passed |
+| `web/`: `npm test` (Vitest) | 54 passed (45 before) |
+| `web/`: `npx playwright test` (own stack) | 5 passed; `matchdesk_dev` unchanged |
+| `web/`: `SHOTS=after npx playwright test -c playwright.shots.config.ts` | 46 screenshots in `docs/screenshots/after/` (6 new) |
+| `docs/PLAY.md` walked in the built-in browser at 1440 x 900 and 375 x 812 after `make demo-reset` | See 17.4 |
+
+### 17.4 PLAY walk
+
+WALK_RESULT
+
+### 17.5 Gaps left
+
+- Account-bound: the live QuickBooks reader (TRD.md section 11.1); a hosted extraction provider and its region highlighting; a hosted inbound email provider (only the local signed webhook is built).
+- Not account-bound, not built in B7: the "no receiving records" declaration on S-03; deleting an invoice line on S-07; pre-applying a saved receiving mapping and the seven-day removal of abandoned previews on S-05; the S-08 assignee filter; the S-10 "changed in QuickBooks" banner; the note on an inconsistent document; credit decisions; finding outcomes (`finding_outcomes`); deletion requests and archive export.
+- The weekly summary schedule runs inside the worker every minute (no external scheduler); two workers would each try, and the unique key lets only one send.

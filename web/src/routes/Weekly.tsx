@@ -84,16 +84,6 @@ export function WeeklyPage() {
         <>
           <div className="cards">
             <div>
-              <span className="muted small">Documents</span>
-              <span className="big">{w.total.documents}</span>
-              <span className="small">{plural(w.total.lines, "line")} checked</span>
-            </div>
-            <div>
-              <span className="muted small">Passed every check</span>
-              <span className="big">{w.total.pass_rate_pct ? `${w.total.pass_rate_pct.replace(/\.0$/, "")}%` : "–"}</span>
-              <span className="small">{plural(w.total.lines_matched, "line")} matched</span>
-            </div>
-            <div>
               <span className="muted small">Flagged discrepancies</span>
               <span className="big">{cad(w.total.flagged_amount)}</span>
               <span className="small">findings and not received</span>
@@ -102,6 +92,16 @@ export function WeeklyPage() {
               <span className="muted small">Open exceptions</span>
               <span className="big">{cad(w.total.open_value)}</span>
               <span className="small">{plural(w.total.open_count, "exception")} waiting for a person</span>
+            </div>
+            <div>
+              <span className="muted small">Documents</span>
+              <span className="big">{w.total.documents}</span>
+              <span className="small">{plural(w.total.lines, "line")} checked</span>
+            </div>
+            <div>
+              <span className="muted small">Passed every check</span>
+              <span className="big">{w.total.pass_rate_pct ? `${w.total.pass_rate_pct.replace(/\.0$/, "")}%` : "–"}</span>
+              <span className="small">{plural(w.total.lines_matched, "line")} matched</span>
             </div>
           </div>
           {w.suppliers.length === 0 ? (

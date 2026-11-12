@@ -54,7 +54,7 @@ Collapsible left sidebar grouped by job: **Work** (Exceptions with the open coun
 
 ## 6. Screenshots (`docs/screenshots/`)
 
-Captured by `cd web && SHOTS=after npx playwright test -c playwright.shots.config.ts` (before: the same harness on commit 2e99ddb). The harness creates and drops `matchdesk_e2e`; it never touches `matchdesk_dev`.
+Captured by `cd web && SHOTS=after npx playwright test -c playwright.shots.config.ts` (before: the same harness on commit 2e99ddb). Since B7 the harness runs on its own stack profile (database `matchdesk_shots`, API 8103, web 5175, its own Mailpit on 1027/8027), separate from Playwright's tests (`matchdesk_e2e`, 8102, 5174, Mailpit 1026/8026); neither touches `matchdesk_dev` or the owner's Mailpit. B7 refreshed every "after" screenshot: S-03 now shows the pilot terms, S-06 the "Invoices by email" panel with one held message, S-07 the line editor, S-13 section 7 the pilot record, S-16 the support-access panel, S-17 the audit log in words.
 
 | Screen | 1440 x 900 | 375 x 812 |
 |---|---|---|
@@ -77,8 +77,15 @@ Captured by `cd web && SHOTS=after npx playwright test -c playwright.shots.confi
 | S-16 Users and support access | [before](screenshots/before/17-users-desktop.png), [after](screenshots/after/17-users-desktop.png) | [before](screenshots/before/17-users-mobile.png), [after](screenshots/after/17-users-mobile.png) |
 | S-17 Audit log | [before](screenshots/before/18-audit-desktop.png), [after](screenshots/after/18-audit-desktop.png) | [before](screenshots/before/18-audit-mobile.png), [after](screenshots/after/18-audit-mobile.png) |
 | Settings index (links to S-03, S-04, S-15 to S-17) | [before](screenshots/before/19-settings-desktop.png), [after](screenshots/after/19-settings-desktop.png) | [before](screenshots/before/19-settings-mobile.png), [after](screenshots/after/19-settings-mobile.png) |
+| S-14 Weekly summary (B7) | [after](screenshots/after/22-weekly-desktop.png) | [after](screenshots/after/22-weekly-mobile.png) |
+| S-18 Operator console (B7) | [after](screenshots/after/23-operator-console-desktop.png) | [after](screenshots/after/23-operator-console-mobile.png) |
+| S-18 Account: pilot record, billable units, support access (B7) | [after](screenshots/after/24-operator-account-desktop.png) | [after](screenshots/after/24-operator-account-mobile.png) |
 | S-08 and S-09 in dark theme | [exceptions](screenshots/after/20-exceptions-dark-desktop.png), [match view](screenshots/after/21-match-view-dark-desktop.png) | |
+
+## 6a. B7 screens
+
+S-14, S-18 and the new panels use the same components and tokens: figure cards (the first card carries the finding tint, as on S-13), stacked-card tables under 640 px, the form grid of S-15 for the pilot record, `grant-row` blocks for support requests, and a violet support banner (`--review-*` tokens) on every screen while an operator reads an account. The S-07 line editor replaces the wide lines table with one block per line (supplier code and description, then quantity, unit, unit price and amount), so the arithmetic fields never leave the pane.
 
 ## 7. Accessibility checks
 
-axe-core (WCAG 2.0 to 2.2 A and AA, serious and critical fail the run) on sign-in, batch, extraction review, exception queue, match view, approvals and report in `web/e2e/full-flow.spec.ts`; the phone-width test fails if any of five reading screens scrolls sideways and names the element that sticks out.
+axe-core (WCAG 2.0 to 2.2 A and AA, serious and critical fail the run) on sign-in, batch, extraction review, exception queue, match view, approvals and report in `web/e2e/full-flow.spec.ts`, and on the operator console, weekly summary and intake with email in `web/e2e/pieces-b7.spec.ts`; the phone-width test fails if any of nine reading screens (with a back-test report) scrolls sideways or shows a list table that is not stacked into cards, and `tablesFit` fails if a table is wider than its box at 1440 px (exception queue, extraction review, report, audit log, weekly summary).
