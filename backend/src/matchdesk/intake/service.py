@@ -28,6 +28,7 @@ from matchdesk.extraction import (
     verification_gates,
 )
 from matchdesk.extraction.models import ExtractionRunRow
+from matchdesk.intake.documents import materialise
 from matchdesk.intake.models import DocumentRow, UploadBatch
 from matchdesk.tenancy import enqueue, session, transition
 from matchdesk.tenancy.models import IdempotencyKey
@@ -65,6 +66,7 @@ def add_file(
     idempotency_key: str,
     data: bytes,
     mime_type: str = "application/pdf",
+    original_name: str | None = None,
 ) -> DocumentRow:
     """Store one uploaded file. Idempotent on the key; a byte-identical file is ``duplicate_file``."""
     request_hash = hashlib.sha256(data).digest()
@@ -101,6 +103,8 @@ def add_file(
         blob_key=key if earlier is None else f"{key}/duplicate/{uuid.uuid4()}",
         state="queued" if earlier is None else "duplicate_file",
         duplicate_of_document_id=earlier.id if earlier is not None else None,
+        original_name=original_name,
+        uploaded_by=user_id,
     )
     s.add(doc)
     s.flush()
@@ -220,6 +224,9 @@ def complete(
         )
         s.add(run)
         s.flush()
+        if isinstance(extracted.output.get("page_count"), int):
+            doc.page_count = extracted.output["page_count"]
+        materialise(s, tenant_id, doc, run.id, extracted.output, passed)
         new_state = "succeeded" if passed else "needs_review"
         transition(s, "documents", doc.id, doc.state_version, new_state, lease_expires_at=None)
         return new_state

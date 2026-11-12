@@ -32,6 +32,7 @@ from matchdesk.api.common import (
     problem,
     require,
 )
+from matchdesk.api.invoice_routes import register_invoice_routes
 from matchdesk.api.limits import MAX_FILE_BYTES, MAX_UPLOAD_FILE_BYTES, BodyLimitMiddleware
 from matchdesk.api.qbo_routes import register_qbo_routes
 from matchdesk.api.receiving_routes import register_receiving_routes
@@ -50,7 +51,7 @@ from matchdesk.core import (
 from matchdesk.exceptions import request_run, stale_runs
 from matchdesk.exceptions.models import ExceptionRow, LineMatch, MatchRun
 from matchdesk.identity import Principal, csrf_matches, load_session
-from matchdesk.intake import add_file, create_batch
+from matchdesk.intake import add_file, create_batch, describe_fields
 from matchdesk.intake.models import DocumentRow, InvoiceLineRow, InvoiceRow, UploadBatch
 from matchdesk.qbo import QboNotConfiguredError, TokenEndpoint, token_endpoint_from_settings
 from matchdesk.tenancy import get_engine, global_session, session
@@ -143,6 +144,7 @@ def create_app(mailer: Mailer | None = None, qbo_token_endpoint: TokenEndpoint |
         qbo_endpoint = _Unconfigured()
     register_qbo_routes(app, settings, engine(), qbo_endpoint)
     register_receiving_routes(app, engine())
+    register_invoice_routes(app, engine())
     # Outermost of the application's own middleware: refuses oversize bodies before anything reads them.
     app.add_middleware(BodyLimitMiddleware)
 
@@ -299,6 +301,7 @@ def create_app(mailer: Mailer | None = None, qbo_token_endpoint: TokenEndpoint |
                 "doc_number": inv.doc_number,
                 "doc_date": inv.doc_date.isoformat() if inv.doc_date else None,
                 "version": inv.version,
+                "review": describe_fields(s, inv),
                 "lines": [
                     {
                         "id": str(ln.id),
@@ -360,13 +363,16 @@ def create_app(mailer: Mailer | None = None, qbo_token_endpoint: TokenEndpoint |
             raise HTTPException(415, "Only PDF, PNG and JPEG invoices are accepted")
         if len(data) > MAX_FILE_BYTES[mime]:
             raise HTTPException(413, "File is larger than 20 MB")
-        return await run_in_threadpool(_store_file, p, batch_id, idempotency_key, data, mime)
+        name = (file.filename or "")[:255] or None
+        return await run_in_threadpool(_store_file, p, batch_id, idempotency_key, data, mime, name)
 
-    def _store_file(p: Principal, batch_id: uuid.UUID, key: str, data: bytes, mime: str) -> dict[str, Any]:
+    def _store_file(
+        p: Principal, batch_id: uuid.UUID, key: str, data: bytes, mime: str, name: str | None
+    ) -> dict[str, Any]:
         with session(p.tenant_id, engine()) as s:
             if s.get(UploadBatch, batch_id) is None:
                 raise NotFoundError("batch")
-            doc = add_file(s, p.tenant_id, p.user_id, batch_id, key, data, mime)
+            doc = add_file(s, p.tenant_id, p.user_id, batch_id, key, data, mime, name)
             return {
                 "id": str(doc.id),
                 "state": doc.state,

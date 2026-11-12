@@ -10,6 +10,7 @@ from sqlalchemy import (
     CheckConstraint,
     Date,
     DateTime,
+    ForeignKey,
     Index,
     Integer,
     LargeBinary,
@@ -65,6 +66,9 @@ class DocumentRow(TenantMixin, Base):
     failure_code: Mapped[str | None] = mapped_column(Text)
     duplicate_of_document_id: Mapped[uuid.UUID | None] = mapped_column(UUIDT)
     correlation_id: Mapped[uuid.UUID] = mapped_column(UUIDT, nullable=False)
+    original_name: Mapped[str | None] = mapped_column(Text)  # S2; never used in paths or logs
+    page_count: Mapped[int | None] = mapped_column(Integer)
+    uploaded_by: Mapped[uuid.UUID | None] = mapped_column(UUIDT, ForeignKey("users.id"))
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
@@ -75,6 +79,7 @@ class InvoiceRow(TenantMixin, Base):
         tfk("document_id", "documents"),
         tfk("vendor_id", "vendors"),
         tfk("purchase_order_id", "purchase_orders"),
+        tfk("extraction_run_id", "extraction_runs"),
         CheckConstraint(enum_check("doc_type", ("invoice", "credit_note")), name="doc_type"),
         CheckConstraint(
             enum_check(
@@ -98,6 +103,17 @@ class InvoiceRow(TenantMixin, Base):
     total: Mapped[Decimal | None] = mapped_column(MONEY)
     currency: Mapped[str | None] = mapped_column(String(3))
     verification_status: Mapped[str] = mapped_column(Text, nullable=False)
+    vendor_name_read: Mapped[str | None] = mapped_column(Text)
+    subtotal: Mapped[Decimal | None] = mapped_column(MONEY)
+    tax_total: Mapped[Decimal | None] = mapped_column(MONEY)
+    # The extraction run currently in use; null only for rows written directly by fixtures (B1).
+    extraction_run_id: Mapped[uuid.UUID | None] = mapped_column(UUIDT)
+    confirmed_by: Mapped[uuid.UUID | None] = mapped_column(UUIDT, ForeignKey("users.id"))
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Unsaved review edits, kept on the server, never in the browser (schema.md 3.4).
+    review_draft: Mapped[dict | None] = mapped_column(JSONB)
+    # Provenance of header fields: per field ``read`` or ``edited``, by whom, original value (B3).
+    field_sources: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default="{}")
     version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
 
 
@@ -111,6 +127,8 @@ class InvoiceLineRow(TenantMixin, Base):
     invoice_id: Mapped[uuid.UUID] = mapped_column(UUIDT, nullable=False)
     line_no: Mapped[int] = mapped_column(Integer, nullable=False)
     supplier_item_code: Mapped[str | None] = mapped_column(Text)
+    description: Mapped[str | None] = mapped_column(Text)
+    page_no: Mapped[int | None] = mapped_column(Integer)
     qty: Mapped[Decimal | None] = mapped_column(QTY)
     uom: Mapped[str | None] = mapped_column(Text)
     unit_price: Mapped[Decimal | None] = mapped_column(PRICE)
