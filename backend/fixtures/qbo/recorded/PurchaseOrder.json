@@ -1,0 +1,216 @@
+{
+ "_note": "Synthetic. Shape assumed from Intuit's public Accounting API reference; unverified until T-1.1.1.",
+ "QueryResponse": {
+  "PurchaseOrder": [
+   {
+    "Id": "101",
+    "DocNumber": "4390",
+    "TxnDate": "2026-08-14",
+    "VendorRef": {
+     "value": "56"
+    },
+    "POStatus": "Open",
+    "SyncToken": "0",
+    "TotalAmt": 250.0,
+    "Line": [
+     {
+      "Id": "1",
+      "LineNum": 1,
+      "Amount": 210.0,
+      "DetailType": "ItemBasedExpenseLineDetail",
+      "ItemBasedExpenseLineDetail": {
+       "ItemRef": {
+        "value": "11"
+       },
+       "Qty": 500,
+       "UnitPrice": 0.42
+      }
+     },
+     {
+      "Id": "2",
+      "LineNum": 2,
+      "Amount": 40.0,
+      "DetailType": "ItemBasedExpenseLineDetail",
+      "ItemBasedExpenseLineDetail": {
+       "ItemRef": {
+        "value": "12"
+       },
+       "Qty": 500,
+       "UnitPrice": 0.08
+      }
+     }
+    ]
+   },
+   {
+    "Id": "102",
+    "DocNumber": "4471",
+    "TxnDate": "2026-09-01",
+    "VendorRef": {
+     "value": "56"
+    },
+    "POStatus": "Open",
+    "SyncToken": "0",
+    "TotalAmt": 420.0,
+    "Line": [
+     {
+      "Id": "1",
+      "LineNum": 1,
+      "Amount": 420.0,
+      "DetailType": "ItemBasedExpenseLineDetail",
+      "ItemBasedExpenseLineDetail": {
+       "ItemRef": {
+        "value": "11"
+       },
+       "Qty": 100,
+       "UnitPrice": 4.2
+      }
+     }
+    ]
+   },
+   {
+    "Id": "103",
+    "DocNumber": "4502",
+    "TxnDate": "2026-10-02",
+    "VendorRef": {
+     "value": "57"
+    },
+    "POStatus": "Open",
+    "SyncToken": "0",
+    "TotalAmt": 765.0,
+    "Line": [
+     {
+      "Id": "1",
+      "LineNum": 1,
+      "Amount": 740.0,
+      "DetailType": "ItemBasedExpenseLineDetail",
+      "ItemBasedExpenseLineDetail": {
+       "ItemRef": {
+        "value": "13"
+       },
+       "Qty": 40,
+       "UnitPrice": 18.5
+      }
+     },
+     {
+      "Id": "2",
+      "LineNum": 2,
+      "Amount": 25.0,
+      "Description": "Freight",
+      "DetailType": "AccountBasedExpenseLineDetail",
+      "AccountBasedExpenseLineDetail": {
+       "AccountRef": {
+        "value": "80"
+       }
+      }
+     }
+    ]
+   },
+   {
+    "Id": "104",
+    "DocNumber": "4510",
+    "TxnDate": "2026-10-05",
+    "VendorRef": {
+     "value": "57"
+    },
+    "POStatus": "Open",
+    "SyncToken": "0",
+    "TotalAmt": 50.0,
+    "Line": [
+     {
+      "Id": "1",
+      "LineNum": 1,
+      "Amount": 50.0,
+      "DetailType": "ItemBasedExpenseLineDetail",
+      "ItemBasedExpenseLineDetail": {
+       "ItemRef": {
+        "value": "15"
+       },
+       "Qty": 1000,
+       "UnitPrice": 0.05
+      }
+     }
+    ]
+   },
+   {
+    "Id": "105",
+    "DocNumber": "4520",
+    "TxnDate": "2026-10-08",
+    "VendorRef": {
+     "value": "58"
+    },
+    "POStatus": "Open",
+    "SyncToken": "0",
+    "TotalAmt": 220.0,
+    "Line": [
+     {
+      "Id": "1",
+      "LineNum": 1,
+      "Amount": 220.0,
+      "DetailType": "ItemBasedExpenseLineDetail",
+      "ItemBasedExpenseLineDetail": {
+       "ItemRef": {
+        "value": "14"
+       },
+       "Qty": 200,
+       "UnitPrice": 1.1
+      }
+     }
+    ]
+   },
+   {
+    "Id": "106",
+    "DocNumber": "4533",
+    "TxnDate": "2026-10-12",
+    "VendorRef": {
+     "value": "58"
+    },
+    "POStatus": "Open",
+    "SyncToken": "0",
+    "TotalAmt": 110.0,
+    "Line": [
+     {
+      "Id": "1",
+      "LineNum": 1,
+      "Amount": 110.0,
+      "DetailType": "ItemBasedExpenseLineDetail",
+      "ItemBasedExpenseLineDetail": {
+       "ItemRef": {
+        "value": "14"
+       },
+       "Qty": 100,
+       "UnitPrice": 1.1
+      }
+     }
+    ]
+   },
+   {
+    "Id": "107",
+    "DocNumber": "4540",
+    "TxnDate": "2026-10-15",
+    "VendorRef": {
+     "value": "56"
+    },
+    "POStatus": "Open",
+    "SyncToken": "0",
+    "TotalAmt": 80.0,
+    "Line": [
+     {
+      "Id": "1",
+      "LineNum": 1,
+      "Amount": 80.0,
+      "DetailType": "ItemBasedExpenseLineDetail",
+      "ItemBasedExpenseLineDetail": {
+       "ItemRef": {
+        "value": "12"
+       },
+       "Qty": 1000,
+       "UnitPrice": 0.08
+      }
+     }
+    ]
+   }
+  ],
+  "startPosition": 1,
+  "maxResults": 7
+ }
+}

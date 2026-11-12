@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, Protocol
 
-from matchdesk.core import dec, round_cents
+from matchdesk.core import Settings, dec, round_cents
 
 
 class ExtractionTransientError(Exception):
@@ -67,4 +67,29 @@ def verification_gates(output: dict[str, Any]) -> dict[str, bool]:
     tax = dec(str(output.get("tax_total", "0")))
     total = dec(str(output.get("total", "0")))
     gates["lines_plus_tax_equals_total"] = subtotal + tax == total
+    if "subtotal" in output and output["subtotal"] is not None:
+        gates["subtotal_equals_lines"] = dec(str(output["subtotal"])) == subtotal
+    if "unread" in output:
+        # Adapters that report what they could not read with certainty (the local PDF reader):
+        # any unread required field sends the document to a person (MH-05).
+        gates["required_fields_read"] = not output["unread"]
     return gates
+
+
+def extractor_from_settings(settings: Settings) -> Extractor:
+    """``fake`` for tests; ``local`` reads text PDFs without network or model; ``provider`` is a hosted
+    model, deferred (needs an account and no-training terms), so it refuses to start."""
+    if settings.extractor == "fake":
+        return FakeExtractor()
+    if settings.extractor == "local":
+        from matchdesk.extraction.local_pdf import LocalPdfExtractor
+
+        local: Extractor = LocalPdfExtractor()
+        return local
+    raise ExtractionNotConfiguredError(
+        "hosted extraction provider not configured (deferred: needs an account; T-1.1.3)"
+    )
+
+
+class ExtractionNotConfiguredError(RuntimeError):
+    """The hosted provider adapter is selected but has no account or key."""

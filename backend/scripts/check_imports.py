@@ -19,7 +19,7 @@ PKG = ROOT / "src" / "matchdesk"
 MODEL_IMPORTS: dict[str, set[str]] = {
     "exceptions": {"qbo", "receiving", "intake"},  # assemble match inputs (TRD 5, B1)
     "intake": {"extraction", "tenancy"},  # extraction runs; idempotency keys
-    "api": {"exceptions", "intake", "tenancy"},  # read endpoints; idempotency keys
+    "api": {"exceptions", "intake", "tenancy", "qbo", "receiving", "reporting"},  # read endpoints (B3)
 }
 EXEMPT = {"schema_registry"}
 

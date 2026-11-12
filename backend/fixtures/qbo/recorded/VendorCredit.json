@@ -1,0 +1,40 @@
+{
+ "_note": "Synthetic. Shape assumed from Intuit's public Accounting API reference; unverified until T-1.1.1.",
+ "QueryResponse": {
+  "VendorCredit": [
+   {
+    "Id": "301",
+    "DocNumber": "FF-CR-12",
+    "TxnDate": "2026-10-25",
+    "VendorRef": {
+     "value": "56"
+    },
+    "TotalAmt": 8.0,
+    "Line": [
+     {
+      "Id": "1",
+      "LineNum": 1,
+      "Amount": 8.0,
+      "DetailType": "ItemBasedExpenseLineDetail",
+      "ItemBasedExpenseLineDetail": {
+       "ItemRef": {
+        "value": "12"
+       },
+       "Qty": 100,
+       "UnitPrice": 0.08
+      },
+      "LinkedTxn": [
+       {
+        "TxnId": "107",
+        "TxnType": "PurchaseOrder",
+        "TxnLineId": "1"
+       }
+      ]
+     }
+    ]
+   }
+  ],
+  "startPosition": 1,
+  "maxResults": 1
+ }
+}

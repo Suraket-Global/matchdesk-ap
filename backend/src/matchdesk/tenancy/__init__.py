@@ -22,6 +22,7 @@ from matchdesk.tenancy.jobs import (
     run_claimed,
 )
 from matchdesk.tenancy.permissions import PERMISSIONS, can, permissions_for
+from matchdesk.tenancy.secrets_box import SealError, seal, unseal
 from matchdesk.tenancy.transitions import transition
 from matchdesk.tenancy.types import MONEY, PRICE, QTY, UUIDT, enum_check
 
@@ -35,6 +36,7 @@ __all__ = [
     "ClaimedJob",
     "GlobalMixin",
     "PermanentJobError",
+    "SealError",
     "TenantMixin",
     "can",
     "claim",
@@ -47,9 +49,11 @@ __all__ = [
     "operator_session",
     "permissions_for",
     "run_claimed",
+    "seal",
     "session",
     "tenant_args",
     "tfk",
     "transition",
+    "unseal",
     "user_session",
 ]

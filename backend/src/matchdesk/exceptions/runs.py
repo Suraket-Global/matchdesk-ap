@@ -21,12 +21,13 @@ from typing import Any
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
-from matchdesk.core import get_correlation_id, get_logger, new_correlation_id
+from matchdesk.core import ConflictError, get_correlation_id, get_logger, new_correlation_id
 from matchdesk.exceptions.inputs import build_match_input
 from matchdesk.exceptions.models import LineMatch, MatchRun, RulesetVersion
 from matchdesk.exceptions.store import store_result
 from matchdesk.intake.models import InvoiceLineRow
 from matchdesk.matching import evaluate, input_fingerprint
+from matchdesk.qbo import processing_allowed
 from matchdesk.tenancy import PermanentJobError, enqueue, transition
 
 log = get_logger("matchdesk.match_runs")
@@ -72,8 +73,11 @@ def request_run(
     """Create a queued run and enqueue its job in the same transaction. Returns (run, created).
 
     No lock is taken here, so a request never waits for a running evaluation; a race can at
-    worst create one extra run, which re-reads the inputs when it executes.
+    worst create one extra run, which re-reads the inputs when it executes. After a QuickBooks
+    disconnect no run is created (Intuit terms s. 12.2; self-check 6.4; IT-11).
     """
+    if not processing_allowed(s):
+        raise ConflictError("QuickBooks was disconnected: matching on its records has stopped")
     inp = build_match_input(s, invoice_ids, currency, ruleset_code)
     scope_ids = sorted(inp.test_document_ids | {str(i) for i in invoice_ids})
     fp = input_fingerprint(inp)
@@ -113,6 +117,10 @@ def execute_run(s: Session, payload: dict[str, Any], ruleset_code: str = "v1", c
         raise PermanentJobError("match run not found in this tenant")
     if run.state not in PENDING:
         log.info("match_run_already_finished", extra={"match_run_id": str(run.id), "state": run.state})
+        return
+    if not processing_allowed(s):
+        transition(s, "match_runs", run.id, run.state_version, "failed", finished_at=datetime.now(UTC))
+        log.info("match_run_refused_disconnected", extra={"match_run_id": str(run.id)})
         return
     if run.state != "running":
         if not transition(

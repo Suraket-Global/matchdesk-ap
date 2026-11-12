@@ -16,7 +16,9 @@ import os
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-SECRET_FIELDS = frozenset({"session_key", "token_key", "s3_secret_key", "smtp_password"})
+SECRET_FIELDS = frozenset(
+    {"session_key", "token_key", "s3_secret_key", "smtp_password", "qbo_client_secret", "extraction_api_key"}
+)
 
 
 def _read_env_file(path: Path) -> dict[str, str]:
@@ -85,6 +87,24 @@ class Settings:
     smtp_username: str = ""
     smtp_password: str = ""
     mail_from: str = "MatchDesk <no-reply@matchdesk.invalid>"
+    # QuickBooks (B3): "recorded" serves synthetic JSON fixtures shaped as the API is assumed to answer
+    # (shape unverified until T-1.1.1); "intuit" selects the real endpoints, which stay unconfigured
+    # (no developer account). Endpoint defaults are Intuit's documented URLs, unverified until T-1.1.1.
+    qbo_mode: str = "recorded"
+    qbo_fixtures_dir: str = ""
+    qbo_client_id: str = ""
+    qbo_client_secret: str = ""
+    qbo_redirect_uri: str = ""
+    qbo_authorize_url: str = "https://appcenter.intuit.com/connect/oauth2"
+    qbo_token_url: str = "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer"  # noqa: S105
+    qbo_revoke_url: str = "https://developer.api.intuit.com/v2/oauth2/tokens/revoke"
+    qbo_scopes: str = "com.intuit.quickbooks.accounting"
+    qbo_page_size: int = 100
+    # Extraction (B3): "fake" (tests), "local" (text PDFs, no network, no model), "provider" (a hosted
+    # model; deferred: needs an account, so it refuses to start without a key).
+    extractor: str = "local"
+    extraction_provider: str = ""
+    extraction_api_key: str = ""
 
     def fingerprint(self) -> str:
         """Hash of the non-secret settings; both entry points log it at start (CI-02)."""
@@ -134,4 +154,17 @@ def load_settings() -> Settings:
         smtp_username=env("MATCHDESK_SMTP_USERNAME", ""),
         smtp_password=env("MATCHDESK_SMTP_PASSWORD", ""),
         mail_from=env("MATCHDESK_MAIL_FROM", Settings.mail_from),
+        qbo_mode=env("MATCHDESK_QBO_MODE", Settings.qbo_mode),
+        qbo_fixtures_dir=env("MATCHDESK_QBO_FIXTURES_DIR", ""),
+        qbo_client_id=env("MATCHDESK_QBO_CLIENT_ID", ""),
+        qbo_client_secret=env("MATCHDESK_QBO_CLIENT_SECRET", ""),
+        qbo_redirect_uri=env("MATCHDESK_QBO_REDIRECT_URI", ""),
+        qbo_authorize_url=env("MATCHDESK_QBO_AUTHORIZE_URL", Settings.qbo_authorize_url),
+        qbo_token_url=env("MATCHDESK_QBO_TOKEN_URL", Settings.qbo_token_url),
+        qbo_revoke_url=env("MATCHDESK_QBO_REVOKE_URL", Settings.qbo_revoke_url),
+        qbo_scopes=env("MATCHDESK_QBO_SCOPES", Settings.qbo_scopes),
+        qbo_page_size=int(env("MATCHDESK_QBO_PAGE_SIZE", "100")),
+        extractor=env("MATCHDESK_EXTRACTOR", Settings.extractor),
+        extraction_provider=env("MATCHDESK_EXTRACTION_PROVIDER", ""),
+        extraction_api_key=env("MATCHDESK_EXTRACTION_API_KEY", ""),
     )

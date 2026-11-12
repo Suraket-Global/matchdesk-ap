@@ -24,6 +24,7 @@ STATE_TABLES: dict[str, frozenset[str]] = {
     ),
     "match_runs": frozenset({"queued", "running", "succeeded", "retry_wait", "failed"}),
     "receiving_imports": frozenset({"draft", "queued", "running", "succeeded", "failed", "voided"}),
+    "sync_runs": frozenset({"queued", "running", "succeeded", "retry_wait", "failed"}),
 }
 ALLOWED_EXTRA = frozenset(
     {
@@ -37,6 +38,7 @@ ALLOWED_EXTRA = frozenset(
         "exceptions_raised",
         "committed_at",
         "voided_at",
+        "error_code",
     }
 )
 

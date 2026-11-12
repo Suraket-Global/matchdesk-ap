@@ -27,6 +27,7 @@ from matchdesk.core.money import (
     round_price,
     round_qty,
 )
+from matchdesk.core.pdf import text_pdf
 from matchdesk.core.settings import Settings, SettingsError, load_settings
 
 __all__ = [
@@ -60,4 +61,5 @@ __all__ = [
     "round_qty",
     "set_correlation_id",
     "set_log_tenant",
+    "text_pdf",
 ]

@@ -1,0 +1,24 @@
+{
+ "_note": "Synthetic. Shape assumed from Intuit's public Accounting API reference; unverified until T-1.1.1.",
+ "QueryResponse": {
+  "Vendor": [
+   {
+    "Id": "56",
+    "DisplayName": "Fictional Fasteners Ltd",
+    "Active": true
+   },
+   {
+    "Id": "57",
+    "DisplayName": "Synthetic Supply Co",
+    "Active": true
+   },
+   {
+    "Id": "58",
+    "DisplayName": "Imaginary Packaging Inc",
+    "Active": true
+   }
+  ],
+  "startPosition": 1,
+  "maxResults": 3
+ }
+}

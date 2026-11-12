@@ -1,51 +1,132 @@
 """QuickBooks Online behind an interface (read only; no write method exists).
 
-T-1.1.1 (sandbox fact sheet) is blocked in B1: no developer account, no keys,
-no real calls. ``FakeQboReader`` serves recorded synthetic records so sync and
-matching can be built and tested; the real ``httpx`` client is written after
-the fact sheet confirms what the API returns for linked bill lines and credits.
+T-1.1.1 (sandbox fact sheet) is blocked: no Intuit developer account, no keys, no real
+calls. Two readers exist:
+
+- ``FakeQboReader``: in-memory rows for unit tests.
+- ``RecordedQboReader``: synthetic JSON files shaped as the Accounting API is assumed to
+  answer a query (``{"QueryResponse": {"PurchaseOrder": [...]}}``, entity fields as in
+  Intuit's public reference). **Shape unverified until T-1.1.1.** Paging imitates the
+  API's ``STARTPOSITION`` / ``MAXRESULTS`` (1-based start).
+
+``IntuitQboReader`` is the real client's place: selected by ``MATCHDESK_QBO_MODE=intuit``,
+it refuses every call until the fact sheet exists and the app has keys.
+
+There is no item-receipt entity in the Accounting API (SRC-16); no reader returns receipts.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+import json
 from dataclasses import dataclass, field
+from datetime import date
+from decimal import Decimal
+from pathlib import Path
 from typing import Any, Protocol
+
+from matchdesk.core import Settings
+
+ENTITIES = ("Vendor", "Item", "PurchaseOrder", "Bill", "VendorCredit")
+
+
+class QboNotConfiguredError(RuntimeError):
+    """The real Intuit client is selected but not configured (no developer account, T-1.1.1)."""
+
+
+class QboTransientError(RuntimeError):
+    """HTTP 429, 5xx or a network error: the sync retries and resumes from its cursor."""
+
+
+@dataclass(frozen=True)
+class PageQuery:
+    """What one sync asks for. ``references``: PO numbers (mode ``po_references``); ``since`` and
+    ``until``: PO transaction dates (mode ``date_range``); ``vendor_ids``: bills and credits of these
+    vendors, with no date filter (history, AD-13)."""
+
+    references: tuple[str, ...] | None = None
+    since: date | None = None
+    until: date | None = None
+    vendor_ids: tuple[str, ...] | None = None
 
 
 class QboReader(Protocol):
     """The five entity types MatchDesk reads (MH-02). There is deliberately no write method."""
 
-    def vendors(self) -> Iterable[dict[str, Any]]: ...
-    def items(self) -> Iterable[dict[str, Any]]: ...
-    def purchase_orders(self, references: list[str] | None = None) -> Iterable[dict[str, Any]]: ...
-    def bills(self, vendor_ids: list[str]) -> Iterable[dict[str, Any]]: ...
-    def vendor_credits(self, vendor_ids: list[str]) -> Iterable[dict[str, Any]]: ...
+    def page(self, entity: str, start: int, size: int, query: PageQuery) -> list[dict[str, Any]]: ...
+
+
+def _ref(row: dict[str, Any], key: str) -> str | None:
+    value = row.get(key)
+    if isinstance(value, dict):
+        return str(value.get("value")) if value.get("value") is not None else None
+    return str(value) if value is not None else None
+
+
+def _matches(entity: str, row: dict[str, Any], q: PageQuery) -> bool:
+    if entity == "PurchaseOrder":
+        if q.references is not None:
+            return str(row.get("DocNumber")) in q.references
+        txn = date.fromisoformat(str(row["TxnDate"]))
+        return (q.since is None or txn >= q.since) and (q.until is None or txn <= q.until)
+    if entity in ("Bill", "VendorCredit"):
+        return q.vendor_ids is None or _ref(row, "VendorRef") in q.vendor_ids
+    return True
+
+
+def _page(
+    rows: list[dict[str, Any]], entity: str, start: int, size: int, q: PageQuery
+) -> list[dict[str, Any]]:
+    selected = sorted((r for r in rows if _matches(entity, r, q)), key=lambda r: str(r.get("Id")))
+    return selected[start - 1 : start - 1 + size]
 
 
 @dataclass
 class FakeQboReader:
-    """In-memory reader over synthetic records shaped as an assumption of the real API."""
+    """In-memory reader over synthetic rows shaped as an assumption of the real API."""
 
-    vendor_rows: list[dict[str, Any]] = field(default_factory=list)
-    item_rows: list[dict[str, Any]] = field(default_factory=list)
-    po_rows: list[dict[str, Any]] = field(default_factory=list)
-    bill_rows: list[dict[str, Any]] = field(default_factory=list)
-    credit_rows: list[dict[str, Any]] = field(default_factory=list)
+    rows: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    calls: list[tuple[str, int]] = field(default_factory=list)
+    fail_on: set[tuple[str, int]] = field(default_factory=set)
 
-    def vendors(self) -> Iterable[dict[str, Any]]:
-        return list(self.vendor_rows)
+    def page(self, entity: str, start: int, size: int, query: PageQuery) -> list[dict[str, Any]]:
+        self.calls.append((entity, start))
+        if (entity, start) in self.fail_on:
+            self.fail_on.discard((entity, start))
+            raise QboTransientError("simulated interruption")
+        return _page(self.rows.get(entity, []), entity, start, size, query)
 
-    def items(self) -> Iterable[dict[str, Any]]:
-        return list(self.item_rows)
 
-    def purchase_orders(self, references: list[str] | None = None) -> Iterable[dict[str, Any]]:
-        if references is None:
-            return list(self.po_rows)
-        return [p for p in self.po_rows if p["DocNumber"] in references]
+class RecordedQboReader(FakeQboReader):
+    """Reads ``<dir>/<Entity>.json`` files in the assumed query-response shape (shape unverified
+    until T-1.1.1). Numbers are parsed as ``Decimal``, never as binary floats."""
 
-    def bills(self, vendor_ids: list[str]) -> Iterable[dict[str, Any]]:
-        return [b for b in self.bill_rows if b["VendorRef"] in vendor_ids]
+    def __init__(self, directory: Path | str) -> None:
+        rows: dict[str, list[dict[str, Any]]] = {}
+        for entity in ENTITIES:
+            path = Path(directory) / f"{entity}.json"
+            if path.exists():
+                body = json.loads(path.read_text(), parse_float=Decimal, parse_int=Decimal)
+                rows[entity] = list(body.get("QueryResponse", {}).get(entity, []))
+        super().__init__(rows=rows)
 
-    def vendor_credits(self, vendor_ids: list[str]) -> Iterable[dict[str, Any]]:
-        return [c for c in self.credit_rows if c["VendorRef"] in vendor_ids]
+
+class IntuitQboReader:
+    """Placeholder for the real ``httpx`` client, written after T-1.1.1 confirms the responses."""
+
+    def __init__(self, settings: Settings, access_token: str | None = None) -> None:
+        self.settings = settings
+        self.access_token = access_token
+
+    def page(self, entity: str, start: int, size: int, query: PageQuery) -> list[dict[str, Any]]:
+        raise QboNotConfiguredError("Intuit client not configured: T-1.1.1 is blocked (no developer account)")
+
+
+DEFAULT_FIXTURES = Path(__file__).resolve().parents[3] / "fixtures" / "qbo" / "recorded"
+
+
+def reader_from_settings(settings: Settings) -> QboReader:
+    if settings.qbo_mode == "recorded":
+        return RecordedQboReader(settings.qbo_fixtures_dir or DEFAULT_FIXTURES)
+    if settings.qbo_mode == "intuit":
+        return IntuitQboReader(settings)
+    raise QboNotConfiguredError(f"unknown QuickBooks mode {settings.qbo_mode}")

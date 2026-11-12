@@ -16,3 +16,5 @@ os.environ["MATCHDESK_SESSION_KEY"] = secrets.token_urlsafe(32)
 os.environ["MATCHDESK_TOKEN_KEY"] = base64.b64encode(os.urandom(32)).decode()
 os.environ["MATCHDESK_TOKEN_KEY_ID"] = "t1"
 os.environ["MATCHDESK_APP_BASE_URL"] = "https://app.matchdesk.test"
+os.environ["MATCHDESK_EXTRACTOR"] = "fake"
+os.environ["MATCHDESK_QBO_MODE"] = "recorded"

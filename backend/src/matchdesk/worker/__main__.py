@@ -8,17 +8,26 @@ import time
 from typing import Any
 
 from matchdesk.core import configure_logging, get_logger, load_settings
-from matchdesk.exceptions import MATCH_RUN_TASK, execute_run
-from matchdesk.extraction import FakeExtractor
+from matchdesk.exceptions import MATCH_REQUEST_TASK, MATCH_RUN_TASK, execute_run, handle_match_request
+from matchdesk.extraction import extractor_from_settings
 from matchdesk.intake import PROCESS_DOCUMENT_TASK, make_handler
+from matchdesk.qbo import SYNC_TASK, make_sync_handler, reader_from_settings
 from matchdesk.tenancy import claim, get_engine, run_claimed
 
 log = get_logger("matchdesk.worker")
 
 
 def handlers(engine: Any) -> dict[str, Any]:
-    # B1: the extraction provider is the fake; no real provider is configured (no account, no key).
-    return {MATCH_RUN_TASK: execute_run, PROCESS_DOCUMENT_TASK: make_handler(engine, FakeExtractor())}
+    # Extraction: MATCHDESK_EXTRACTOR selects the fake (tests), the local text-PDF reader, or a hosted
+    # provider (deferred: no account). QuickBooks: recorded synthetic responses or the unconfigured
+    # Intuit client (MATCHDESK_QBO_MODE).
+    settings = load_settings()
+    return {
+        MATCH_RUN_TASK: execute_run,
+        MATCH_REQUEST_TASK: handle_match_request,
+        PROCESS_DOCUMENT_TASK: make_handler(engine, extractor_from_settings(settings)),
+        SYNC_TASK: make_sync_handler(engine, lambda: reader_from_settings(settings), settings.qbo_page_size),
+    }
 
 
 def run_once(engine: Any = None) -> str | None:

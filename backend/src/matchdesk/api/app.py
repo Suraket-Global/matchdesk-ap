@@ -22,8 +22,18 @@ from sqlalchemy.exc import IntegrityError
 
 from matchdesk import blobstore
 from matchdesk.api.auth_routes import PUBLIC_API_PATHS, register_auth_routes
-from matchdesk.api.common import CSRF_HEADER, MUTATING, SESSION_COOKIE, Auth, problem, require
+from matchdesk.api.common import (
+    CSRF_HEADER,
+    MUTATING,
+    SESSION_COOKIE,
+    Auth,
+    StaleVersion,
+    conflict_response,
+    problem,
+    require,
+)
 from matchdesk.api.limits import MAX_FILE_BYTES, MAX_UPLOAD_FILE_BYTES, BodyLimitMiddleware
+from matchdesk.api.qbo_routes import register_qbo_routes
 from matchdesk.core import (
     ConflictError,
     ForbiddenError,
@@ -41,6 +51,7 @@ from matchdesk.exceptions.models import ExceptionRow, LineMatch, MatchRun
 from matchdesk.identity import Principal, csrf_matches, load_session
 from matchdesk.intake import add_file, create_batch
 from matchdesk.intake.models import DocumentRow, InvoiceLineRow, InvoiceRow, UploadBatch
+from matchdesk.qbo import QboNotConfiguredError, TokenEndpoint, token_endpoint_from_settings
 from matchdesk.tenancy import get_engine, global_session, session
 from matchdesk.tenancy.models import IdempotencyKey
 
@@ -70,7 +81,7 @@ def _same_origin(request: Request, app_base_url: str) -> bool:
     return origin is None or origin.rstrip("/") == app_base_url.rstrip("/")
 
 
-def create_app(mailer: Mailer | None = None) -> FastAPI:
+def create_app(mailer: Mailer | None = None, qbo_token_endpoint: TokenEndpoint | None = None) -> FastAPI:
     settings = load_settings()
     settings.require_secrets()
     app = FastAPI(title="MatchDesk API", version="0.2.0", docs_url=None, redoc_url=None)
@@ -124,6 +135,12 @@ def create_app(mailer: Mailer | None = None) -> FastAPI:
         return response
 
     register_auth_routes(app, settings, engine(), out_mail)
+    qbo_endpoint: TokenEndpoint
+    try:
+        qbo_endpoint = qbo_token_endpoint or token_endpoint_from_settings(settings)
+    except QboNotConfiguredError:  # Intuit selected but unconfigured: connect answers 503
+        qbo_endpoint = _Unconfigured()
+    register_qbo_routes(app, settings, engine(), qbo_endpoint)
     # Outermost of the application's own middleware: refuses oversize bodies before anything reads them.
     app.add_middleware(BodyLimitMiddleware)
 
@@ -143,6 +160,10 @@ def create_app(mailer: Mailer | None = None) -> FastAPI:
     @app.exception_handler(ForbiddenError)
     async def forbidden(_r: Request, _e: ForbiddenError) -> JSONResponse:
         return problem(403, "Forbidden")
+
+    @app.exception_handler(StaleVersion)
+    async def stale_version(_r: Request, e: StaleVersion) -> JSONResponse:
+        return conflict_response(e.current)
 
     @app.exception_handler(ConflictError)
     async def conflict(_r: Request, e: ConflictError) -> JSONResponse:
@@ -370,6 +391,19 @@ def create_app(mailer: Mailer | None = None) -> FastAPI:
             )
 
     return app
+
+
+class _Unconfigured:
+    """Token endpoint stand-in when ``MATCHDESK_QBO_MODE=intuit`` has no client configured."""
+
+    def exchange(self, code: str, redirect_uri: str) -> dict[str, Any]:
+        raise PermissionError("not configured")
+
+    def refresh(self, refresh_token: str) -> dict[str, Any]:
+        raise PermissionError("not configured")
+
+    def revoke(self, token: str) -> None:
+        return None
 
 
 def _line_status(lm: LineMatch | None, stale: dict[uuid.UUID, bool]) -> dict[str, Any]:

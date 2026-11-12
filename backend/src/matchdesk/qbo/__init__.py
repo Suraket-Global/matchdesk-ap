@@ -1,5 +1,67 @@
-"""QuickBooks Online read copies and the reader interface (no writes)."""
+"""QuickBooks Online: read-only client interface, connection (OAuth), sync runs, local copies."""
 
-from matchdesk.qbo.client import FakeQboReader, QboReader
+from matchdesk.qbo.client import (
+    DEFAULT_FIXTURES,
+    ENTITIES,
+    FakeQboReader,
+    IntuitQboReader,
+    PageQuery,
+    QboNotConfiguredError,
+    QboReader,
+    QboTransientError,
+    RecordedQboReader,
+    reader_from_settings,
+)
+from matchdesk.qbo.oauth import (
+    FakeIntuitTokenEndpoint,
+    IntuitTokenEndpoint,
+    RefreshExpiredError,
+    TokenEndpoint,
+    access_token,
+    complete_callback,
+    describe_connection,
+    disconnect,
+    get_connection,
+    processing_allowed,
+    start_authorization,
+    token_endpoint_from_settings,
+)
+from matchdesk.qbo.sync import (
+    MATCH_REQUEST_TASK,
+    describe_sync,
+    execute_sync,
+    make_sync_handler,
+    request_sync,
+)
+from matchdesk.qbo.sync import TASK as SYNC_TASK
 
-__all__ = ["FakeQboReader", "QboReader"]
+__all__ = [
+    "DEFAULT_FIXTURES",
+    "ENTITIES",
+    "MATCH_REQUEST_TASK",
+    "SYNC_TASK",
+    "FakeIntuitTokenEndpoint",
+    "FakeQboReader",
+    "IntuitQboReader",
+    "IntuitTokenEndpoint",
+    "PageQuery",
+    "QboNotConfiguredError",
+    "QboReader",
+    "QboTransientError",
+    "RecordedQboReader",
+    "RefreshExpiredError",
+    "TokenEndpoint",
+    "access_token",
+    "complete_callback",
+    "describe_connection",
+    "describe_sync",
+    "disconnect",
+    "execute_sync",
+    "get_connection",
+    "make_sync_handler",
+    "processing_allowed",
+    "reader_from_settings",
+    "request_sync",
+    "start_authorization",
+    "token_endpoint_from_settings",
+]
