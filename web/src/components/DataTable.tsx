@@ -62,7 +62,7 @@ export function DataTable<T>(p: DataTableProps<T>) {
     p.onSelectedChange(n);
   };
   return (
-    <div className={`table-wrap ${p.stickyHeader ? "sticky" : ""}`}>
+    <div className={`table-wrap ${p.stickyHeader ? "sticky" : ""}`} tabIndex={0} role="region" aria-label={p.caption ?? "Table"}>
       <table className={p.stackOnPhone ? "stack-sm" : undefined}>
         {p.caption && <caption className="sr-only">{p.caption}</caption>}
         <thead>

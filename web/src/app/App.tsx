@@ -217,16 +217,16 @@ function Shell({ children }: { children: ReactNode }) {
                             <I size={17} aria-hidden="true" />
                             <span className="label">{n.label}</span>
                             {c > 0 && (
-                              <>
-                                <span className={`nav-count ${n.to === "/approvals" ? "alert" : ""}`} aria-hidden="true">
-                                  {c}
-                                </span>
-                                <span className="sr-only" id={descId}>
-                                  {c} {countWords[n.to]}
-                                </span>
-                              </>
+                              <span className={`nav-count ${n.to === "/approvals" ? "alert" : ""}`} aria-hidden="true">
+                                {c}
+                              </span>
                             )}
                           </NavLink>
+                          {c > 0 && (
+                            <span className="sr-only" id={descId}>
+                              {c} {countWords[n.to]}
+                            </span>
+                          )}
                         </li>
                       );
                     })}

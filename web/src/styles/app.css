@@ -188,7 +188,7 @@ svg.lucide {
   font-size: var(--fs-xs);
   line-height: var(--lh-xs);
   font-weight: 600;
-  color: var(--text-3);
+  color: var(--text-2);
   padding: 0 var(--s-2) var(--s-1);
 }
 .nav-group ul {
@@ -279,6 +279,8 @@ svg.lucide {
 }
 
 .workspace {
+  position: relative;
+  overflow-x: clip;
   min-width: 0;
   display: flex;
   flex-direction: column;
@@ -819,6 +821,22 @@ input[type="radio"] {
 input[type="file"] {
   font: inherit;
   max-width: 100%;
+  color: var(--text-2);
+}
+input[type="file"]::file-selector-button {
+  height: 32px;
+  margin-right: var(--s-3);
+  padding: 0 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-weight: 550;
+  cursor: pointer;
+}
+input[type="file"]::file-selector-button:hover {
+  background: var(--gray-50);
 }
 fieldset {
   border: 0;
@@ -1045,6 +1063,7 @@ kbd {
 
 /* ================================================================ data tables */
 .table-wrap {
+  position: relative; /* keeps absolutely placed screen-reader text inside the scroll box */
   overflow: auto;
   background: var(--surface);
   border: 1px solid var(--border);
@@ -1059,6 +1078,10 @@ kbd {
   border-radius: 0;
   box-shadow: none;
   margin: 0;
+}
+.table-wrap:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
 }
 .table-wrap.sticky {
   max-height: calc(100vh - 240px);
@@ -1907,6 +1930,11 @@ dialog.drawer .modal-foot {
 }
 .match-grid .panel {
   margin-bottom: 0;
+}
+.compare th,
+.compare td {
+  padding-left: var(--s-3);
+  padding-right: var(--s-3);
 }
 .compare th[scope="row"] {
   white-space: nowrap;

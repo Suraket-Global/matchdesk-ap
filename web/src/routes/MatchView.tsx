@@ -319,7 +319,7 @@ export function MatchViewPage() {
                 <h2 id="cmp-h">Line comparison</h2>
                 <span className="muted small">Quantities in {uom || "PO units"}, to date across every document on this PO line</span>
               </div>
-              <div className="table-wrap">
+              <div className="table-wrap" tabIndex={0} role="region" aria-label="Line comparison table">
                 <table className="compare">
                   <thead>
                     <tr>
@@ -378,7 +378,7 @@ export function MatchViewPage() {
                 </Link>
               )}
             </div>
-            <div className="table-wrap">
+            <div className="table-wrap" tabIndex={0} role="region" aria-label="Receipts table">
               <table className="compact">
                 <caption className="sr-only">Receipts counted for this PO line</caption>
                 <thead>

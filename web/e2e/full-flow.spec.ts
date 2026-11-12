@@ -167,7 +167,19 @@ test("phone width keeps the reading screens usable without sideways scrolling", 
     await page.goto(p);
     await expect(page.locator("main h1")).toBeVisible();
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
-    expect(overflow, p).toBeLessThanOrEqual(1);
+    // On failure, name the elements that stick out of the page (not those inside a scrolling box).
+    const culprits = await page.evaluate(() =>
+      [...document.querySelectorAll("body *")]
+        .filter((e) => e.getBoundingClientRect().right > window.innerWidth + 1 || e.scrollWidth > e.clientWidth + 1)
+        .filter((e) => !["auto", "scroll", "hidden"].includes(getComputedStyle(e).overflowX))
+        .filter((e) => {
+          for (let p = e.parentElement; p && p !== document.body; p = p.parentElement) if (["auto", "scroll", "hidden"].includes(getComputedStyle(p).overflowX)) return false;
+          return true;
+        })
+        .slice(0, 5)
+        .map((e) => `${e.tagName.toLowerCase()}.${String(e.className)} ${Math.round(e.getBoundingClientRect().right)}`),
+    );
+    expect(overflow, `${p}: ${culprits.join(", ")}`).toBeLessThanOrEqual(1);
   }
   await ctx.close();
 });
