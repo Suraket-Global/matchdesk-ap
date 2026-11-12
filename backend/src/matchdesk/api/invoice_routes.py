@@ -188,6 +188,16 @@ def register_invoice_routes(app: FastAPI, engine: Engine) -> None:
             ):
                 invoices.setdefault(inv.document_id, []).append(inv)
             vendors = views.vendor_names(s)
+            # The first document read from the original of each duplicate file, for the link to it
+            # (App-flow S-06), wherever its batch.
+            originals = {d.duplicate_of_document_id for d in docs if d.duplicate_of_document_id}
+            original_invoice: dict[uuid.UUID, uuid.UUID] = {}
+            for inv in s.scalars(
+                select(InvoiceRow)
+                .where(InvoiceRow.document_id.in_(originals))
+                .order_by(InvoiceRow.page_from.desc())
+            ):
+                original_invoice[inv.document_id] = inv.id
             return {
                 "id": str(batch.id),
                 "created_at": batch.created_at.isoformat(),
@@ -202,6 +212,9 @@ def register_invoice_routes(app: FastAPI, engine: Engine) -> None:
                         "mime_type": d.mime_type,
                         "duplicate_of_document_id": str(d.duplicate_of_document_id)
                         if d.duplicate_of_document_id
+                        else None,
+                        "duplicate_of_invoice_id": str(original_invoice[d.duplicate_of_document_id])
+                        if d.duplicate_of_document_id in original_invoice
                         else None,
                         "original_name": d.original_name,
                         "invoices": [

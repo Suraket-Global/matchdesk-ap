@@ -34,6 +34,7 @@ export async function signIn(page: Page, email: string): Promise<void> {
   await expect(page.getByText("Local development: open Mailpit")).toBeVisible();
   const link = await linkFor(email, asked);
   await page.goto(link);
+  await expect(page.getByText(email)).toBeVisible(); // S-01: the page says who signs in
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await expect(page.locator("header.topbar")).toBeVisible();
 }

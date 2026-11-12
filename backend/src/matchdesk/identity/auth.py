@@ -13,6 +13,7 @@ import hashlib
 import hmac
 import secrets
 import time
+import urllib.parse
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -22,7 +23,7 @@ from sqlalchemy import Engine, delete, func, select, text, update
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
-from matchdesk.audit import write_audit
+from matchdesk.audit import AuditEvent, write_audit
 from matchdesk.core import (
     ConflictError,
     ForbiddenError,
@@ -271,7 +272,8 @@ def _request_login_link(
                 created_at=at,
             )
         )
-    link = f"{cfg.app_base_url}/login/verify#t={token}"
+    # The address rides in the fragment too (never sent to a server), so S-01 can say who signs in.
+    link = f"{cfg.app_base_url}/login/verify#t={token}&e={urllib.parse.quote(address)}"
     return OutgoingMail(
         to=address,
         subject="Your MatchDesk sign-in link",
@@ -710,6 +712,14 @@ def list_users(engine: Engine, p: Principal) -> list[dict[str, Any]]:
             .join(User, User.id == Membership.user_id)
             .order_by(User.email)
         ).all()
+        # Last sign-in to this account, from the audit log (S-16; sessions are deleted when they end).
+        last = dict(
+            s.execute(
+                select(AuditEvent.actor_user_id, func.max(AuditEvent.occurred_at))
+                .where(AuditEvent.action == "sign_in")
+                .group_by(AuditEvent.actor_user_id)
+            ).all()
+        )
         return [
             {
                 "membership_id": str(m.id),
@@ -718,6 +728,7 @@ def list_users(engine: Engine, p: Principal) -> list[dict[str, Any]]:
                 "display_name": name,
                 "role": m.role,
                 "status": m.status,
+                "last_sign_in_at": last[m.user_id].isoformat() if last.get(m.user_id) else None,
             }
             for m, email, name in rows
         ]

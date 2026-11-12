@@ -4,6 +4,7 @@ import { ApiError, send } from "../api/client";
 import type { Me } from "../api/types";
 import { useSession } from "../app/session";
 import { usePageTitle } from "../components/ui";
+import { safePath } from "../lib/format";
 
 const MAILPIT = "http://127.0.0.1:8025";
 // Shown only in a development build (Vite's `DEV` flag); a production build drops it.
@@ -31,7 +32,7 @@ function DevMailNote() {
       <a href={MAILPIT} target="_blank" rel="noreferrer">
         {MAILPIT}
       </a>
-      .
+      . If no message arrives, the sign-in rate limit for this address was reached; <code>make demo-reset</code> clears it.
     </p>
   );
 }
@@ -92,7 +93,11 @@ export function EmailForm({ intro }: { intro?: string }) {
       </button>
       <div role="status" aria-live="polite" style={{ marginTop: 12 }}>
         {state === "sent" && (
-          <p>If that address has access, a link is on its way. It works once, in this browser, and expires in 10 minutes.</p>
+          <p>
+            If that address has access, a link is on its way. It works once, in this browser, and expires in 10 minutes. If
+            nothing arrives, wait 15 minutes before asking again: after several requests for one address no further link is sent,
+            and this page says the same either way so nobody can learn which addresses exist.
+          </p>
         )}
         {state === "limited" && <p className="error-text">Too many requests. Try again in a few minutes.</p>}
         {state === "error" && <p className="error-text">The link could not be sent. Try again.</p>}
@@ -103,9 +108,7 @@ export function EmailForm({ intro }: { intro?: string }) {
   );
 }
 
-function safeNext(next: string | null): string {
-  return next && next.startsWith("/") && !next.startsWith("//") ? next : "/";
-}
+const safeNext = (next: string | null) => safePath(next, "/");
 
 export function LoginPage() {
   usePageTitle("Sign in");
@@ -122,8 +125,22 @@ export function LoginPage() {
 
 /** S-01 /login/verify: the token is in the fragment, never sent in a URL; opening uses nothing up. */
 export function VerifyPage() {
+  // A second emailed link opened in a tab already on this page only changes the fragment: start
+  // again from the new link instead of keeping the old state (review, minor).
+  const [hash, setHash] = useState(window.location.hash);
+  useEffect(() => {
+    const onHash = () => setHash(window.location.hash);
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+  return <VerifyLink key={hash} hash={hash} />;
+}
+
+function VerifyLink({ hash }: { hash: string }) {
   usePageTitle("Sign in");
-  const token = new URLSearchParams(window.location.hash.slice(1)).get("t") ?? "";
+  const fragment = new URLSearchParams(hash.slice(1));
+  const token = fragment.get("t") ?? "";
+  const email = fragment.get("e");
   const [state, setState] = useState<"ready" | "pending" | "expired" | "other" | "totp" | "limited">(
     token ? "ready" : "expired",
   );
@@ -134,9 +151,10 @@ export function VerifyPage() {
     setState("pending");
     try {
       const me = await send<Me>("POST", "/api/v1/auth/sessions", { token, totp_code: code || undefined });
-      signedIn(me);
-      history.replaceState(null, "", window.location.pathname);
+      // Read where to go before the address is rewritten (review, minor).
       const next = new URLSearchParams(window.location.search).get("next");
+      signedIn(me);
+      history.replaceState(null, "", window.location.pathname + window.location.search);
       navigate(safeNext(next), { replace: true });
     } catch (err) {
       const s = err instanceof ApiError ? err.status : 0;
@@ -148,7 +166,7 @@ export function VerifyPage() {
       <h1 style={{ marginBottom: 8 }}>Sign in</h1>
       {(state === "ready" || state === "pending" || state === "totp") && (
         <>
-          <p>Sign in to MatchDesk in this browser?</p>
+          <p>{email ? <>Sign in to MatchDesk as <strong>{email}</strong> in this browser?</> : "Sign in to MatchDesk in this browser?"}</p>
           {state === "totp" && (
             <div className="field">
               <label htmlFor="totp">One-time code from your authenticator app</label>

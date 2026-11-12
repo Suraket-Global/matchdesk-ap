@@ -7,7 +7,7 @@ import { useSession } from "../app/session";
 import { SETTINGS_NAV } from "../app/routes";
 import { Banner, Dialog, ErrorState, Field, Loading, NarrowNote, PageHead, StatusChip, toast, usePageTitle } from "../components/ui";
 import { isDecimal, compareDecimal } from "../lib/decimal";
-import { when } from "../lib/format";
+import { plural, when } from "../lib/format";
 import { ROLES } from "../lib/words";
 
 export function SettingsPage() {
@@ -208,7 +208,7 @@ export function TolerancesPage() {
         }
       >
         <p>
-          This change will re-match {preview?.lines_rematched ?? 0} lines; an estimated {preview?.exceptions_cleared ?? 0} exceptions would now pass. A missing
+          This change will re-match {plural(preview?.lines_rematched ?? 0, "line")}; an estimated {plural(preview?.exceptions_cleared ?? 0, "exception")} would now pass. A missing
           receiving record stays an exception whatever the tolerance.
         </p>
         {save.error && <p className="error-text">{errorText(save.error)}</p>}
@@ -290,6 +290,7 @@ export function UsersPage() {
                 <th scope="col">Email</th>
                 <th scope="col">Role</th>
                 <th scope="col">Status</th>
+                <th scope="col">Last sign-in</th>
                 <th scope="col">
                   <span className="sr-only">Actions</span>
                 </th>
@@ -304,8 +305,11 @@ export function UsersPage() {
                     <td>{u.display_name}</td>
                     <td>{u.email}</td>
                     <td>
+                      <label className="sr-only" htmlFor={`role-${u.membership_id}`}>
+                        Role of {u.email}
+                      </label>
                       <select
-                        aria-label={`Role of ${u.email}`}
+                        id={`role-${u.membership_id}`}
                         value={u.role}
                         disabled={self || last || u.status !== "active"}
                         onChange={(e) => setChange({ u, role: e.target.value })}
@@ -320,6 +324,7 @@ export function UsersPage() {
                     <td>
                       <StatusChip status={u.status} />
                     </td>
+                    <td>{u.last_sign_in_at ? when(u.last_sign_in_at) : <span className="muted">Never</span>}</td>
                     <td>
                       {u.status === "active" && !self && !last && (
                         <button className="btn small danger" onClick={() => setChange({ u, status: "deactivated" })}>

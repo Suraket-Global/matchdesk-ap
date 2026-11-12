@@ -86,6 +86,9 @@ export function ReceivingListPage() {
                   <th scope="col" className="num">
                     Rows rejected
                   </th>
+                  <th scope="col" className="num">
+                    Rows waiting for controller approval
+                  </th>
                   <th scope="col">Status</th>
                 </tr>
               </thead>
@@ -103,6 +106,7 @@ export function ReceivingListPage() {
                     <td>{when(i.committed_at ?? i.created_at)}</td>
                     <td className="num">{i.state === "succeeded" || i.state === "voided" ? i.rows_valid ?? 0 : ""}</td>
                     <td className="num">{i.rows_rejected ?? ""}</td>
+                    <td className="num">{i.late_lines_waiting ? <Link to="/approvals">{i.late_lines_waiting}</Link> : i.state === "succeeded" ? 0 : ""}</td>
                     <td>
                       <StatusChip status={status(i)} word={i.state === "draft" ? "Draft, not imported" : undefined} />
                     </td>
@@ -387,7 +391,7 @@ export function ReceivingImportPage() {
               {imp.preview && (
                 <div className="table-wrap" style={{ marginTop: 12, maxHeight: 320 }}>
                   <table className="compact">
-                    <caption>First {Math.min(20, imp.preview.sample_rows?.length ?? 0)} rows</caption>
+                    <caption>First {plural(Math.min(20, imp.preview.sample_rows?.length ?? 0), "row")}</caption>
                     <thead>
                       <tr>
                         <th scope="col">Row</th>
@@ -442,10 +446,10 @@ export function ReceivingImportPage() {
                 {!mapErr && v && (
                   <p>
                     <strong>
-                      {(v.rows_valid ?? 0).toLocaleString("en-CA")} rows valid, {(v.rows_rejected ?? 0).toLocaleString("en-CA")} rejected.
+                      {plural(v.rows_valid ?? 0, "row")} valid, {(v.rows_rejected ?? 0).toLocaleString("en-CA")} rejected.
                     </strong>{" "}
                     {(v.rows_rejected ?? 0) > 0 &&
-                      `Download the ${v.rows_rejected} rows with reasons, fix them in your spreadsheet and upload them again, or import the valid rows now. A date outside the test month is not an error.`}
+                      `Download the ${plural(v.rows_rejected ?? 0, "rejected row")} with reasons, fix them in your spreadsheet and upload them again, or import the valid rows now. A date outside the test month is not an error.`}
                   </p>
                 )}
               </div>
@@ -561,6 +565,9 @@ function ReceiptsTable({ imp }: { imp: ReceivingImport }) {
           <thead>
             <tr>
               <th scope="col">PO</th>
+              <th scope="col" className="num">
+                PO line
+              </th>
               <th scope="col">Received</th>
               <th scope="col">Receiver reference</th>
               <th scope="col" className="num">
@@ -569,6 +576,7 @@ function ReceiptsTable({ imp }: { imp: ReceivingImport }) {
               <th scope="col" className="num">
                 Quantity
               </th>
+              <th scope="col">Unit</th>
               <th scope="col">Counts as a receipt</th>
             </tr>
           </thead>
@@ -579,10 +587,12 @@ function ReceiptsTable({ imp }: { imp: ReceivingImport }) {
                   <td>
                     <Link to={`/purchase-orders/${r.purchase_order_id}`}>{r.po_number ?? "PO"}</Link>
                   </td>
+                  <td className="num">{ln.po_line_no ?? ""}</td>
                   <td>{day(r.received_date)}</td>
                   <td>{r.receiver_ref}</td>
                   <td className="num">{ln.source_row}</td>
                   <td className="num">{ln.qty_received.replace(/\.?0+$/, "")}</td>
+                  <td>{ln.uom ?? ""}</td>
                   <td>
                     {imp.state === "voided"
                       ? "No: import voided"

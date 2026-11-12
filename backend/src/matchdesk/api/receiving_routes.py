@@ -14,7 +14,7 @@ from typing import Annotated, Any, Literal
 from fastapi import FastAPI, Form, Header, HTTPException, Response, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
-from sqlalchemy import Engine, select
+from sqlalchemy import Engine, func, select
 from sqlalchemy.orm import Session
 
 from matchdesk import receiving
@@ -191,10 +191,24 @@ def register_receiving_routes(app: FastAPI, engine: Engine) -> None:
                 q = q.where(ReceivingImportRow.id > cursor)
             rows = s.scalars(q).all()
             names = _file_names(s, rows[:n])
+            # Rows loaded for lines that already had an open exception, still waiting for the
+            # controller (App-flow S-05 column).
+            waiting = dict(
+                s.execute(
+                    select(ReceiptLineRow.receiving_import_id, func.count())
+                    .where(
+                        ReceiptLineRow.receiving_import_id.in_([i.id for i in rows[:n]]),
+                        ReceiptLineRow.added_after_exception.is_(True),
+                        ReceiptLineRow.late_approved.is_(False),
+                    )
+                    .group_by(ReceiptLineRow.receiving_import_id)
+                ).all()
+            )
             return {
                 "items": [
                     {
                         **receiving.describe_import(i),
+                        "late_lines_waiting": int(waiting.get(i.id, 0)),
                         "file_name": names.get(i.document_id),
                         "created_at": i.created_at.isoformat(),
                     }
@@ -231,6 +245,12 @@ def register_receiving_routes(app: FastAPI, engine: Engine) -> None:
                     )
                 ).all()
             )
+            po_lines = {
+                pl.id: pl
+                for pl in s.scalars(
+                    select(PoLineRow).where(PoLineRow.id.in_({ln.po_line_id for ln in lines}))
+                )
+            }
             body["receipts"] = [
                 {
                     "id": str(r.id),
@@ -245,6 +265,11 @@ def register_receiving_routes(app: FastAPI, engine: Engine) -> None:
                         {
                             "id": str(ln.id),
                             "po_line_id": str(ln.po_line_id),
+                            "po_line_no": po_lines[ln.po_line_id].line_no
+                            if ln.po_line_id in po_lines
+                            else None,
+                            "uom": ln.uom
+                            or (po_lines[ln.po_line_id].uom if ln.po_line_id in po_lines else None),
                             "qty_received": str(ln.qty_received),
                             "source_row": ln.source_row,
                             "added_after_exception": ln.added_after_exception,

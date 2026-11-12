@@ -329,7 +329,16 @@ export function BatchPage() {
                 <td>
                   <StatusChip status={f.displayed_state} />
                   {f.failure_code && <div className="error-text">{FAILURE_CODES[f.failure_code] ?? "Could not be read. Try again."}</div>}
-                  {f.duplicate_of_document_id && <div className="muted small">Same as {names.get(f.duplicate_of_document_id) ?? "an earlier file"}</div>}
+                  {f.duplicate_of_document_id && (
+                    <div className="muted small">
+                      Same as{" "}
+                      {f.duplicate_of_invoice_id ? (
+                        <Link to={`/invoices/${f.duplicate_of_invoice_id}`}>{names.get(f.duplicate_of_document_id) ?? "the original file"}</Link>
+                      ) : (
+                        (names.get(f.duplicate_of_document_id) ?? "an earlier file")
+                      )}
+                    </div>
+                  )}
                 </td>
                 <td>{f.invoices.map((i) => i.vendor_name).filter(Boolean).join(", ") || <span className="muted">Not known yet</span>}</td>
                 <td>
