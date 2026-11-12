@@ -108,6 +108,8 @@ describe("W7 and minor: amounts in words", () => {
     expect(zeroCounted({ reported_amount: "0.00", variance_amount: "740.00" })).toBe(true);
     expect(zeroCounted({ reported_amount: "740.00", variance_amount: "740.00" })).toBe(false);
     expect(zeroCounted({ reported_amount: "0.00", variance_amount: "0.00" })).toBe(false);
+    // FF-1006: over-ordered gross but cleared by a QuickBooks vendor credit; it says "cleared", not "counted".
+    expect(zeroCounted({ reported_amount: "0.00", variance_amount: "0.80", status: "resolved" })).toBe(false);
   });
   it("prices keep their cents (4.20, not 4.2)", () => {
     expect(price("4.200000")).toBe("4.20");

@@ -112,7 +112,8 @@ export function typeWord(t: string): string {
 
 /** An exception that adds nothing because the line's amount is already counted under another one
  * on the same line (TRD 8.5 per-line rule): shown with its quantity, never as "CAD 0.00" (review W7). */
-export function zeroCounted(e: Pick<ExceptionItem, "reported_amount" | "variance_amount">): boolean {
+export function zeroCounted(e: Pick<ExceptionItem, "reported_amount" | "variance_amount"> & { status?: string }): boolean {
+  if (e.status === "resolved" || e.status === "auto_closed") return false; // cleared: says so instead
   return e.reported_amount !== null && toCents(e.reported_amount) === 0n && (toCents(e.variance_amount) ?? 0n) !== 0n;
 }
 

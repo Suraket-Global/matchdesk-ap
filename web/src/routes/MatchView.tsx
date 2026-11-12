@@ -32,6 +32,10 @@ function lineChip(l: InvoiceLine, excs: ExceptionItem[]) {
   return <StatusChip status={l.status ?? "not_evaluated"} />;
 }
 
+function chipWord(e: ExceptionItem): string {
+  return e.status === "waived" ? "waived" : `resolved: ${(RESOLUTION_CODES[e.resolution_code ?? ""] ?? "resolved").toLowerCase()}`;
+}
+
 /** Order of the queue the user came from, so "Resolve and next" follows it (App-flow S-09). */
 function queueOrder(items: ExceptionItem[], from: URLSearchParams): ExceptionItem[] {
   const type = from.get("type");
@@ -391,7 +395,14 @@ export function MatchViewPage() {
                 {lineChip(line, inv.exceptions)}{" "}
                 {lineExcs.map((e) => (
                   <span key={e.id} style={{ marginLeft: 6 }}>
-                    {typeWord(e.type)} {zeroCounted(e) ? `(by ${qty(e.variance_qty)})` : money(e.reported_amount ?? e.variance_amount) && `(${cad(e.reported_amount ?? e.variance_amount)})`}
+                    {typeWord(e.type)}{" "}
+                    {e.status === "resolved" && e.resolution_code === "resolved_by_credit"
+                      ? `(by ${qty(e.variance_qty)}, cleared by ${e.label ? "a QuickBooks vendor credit" : "a credit note"})`
+                      : e.status === "resolved" || e.status === "waived"
+                        ? `(${chipWord(e)})`
+                        : zeroCounted(e)
+                          ? `(by ${qty(e.variance_qty)})`
+                          : money(e.reported_amount ?? e.variance_amount) && `(${cad(e.reported_amount ?? e.variance_amount)})`}
                   </span>
                 ))}
               </div>

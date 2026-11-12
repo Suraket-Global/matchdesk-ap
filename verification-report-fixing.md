@@ -685,3 +685,81 @@ Not run: the manual WCAG checks of design.md section 11 (screen reader, 200% zoo
 - `make seed-demo` no longer uploads the invoices and receiving file: it writes them to `play-files/` (gitignored) so the owner does those steps; `ARGS=--preload` keeps the B3 behaviour. `make demo-reset` added (local `matchdesk_dev` only).
 - Playwright runs in the installed Google Chrome (`channel: chrome`) instead of a downloaded browser; each run seeds a tagged tenant that stays in the development database until `make demo-reset`.
 - Order matters in the demo: receiving loaded after invoices becomes late evidence needing the controller (B3 rule); PLAY.md loads receiving first and says so.
+
+## 15. B3/B4 review fixes 2026-11-12
+
+Source: the independent review of B3 and B4 (two read-only reviewers, kept outside this repository). Branch `feat/b4-fixes` from `feat/b4-web`. Every finding was first confirmed by reading the code and writing a test that failed on the unfixed code (run by setting the fix aside), then fixed; where a finding was not real, nothing was changed for it and the evidence is given. Back-end tests are in `backend/tests/integration/test_b4_review_fixes.py` unless named otherwise; web tests in `web/src/review-fixes.test.tsx` (Vitest) and `web/e2e/full-flow.spec.ts` (Playwright). New migrations: 0014 (report immutability), 0015 (`po_lines.removed_at`), 0016 (`item_aliases.reviewed_by`, `reviewed_at`); none earlier was edited.
+
+### 15.1 Results
+
+| ID | Finding (short) | Outcome | Test or evidence |
+|---|---|---|---|
+| C1 | Item-receipt rows without linked-bill audit or attestation counted as class A (false pass #3) | Fixed | `test_c1_review_unknown_linked_bill_is_never_class_a` (unit), `test_c1_item_receipt_export_without_bill_audit_or_attestation_never_counts` |
+| M1 | Re-match left a stale pending waiver; decide waived an auto-closed exception; re-request was a 500 | Fixed | `test_m1_rematch_that_closes_the_exception_withdraws_the_pending_waiver`, `test_m1_rematch_that_changes_the_amount_reopens_and_a_new_request_works` |
+| M2 | Concurrent waivers passed the period cap | Fixed (advisory lock per tenant and person) | `test_m2_concurrent_waivers_cannot_pass_the_period_cap_together` |
+| M3 | If-Match compared without a row lock | Fixed (`lock_for_update` at every site named) | `test_m3_same_if_match_twice_at_once_gives_one_change_and_one_conflict` |
+| M4 | Approval of a draft whose results changed after the cut-off | Fixed | `test_m4_approval_refused_when_results_changed_after_the_cut_off` |
+| M5 | Approved-report trigger missed columns; findings insertable into an approved report | Fixed (migration 0014) | `test_m5_approved_report_is_immutable_as_a_whole_and_takes_no_new_findings` |
+| M6 | Refund evaluated superseded reports; threshold from the caller | Fixed | `test_m6_refund_only_on_the_approved_version_and_threshold_is_not_the_callers`; `test_report_totals_approval_versions_refund_and_export` updated |
+| M7 | XLSX cell reference `ZZZZZZZZZZ1` built a huge list | Fixed (column ≤ XFD, ≤ 200 columns) | `test_m7_xlsx_far_column_reference_and_wide_rows_are_refused_quickly` (the unfixed code hung at 100% CPU and was killed) |
+| m1 | Reconnecting another company mixed data; realm used elsewhere was a 500 | Fixed (refused, same words as other refusals) | `test_m1_minor_reconnecting_another_company_or_a_company_used_elsewhere_is_refused` |
+| m2 | Token refresh not wired; `needs_reconnect` rolled back | Fixed: committed in its own transaction. Wiring: documented as not built (only the Intuit reader needs it, blocked on T-1.1.1) | `test_m2_minor_needs_reconnect_survives_the_callers_rollback` |
+| m3 | CSV guard turned negative amounts into text | Fixed | `test_m3_minor_csv_guard_keeps_negative_amounts_numeric` |
+| m4 | Non-UTF-8 CSV past 64 KB and bad shared-string index were 500 | Fixed | `test_m4_minor_non_utf8_csv_and_bad_shared_string_are_422` |
+| m5 | Concurrent drafts collided (500); approve versus draft race | Fixed (advisory lock per period) | `test_m5_minor_two_drafts_at_once_get_two_versions` |
+| m6 | PO lines deleted in QuickBooks stayed matchable | Fixed (migration 0015) | `test_m6_minor_po_line_deleted_in_quickbooks_is_no_longer_matchable` |
+| m7 | Uploader chose an evidence class above the attestation | Fixed (commit refused above the attested class) | `test_m7_minor_import_class_above_the_attested_class_is_not_committed`; three B3 tests now attest first |
+| W1 | `?from=` unvalidated | Fixed (`safePath`) | Vitest "W1"; E2E-01 `from=javascript:` assertion |
+| W2 | Report figures disagreed (list, detail, coverage, approve dialog) | Fixed: "flagged discrepancies" is findings plus not received everywhere; coverage figures labelled on one denominator (the complete-log figure says why it can be higher); the dialog counts every exception still open | Vitest "W2"; E2E-01 list-versus-report assertion; browser walk: 1,037.30 on both, dialog "6 exceptions still open" = queue 6 |
+| W3 | Exception strip stale until a draft exists | Fixed (`GET /coverage`) | `test_w3_coverage_is_live_without_a_report_draft`; Vitest "W3"; E2E-01 strip assertion |
+| W4 | No "edited" tag after a draft save | Fixed | Vitest "W4 and W8" |
+| W5 | "Mark reviewed" never emptied the list | Fixed (migration 0016, invalidation) | `test_w5_mark_reviewed_empties_the_new_alias_list`; Vitest "W5" |
+| W6 | Bulk result rows lost names | Fixed (rows kept as chosen) | Vitest "W6"; browser walk |
+| W7 | Zero-value "invoiced above ordered" shown; FF-1006 flagged although under-ordered | Engine not wrong: FF-1006 is over the order gross (1,000 on FF-1004 plus 10) and the QuickBooks vendor credit of 100 brings the net to 910, so the engine raises `qty_over_ordered` already `resolved_by_credit` (UT-06 behaviour); the 0.00 rows are the per-line rule of TRD 8.5. Fixed the words: cleared exceptions say "cleared by a QuickBooks vendor credit", amount-less ones show their quantity and "counted under another exception" | `test_w7_engine_flags_over_ordered_only_cumulatively` (passes before and after: evidence); Vitest "W7"; browser walk on FF-1006 and the queue |
+| W8 | Session: sign-in loop on cached `me`; polling counted as activity; cache kept after expiry; autosave lost edits typed during save; bulk retry 409 shown as failure | Fixed (all five) | Playwright "an expired session goes to sign-in once…"; Vitest "W8" (background header, cache cleared, autosave); `test_w8_background_requests_do_not_reset_the_idle_timer`; `test_w8_bulk_retry_with_the_same_key_reports_what_was_applied` |
+| minor | PLAY 3.3 duplicate direction | Fixed (PLAY.md: the copy uploads first; the duplicate links to it) | Browser walk |
+| minor | NarrowNote missing on queue and match view | Fixed | Code (`Exceptions.tsx`, `MatchView.tsx`) |
+| minor | `?type=no_po` after the waiver hid the counter and said "no open exceptions" | Fixed | E2E-01 assertion |
+| minor | Approvals empty state wrong while aliases wait | Fixed | Vitest "W5" |
+| minor | Approved report showed "Refresh draft" | Fixed (only when out of date, as "Create a new draft version") | E2E-01 assertion |
+| minor | Unknown record not the S-19 page | Fixed | Playwright "…unknown route is not found" (now asserts the page) |
+| minor | "Extraction not confirmed:" empty and stale while matching | Fixed (amount shown; hidden while matching) | Browser walk on FF-1006 |
+| minor | "Does not add up" shown when only the supplier is missing | Fixed | Vitest "W4 and W8" |
+| minor | Missing labels: invoice filters, "Resolve as", member roles | Invoice filters and "Resolve as": not real (`<label htmlFor="i-state">`, `"i-vendor"` in `Invoices.tsx`; `<label htmlFor="res-code">` in `MatchView.tsx`; the bulk dialog uses a fieldset legend). Member roles: had only `aria-label`; now a `<label>` | Code; phone-width Playwright check (the new label exposed a containing-block overflow, fixed in CSS) |
+| minor | Last controller's role select enabled | Not real: `disabled={self \|\| last \|\| …}` in `Settings.tsx` since B4; in the browser the only controller's select has `disabled = true` | Browser walk |
+| minor | "4.2" not "4.20" | Fixed (screens and the calculation sentence) | `test_b4_web_reads` updated; Vitest price |
+| minor | "1 rows" | Fixed (plural everywhere it was missing) | Browser walk ("Download the 1 rejected row") |
+| minor | Receipt-lines table lacked PO line and unit | Fixed | `test_appflow_s05_s16_columns_and_receipt_lines_name_the_po_line` |
+| minor | New link in a tab already on `/login/verify` kept the old state | Fixed (restarts on hash change) | Browser walk |
+| minor | `note` not reset on Previous/Next | Fixed | Code (`MatchView.tsx`) |
+| minor | Every 403 shown as a role refusal, CSRF too | Fixed | Vitest "W8" |
+| minor | `next` read after `replaceState` (always "/") | Fixed | Code (`Login.tsx`) |
+| minor | PdfViewer render not cancelled | Fixed | Code (`PdfViewer.tsx`) |
+| minor | Endless polling on a failing sync GET | Fixed (stops on error after two retries) | Code (`Quickbooks.tsx`, `Onboarding.tsx`) |
+| minor | Six `e2e*` folders in `play-files/` | Fixed: deleted; tagged seeds write to the system temporary folder | `play-files/` holds only the demo files after four Playwright runs |
+| minor | Silent sign-in rate limit | Kept the anti-enumeration message; the sent message, the development note and PLAY.md now say a link may not come and why; `make demo-reset` empties `auth_rate_events`; tagged test seeds empty it too | Browser walk |
+| App-flow | S-01 verify page shows the email | Fixed (address in the link fragment) | `test_appflow_s01_link_carries_the_address_in_the_fragment`; every Playwright sign-in asserts it |
+| App-flow | S-05 rows waiting column | Fixed | `test_appflow_s05_s16_…`; E2E-01 |
+| App-flow | S-05 receipt lines link to S-10 | Not real: each receipt line's PO cell links to `/purchase-orders/{id}` since B4 (`Receiving.tsx`) | Code; browser walk |
+| App-flow | S-06 duplicate row links to the original | Fixed | `test_appflow_s06_s09_…`; browser walk |
+| App-flow | S-09 greyed "Billed against PO in QuickBooks" row | Fixed (read from synced bill lines; display only) | `test_appflow_s06_s09_…`; browser walk on SS-5120 |
+| App-flow | S-16 last sign-in column | Fixed | `test_appflow_s05_s16_…`; E2E-01 |
+| App-flow | S-08 table links carry `from=` | Fixed | Browser walk (link href carries `from=`) |
+
+### 15.2 Commands and results (from `matchdesk-ap/`)
+
+| Command | Result |
+|---|---|
+| `make test` (clean `matchdesk_test`, migrations 0001 to 0016) | 249 passed (221 before) |
+| `make check` | passed (ruff, format, mypy, 5 import contracts, top-level imports, float lint) |
+| `web/`: `npm run typecheck`, `npm run lint`, `npm run build` | passed |
+| `web/`: `npm test` (Vitest) | 23 passed (11 before) |
+| `web/`: `npx playwright test` | 4 passed (3 before) |
+| `docs/PLAY.md` walked in the built-in browser as clerk and controller on a fresh `make demo-reset` | Completed; PLAY.md updated where the screens now say more |
+
+### 15.3 Gaps left
+
+- Token refresh is not called by any reader: the only reader that needs it (Intuit) is not built until T-1.1.1.
+- The refund threshold is the server's 500.00 until `pilot_engagements` exists.
+- A few minor fixes (note reset, PdfViewer, polling, `next`) are covered by code reading and the browser walk, not by a dedicated test.
+- Commits: some minor fixes sit in the "web major" and "App-flow" commits because they touched the same files.
