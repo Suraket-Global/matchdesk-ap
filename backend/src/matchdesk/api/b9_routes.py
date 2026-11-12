@@ -121,6 +121,27 @@ def register_b9_routes(app: FastAPI, engine: Engine) -> None:
             receiving.withdraw_declaration(s, row, p.user_id, body.reason)
             return {"declaration": None}
 
+    @app.get("/api/v1/onboarding/status")
+    def get_onboarding_status(p: Auth) -> dict[str, Any]:
+        """S-03 (B9): the controller's receiving attestation with name and date, and the purchase-order
+        lines where QuickBooks shows more billed than MatchDesk has documents for ("earlier invoices
+        needed"), with the QuickBooks bill numbers to upload."""
+        require(p, "read")
+        with session(p.tenant_id, engine) as s:
+            att = receiving.latest_attestation(s)
+            names = views.user_names(s, [att.attested_by] if att else [])
+            return {
+                "attestation": {
+                    "evidence_class": att.evidence_class,
+                    "source_description": att.source_description,
+                    "attested_by_name": names.get(att.attested_by),
+                    "attested_at": att.created_at.isoformat(),
+                }
+                if att
+                else None,
+                "earlier_invoices_needed": views.earlier_invoices_needed(s),
+            }
+
     # ------------------------------------------------------------------ S-07 remove a line
     @app.post("/api/v1/invoices/{invoice_id}/lines/{line_id}/removal")
     def post_remove_line(

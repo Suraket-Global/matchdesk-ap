@@ -460,3 +460,61 @@ def po_change_banner(s: Session, po_id: uuid.UUID) -> dict[str, Any] | None:
             for c in changes
         ],
     }
+
+
+def earlier_invoices_needed(s: Session) -> list[dict[str, Any]]:
+    """S-03 "Earlier invoices needed" (B9): open ``history_incomplete`` exceptions with a quantity,
+    grouped by purchase-order line, with the QuickBooks bills on that line that have no document."""
+    rows = s.execute(
+        select(ExceptionRow, LineMatch.po_line_id)
+        .join(LineMatch, LineMatch.id == ExceptionRow.line_match_id)
+        .where(
+            ExceptionRow.type == "history_incomplete",
+            ExceptionRow.status.in_(("open", "pending_approval")),
+            LineMatch.po_line_id.is_not(None),
+        )
+    ).all()
+    by_line: dict[uuid.UUID, Decimal] = {}
+    for e, pl_id in rows:
+        if pl_id is None:
+            continue
+        missing = e.variance_qty if e.variance_qty is not None else Decimal("0")
+        by_line[pl_id] = max(by_line.get(pl_id, Decimal("0")), missing)
+    if not by_line:
+        return []
+    lines = {pl.id: pl for pl in s.scalars(select(PoLineRow).where(PoLineRow.id.in_(list(by_line))))}
+    pos = {
+        po.id: po
+        for po in s.scalars(
+            select(PurchaseOrderRow).where(
+                PurchaseOrderRow.id.in_({pl.purchase_order_id for pl in lines.values()})
+            )
+        )
+    }
+    documented = {
+        (inv.vendor_id, inv.doc_number_norm)
+        for inv in s.scalars(select(InvoiceRow).where(InvoiceRow.doc_number_norm.is_not(None)))
+    }
+    out = []
+    for pl_id, missing in by_line.items():
+        pl = lines.get(pl_id)
+        if pl is None:
+            continue
+        po = pos.get(pl.purchase_order_id)
+        bills = s.execute(
+            select(QboBillRow.doc_number, QboBillRow.doc_number_norm, QboBillRow.vendor_id)
+            .join(QboBillLineRow, QboBillLineRow.qbo_bill_id == QboBillRow.id)
+            .where(QboBillLineRow.po_line_id == pl_id, QboBillRow.txn_type == "bill")
+            .distinct()
+        ).all()
+        out.append(
+            {
+                "po_number": po.po_number if po else None,
+                "purchase_order_id": str(pl.purchase_order_id),
+                "po_line_no": pl.line_no,
+                "billed_without_document_qty": qty(missing),
+                "uom": pl.uom,
+                "bills_to_upload": sorted(b[0] for b in bills if b[0] and (b[2], b[1]) not in documented),
+            }
+        )
+    return sorted(out, key=lambda x: (str(x["po_number"]), x["po_line_no"] or 0))

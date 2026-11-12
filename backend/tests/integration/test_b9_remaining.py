@@ -894,3 +894,103 @@ def test_account_deletion_request_operator_schedule_cancel_and_execute(app_engin
     with session(keep.tenant_id, app_engine) as s:
         assert s.scalar(text("select count(*) from invoices")) == 1
         assert s.get(Vendor, keep.vendor_id) is not None
+
+
+# --- section 7 of App-flow.md: S-03 attestation and earlier invoices, S-12 late evidence -------------
+
+
+def test_onboarding_status_names_the_attestation_and_the_earlier_invoices_needed(app_engine, client):  # type: ignore[no-untyped-def]
+    from matchdesk.qbo.models import PoLineRow, QboBillLineRow
+
+    w = make_tenant(app_engine, "Fictional Distributor B9-E1")
+    attest(app_engine, w)
+    add_receipt(app_engine, w, "100", date(2026, 9, 28))
+    with session(w.tenant_id, app_engine) as s:
+        pl = s.get(PoLineRow, w.po_line_id)
+        assert pl is not None
+        pl.qbo_billed_qty = D("150")  # QuickBooks shows 150 billed; MatchDesk has a document for 100
+        bill = QboBillRow(
+            tenant_id=w.tenant_id,
+            qbo_id="B-77",
+            txn_type="bill",
+            vendor_id=w.vendor_id,
+            doc_number="FT-0770",
+            doc_number_norm="FT0770",
+            txn_date=date(2026, 9, 5),
+            total=D("210.00"),
+            synced_at=NOW,
+        )
+        s.add(bill)
+        s.flush()
+        s.add(
+            QboBillLineRow(
+                tenant_id=w.tenant_id, qbo_bill_id=bill.id, qty=D("50"), amount=D("210.00"), po_line_id=None
+            )
+        )
+    inv = add_invoice(app_engine, w, "e1", "INV-B9E1", date(2026, 10, 6), "100")
+    match(client, app_engine, w.headers, [inv])
+    assert any(e.type == "history_incomplete" for e in exceptions_of(app_engine, w, inv))
+    body = client.get("/api/v1/onboarding/status", headers=w.headers).json()
+    assert body["attestation"]["evidence_class"] == "A"
+    assert body["attestation"]["attested_by_name"] == "Synthetic user"
+    need = body["earlier_invoices_needed"]
+    assert need and need[0]["po_number"] == "4471" and need[0]["billed_without_document_qty"] == "50"
+
+
+def test_late_evidence_approval_lists_the_open_exceptions_it_lets_the_rematch_see(app_engine, client):  # type: ignore[no-untyped-def]
+    from matchdesk.exceptions.models import Approval
+    from matchdesk.receiving.models import ReceiptLineRow, ReceiptRow, ReceivingImportRow
+
+    w = make_tenant(app_engine, "Fictional Distributor B9-E2")
+    _c, ctrl = add_user(app_engine, w, "controller")
+    add_receipt(app_engine, w, "60", date(2026, 9, 28))
+    inv = add_invoice(app_engine, w, "e2", "INV-B9E2", date(2026, 10, 6), "100")
+    match(client, app_engine, w.headers, [inv])
+    over = next(e for e in exceptions_of(app_engine, w, inv) if e.type == "qty_over_received")
+    with session(w.tenant_id, app_engine) as s:
+        doc_id = s.execute(text("select document_id from receiving_imports limit 1")).scalar()
+        late = ReceivingImportRow(
+            tenant_id=w.tenant_id,
+            source_type="spreadsheet",
+            evidence_class="A",
+            document_id=doc_id,
+            file_sha256=uuid.uuid4().bytes,
+            state="succeeded",
+            committed_at=NOW,
+        )
+        s.add(late)
+        s.flush()
+        r = ReceiptRow(
+            tenant_id=w.tenant_id,
+            receiving_import_id=late.id,
+            purchase_order_id=w.po_id,
+            received_date=date(2026, 10, 1),
+        )
+        s.add(r)
+        s.flush()
+        s.add(
+            ReceiptLineRow(
+                tenant_id=w.tenant_id,
+                receipt_id=r.id,
+                receiving_import_id=late.id,
+                po_line_id=w.po_line_id,
+                qty_received=D("40"),
+                qty_in_po_uom=D("40"),
+                source_row=2,
+                added_after_exception=True,
+            )
+        )
+        s.add(
+            Approval(
+                tenant_id=w.tenant_id,
+                subject_type="late_receipt",
+                receiving_import_id=late.id,
+                requested_by=w.user_id,
+                status="pending",
+                version=1,
+            )
+        )
+    items = client.get("/api/v1/approvals", headers=ctrl).json()["items"]
+    late_item = next(a for a in items if a["subject_type"] == "late_receipt")
+    clears = {c["id"]: c for c in late_item["would_clear"]}
+    assert str(over.id) in clears and clears[str(over.id)]["value"] == "168.00"

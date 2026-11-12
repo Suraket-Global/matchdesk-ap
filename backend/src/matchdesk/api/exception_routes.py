@@ -62,6 +62,7 @@ from matchdesk.exceptions.models import (
 from matchdesk.identity import Membership, Principal, Tenant
 from matchdesk.intake.models import InvoiceLineRow, InvoiceRow
 from matchdesk.matching import normalise_code
+from matchdesk.receiving.models import ReceiptLineRow
 from matchdesk.tenancy import session
 
 
@@ -195,8 +196,48 @@ def _approval_context(s: Session, rows: list[Approval]) -> list[dict[str, Any]]:
                 "item_sku": items.get(al.item_id),
             }
             body["affected"] = _alias_affected(s, al)
+        if a.subject_type == "late_receipt" and a.receiving_import_id is not None:
+            body["would_clear"] = _late_receipt_exceptions(s, a.receiving_import_id)
         out.append(body)
     return out
+
+
+def _late_receipt_exceptions(s: Session, import_id: uuid.UUID) -> list[dict[str, Any]]:
+    """S-12 (B9): the exceptions open now on the purchase-order lines of an import's late lines, with
+    their value: what approving the late evidence lets the re-match look at again. Whether each one
+    clears is decided by that re-match, never here."""
+    po_lines = set(
+        s.scalars(
+            select(ReceiptLineRow.po_line_id).where(
+                ReceiptLineRow.receiving_import_id == import_id,
+                ReceiptLineRow.added_after_exception.is_(True),
+                ReceiptLineRow.late_approved.is_(False),
+            )
+        ).all()
+    )
+    if not po_lines:
+        return []
+    rows = list(
+        s.scalars(
+            select(ExceptionRow)
+            .join(LineMatch, LineMatch.id == ExceptionRow.line_match_id)
+            .where(LineMatch.po_line_id.in_(po_lines), ExceptionRow.status.in_(("open", "pending_approval")))
+            .order_by(ExceptionRow.created_at, ExceptionRow.id)
+        ).all()
+    )
+    ctx = views.exception_context(s, rows)
+    return [
+        {
+            "id": str(e.id),
+            "invoice_id": str(e.invoice_id),
+            "invoice_line_id": str(e.invoice_line_id) if e.invoice_line_id else None,
+            "type": e.type,
+            "doc_number": ctx[e.id]["doc_number"],
+            "line_no": ctx[e.id]["line_no"],
+            "value": str(e.reported_amount if e.reported_amount is not None else e.variance_amount or 0),
+        }
+        for e in rows
+    ]
 
 
 def _alias_affected(s: Session, al: ItemAlias) -> list[dict[str, Any]]:

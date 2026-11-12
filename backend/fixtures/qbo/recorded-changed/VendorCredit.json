@@ -1,5 +1,5 @@
 {
- "_note": "Synthetic. Shape assumed from Intuit's public Accounting API reference; unverified until T-1.1.1.",
+ "_note": "Synthetic. Shape assumed from Intuit's public Accounting API reference; unverified until T-1.1.1. B9: plus VC-DEMO-9, a vendor credit with no invoice number and no lines (ties only by supplier and amount: \"possibly credited\").",
  "QueryResponse": {
   "VendorCredit": [
    {
@@ -32,9 +32,19 @@
       ]
      }
     ]
+   },
+   {
+    "Id": "302",
+    "DocNumber": "VC-DEMO-9",
+    "TxnDate": "2026-10-30",
+    "VendorRef": {
+     "value": "56"
+    },
+    "TotalAmt": 168.0,
+    "Line": []
    }
   ],
   "startPosition": 1,
-  "maxResults": 1
+  "maxResults": 2
  }
 }

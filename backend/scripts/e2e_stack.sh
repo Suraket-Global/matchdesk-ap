@@ -75,7 +75,9 @@ case "${1:-}" in
     ;;
   seed) # seed_demo.py with the e2e settings; remaining arguments are passed on
     shift; "$PY" scripts/seed_demo.py "$@" ;;
+  po-change) # B9: demo_po_change.py for the tenant named in $2 (recorded responses after a change)
+    shift; MATCHDESK_DEMO_TENANT="$1" "$PY" scripts/demo_po_change.py ;;
   down)
     stop; database drop; rm -rf "$E2E"; echo "e2e stack: stopped, $DB dropped" ;;
-  *) echo "usage: e2e_stack.sh up|seed ARGS|down" >&2; exit 2 ;;
+  *) echo "usage: e2e_stack.sh up|seed ARGS|po-change TENANT|down" >&2; exit 2 ;;
 esac

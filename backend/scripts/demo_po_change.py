@@ -3,7 +3,9 @@ change in QuickBooks, for the local demo company.
 
 The responses in ``fixtures/qbo/recorded-changed/`` are the demo's own recorded responses with two
 invented edits: purchase order 4471 line 1 ordered 80 instead of 100, and purchase order 4390 line 2
-deleted. The read runs the real sync (``request_sync``, ``execute_sync``) in recorded-response mode,
+deleted, plus a vendor credit VC-DEMO-9 of 168.00 with no invoice number and no lines, which ties only
+by supplier and amount and so flags FF-1003 "possibly credited" for the controller to decide (S-09).
+The read runs the real sync (``request_sync``, ``execute_sync``) in recorded-response mode,
 so S-10 shows "Changed in QuickBooks" with the old and new values and the worker re-matches the
 affected lines. Nothing is written to QuickBooks. Refuses in production.
 """
@@ -46,7 +48,9 @@ def main() -> int:
     state = execute_sync(engine, tid, run_id, RecordedQboReader(CHANGED), settings.qbo_page_size)
     print(f"demo-po-change: QuickBooks read {state} (recorded responses after a change)")
     print("  open purchase order 4471 or 4390 in the web app: the banner shows what changed;")
-    print("  the running worker re-matches the affected lines")
+    print(
+        "  the running worker re-matches the affected lines; FF-1003 is then 'possibly credited' (VC-DEMO-9)"
+    )
     return 0
 
 
