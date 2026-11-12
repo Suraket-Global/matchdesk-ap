@@ -21,3 +21,10 @@ backend/var/
 var/
 *.log
 *.pid
+
+# Demo files written by make seed-demo (docs/PLAY.md); test output
+play-files/
+web/dist/
+web/test-results/
+web/playwright-report/
+*.tsbuildinfo

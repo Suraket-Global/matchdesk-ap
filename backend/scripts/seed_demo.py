@@ -1,16 +1,21 @@
-"""OPS-04 companion: load one invented tenant so the whole flow can be clicked through (B3).
+"""OPS-04 companion: load one invented tenant so the whole flow can be played through (B3, B4).
 
 Everything is synthetic: an invented distributor, a controller and a clerk with ``.invalid``
 addresses, the invented suppliers of the recorded QuickBooks fixtures (read through a real sync
-run over the recorded-response reader), a warehouse receiving file committed through the
-receiving service, and twelve text PDFs generated here and processed by the worker with the local
-extractor. Sign in by requesting a link for either address; Mailpit (http://127.0.0.1:8025)
-shows the mail. Refuses to run when ``MATCHDESK_ENV`` is ``production``. Idempotent: a second run
-finds the tenant and stops.
+run over the recorded-response reader), the receiving attestation and supplier-item aliases (one
+with a unit conversion waiting for the controller). From B4 the seed no longer uploads the
+invoices or imports the receiving file: it writes them to ``play-files/`` at the repository root
+so the owner does those steps in the web app (docs/PLAY.md). ``--preload`` restores the B3
+behaviour (everything loaded and processed by the worker). ``--tag NAME`` creates a separate
+tenant and addresses (``controller.NAME@example.invalid``) and writes the files to
+``play-files/NAME/``; the end-to-end test uses it so it never disturbs the owner's tenant.
+Sign in by requesting a link; Mailpit (http://127.0.0.1:8025) shows the mail. Refuses to run when
+``MATCHDESK_ENV`` is ``production``. Idempotent: a second run finds the tenant and stops.
 """
 
 from __future__ import annotations
 
+import argparse
 import os
 import subprocess
 import sys
@@ -42,6 +47,7 @@ TENANT = "Demo Distributor Ltd (synthetic)"
 CONTROLLER = "controller.demo@example.invalid"
 CLERK = "clerk.demo@example.invalid"
 ROOT = Path(__file__).resolve().parents[1]
+PLAY_DIR = ROOT.parent / "play-files"
 
 RECEIVING = """PO,Line,Qty,UOM,Received,Receiver
 4390,1,500,,2026-08-20,R-0820
@@ -51,6 +57,7 @@ RECEIVING = """PO,Line,Qty,UOM,Received,Receiver
 4510,1,1000,,2026-10-06,R-1006
 4520,1,200,,2026-10-09,R-1009
 4540,1,900,,2026-10-16,R-1016
+4999,1,10,,2026-10-28,R-1028
 """
 
 # (vendor, number, date, PO, [(code, description, qty, uom, price)], extra lines, printed total or None)
@@ -189,11 +196,41 @@ def invoice_pdf(
     return text_pdf(lines, title=f"Invoice {number}")
 
 
+def write_play_files(folder: Path) -> list[tuple[str, bytes]]:
+    """The invented files the owner uploads in the web app (docs/PLAY.md)."""
+    (folder / "invoices").mkdir(parents=True, exist_ok=True)
+    (folder / "receiving-warehouse-log.csv").write_bytes(RECEIVING.encode())
+    files = [(f"{spec[1]}.pdf", invoice_pdf(*spec)) for spec in INVOICES]
+    # One byte-identical repeat: shown as a duplicate file, never processed twice.
+    files.append(("FF-1002 copy.pdf", invoice_pdf(*INVOICES[1])))
+    for name, data in files:
+        (folder / "invoices" / name).write_bytes(data)
+    (folder / "README.txt").write_text(
+        "Invented files for the MatchDesk demo (docs/PLAY.md). Not real documents.\n"
+        "invoices/: 13 invoice PDFs, one of them a byte-identical copy.\n"
+        "receiving-warehouse-log.csv: the warehouse receiving log (class A).\n"
+    )
+    return files
+
+
 def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--tag", help="separate tenant, addresses and play-files folder", default=None)
+    ap.add_argument("--preload", action="store_true", help="also upload and process everything (B3)")
+    args = ap.parse_args()
+    tag = args.tag
+    if tag is not None and not tag.replace("-", "").isalnum():
+        print("seed-demo: --tag takes letters, digits and dashes", file=sys.stderr)
+        return 2
+    tenant_name = TENANT if tag is None else f"{TENANT} {tag}"
+    controller = CONTROLLER if tag is None else f"controller.{tag}@example.invalid"
+    clerk = CLERK if tag is None else f"clerk.{tag}@example.invalid"
+    folder = PLAY_DIR if tag is None else PLAY_DIR / tag
     settings = load_settings()
     if settings.env == "production":
         print("seed-demo: refused, MATCHDESK_ENV is production", file=sys.stderr)
         return 1
+    files = write_play_files(folder)
     env = {**os.environ, "MATCHDESK_MIGRATION_DATABASE_URL": settings.migration_database_url}
     subprocess.run(
         [sys.executable, "-m", "alembic", "upgrade", "head"],
@@ -204,18 +241,20 @@ def main() -> int:
     )
     engine = get_engine(settings.database_url)
     with global_session(engine) as s:
-        if s.scalar(select(Tenant).where(Tenant.name == TENANT)) is not None:
-            print(f"seed-demo: '{TENANT}' already exists; nothing changed")
+        if s.scalar(select(Tenant).where(Tenant.name == tenant_name)) is not None:
+            print(f"seed-demo: '{tenant_name}' already exists; nothing changed")
+            print(f"  controller: {controller}   clerk: {clerk}   play files: {folder}")
+            print("  for a clean start: make demo-reset")
             return 0
-        t = Tenant(name=TENANT)
+        t = Tenant(name=tenant_name)
         s.add(t)
         users = {}
-        for email, name in ((CONTROLLER, "Demo Controller"), (CLERK, "Demo Clerk")):
+        for email, name in ((controller, "Demo Controller"), (clerk, "Demo Clerk")):
             u = s.scalar(select(User).where(User.email == email)) or User(email=email, display_name=name)
             s.add(u)
             users[email] = u
         s.flush()
-        tid, ctrl_id, clerk_id = t.id, users[CONTROLLER].id, users[CLERK].id
+        tid, ctrl_id, clerk_id = t.id, users[controller].id, users[clerk].id
     with session(tid, engine) as s:
         s.add_all(
             [
@@ -260,53 +299,53 @@ def main() -> int:
         ):
             create_alias(s, tid, clerk_id, vendors[vq], code, items[sku], Decimal(factor), sup, itm)
         attest(s, tid, ctrl_id, "A", "Warehouse receiving log kept by the receiver (synthetic)", [])
-        imp, _preview = create_import(
-            s, tid, clerk_id, RECEIVING.encode(), "spreadsheet", "A", "Demo Receiver"
-        )
-        set_declaration(s, imp, clerk_id, True, date(2026, 8, 1), date(2026, 11, 14), "Demo Receiver")
-        save_mapping(
-            s,
-            imp,
-            clerk_id,
-            {
-                "po_number": "PO",
-                "line_no": "Line",
-                "qty_received": "Qty",
-                "uom": "UOM",
-                "received_date": "Received",
-                "receiver_ref": "Receiver",
-            },
-            "Warehouse log",
-        )
-        commit(s, imp, clerk_id, frozenset())
-        batch = create_batch(s, tid)
-        for n, spec in enumerate(INVOICES):
-            data = invoice_pdf(*spec)
-            add_file(s, tid, clerk_id, batch.id, f"demo-{n}", data, "application/pdf", f"{spec[1]}.pdf")
-        # One byte-identical repeat: shown as a duplicate file, never processed twice.
-        add_file(
-            s,
-            tid,
-            clerk_id,
-            batch.id,
-            "demo-repeat",
-            invoice_pdf(*INVOICES[1]),
-            "application/pdf",
-            "FF-1002 copy.pdf",
-        )
     processed = 0
-    while run_once(engine) is not None:
-        processed += 1
+    if args.preload:
+        with session(tid, engine) as s:
+            imp, _preview = create_import(
+                s,
+                tid,
+                clerk_id,
+                RECEIVING.encode(),
+                "spreadsheet",
+                "A",
+                "Demo Receiver",
+                "receiving-warehouse-log.csv",
+            )
+            set_declaration(s, imp, clerk_id, True, date(2026, 8, 1), date(2026, 11, 14), "Demo Receiver")
+            save_mapping(
+                s,
+                imp,
+                clerk_id,
+                {
+                    "po_number": "PO",
+                    "line_no": "Line",
+                    "qty_received": "Qty",
+                    "uom": "UOM",
+                    "received_date": "Received",
+                    "receiver_ref": "Receiver",
+                },
+                "Warehouse log",
+            )
+            commit(s, imp, clerk_id, frozenset())
+            batch = create_batch(s, tid)
+            for n, (name, data) in enumerate(files):
+                add_file(s, tid, clerk_id, batch.id, f"demo-{n}", data, "application/pdf", name)
+        while run_once(engine) is not None:
+            processed += 1
     with session(tid, engine) as s:
         from matchdesk.exceptions.models import ExceptionRow
 
         open_excs = s.scalar(
             select(func.count()).select_from(ExceptionRow).where(ExceptionRow.status == "open")
         )
-    print(f"seed-demo: tenant '{TENANT}' ({tid})")
-    print(f"  controller: {CONTROLLER}   clerk: {CLERK}   (request a sign-in link; read it in Mailpit)")
-    print(f"  {len(INVOICES) + 1} files uploaded, {processed} jobs run, {open_excs} open exceptions")
-    print("  next: a back-test draft for 2026-10-01 to 2026-10-31 (POST /api/v1/reports/backtest)")
+    print(f"seed-demo: tenant '{tenant_name}' ({tid})")
+    print(f"  controller: {controller}   clerk: {clerk}")
+    print("  sign in: open the web app (make web, http://127.0.0.1:5173), ask for a link,")
+    print("           then open it from Mailpit (http://127.0.0.1:8025)")
+    print(f"  play files: {folder} (receiving log and 13 invoice PDFs; see docs/PLAY.md)")
+    if args.preload:
+        print(f"  preloaded: {len(files)} files uploaded, {processed} jobs run, {open_excs} open exceptions")
     return 0
 
 

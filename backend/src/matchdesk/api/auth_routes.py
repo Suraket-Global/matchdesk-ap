@@ -19,6 +19,7 @@ from matchdesk.identity import (
     IssuedSession,
     accept_invitation,
     create_invitation,
+    csrf_for,
     describe_me,
     end_session,
     exchange_login_token,
@@ -165,16 +166,21 @@ def register_auth_routes(app: FastAPI, settings: Settings, engine: Engine, maile
         out.delete_cookie(SESSION_COOKIE, path="/", secure=True, httponly=True, samesite="lax")
         return out
 
+    def _with_csrf(request: Request, body: dict[str, Any]) -> dict[str, Any]:
+        # The web app keeps the anti-forgery token in memory only; after a reload it reads it here
+        # (B4). It is derived from the session cookie, which script cannot read (httponly).
+        return {**body, "csrf_token": csrf_for(request.cookies[SESSION_COOKIE], settings)}
+
     @app.get("/api/v1/me")
-    def get_me(ctx: Ctx) -> dict[str, Any]:
-        return describe_me(engine, ctx)
+    def get_me(ctx: Ctx, request: Request) -> dict[str, Any]:
+        return _with_csrf(request, describe_me(engine, ctx))
 
     @app.put("/api/v1/me/active-tenant")
     def put_active_tenant(body: ActiveTenant, ctx: Ctx, request: Request) -> dict[str, Any]:
         switch_tenant(engine, ctx, body.tenant_id)
         fresh = load_session(engine, request.cookies[SESSION_COOKIE], touch=False)
         assert fresh is not None
-        return describe_me(engine, fresh)
+        return _with_csrf(request, describe_me(engine, fresh))
 
     @app.post("/api/v1/invitations", status_code=201)
     def post_invitation(body: InvitationCreate, p: Auth, background: BackgroundTasks) -> dict[str, Any]:

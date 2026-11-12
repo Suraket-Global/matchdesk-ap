@@ -15,6 +15,7 @@ from sqlalchemy import Engine, func, select
 from sqlalchemy.orm import Session
 
 from matchdesk import receiving
+from matchdesk.api import views
 from matchdesk.api.common import (
     Auth,
     StaleVersion,
@@ -153,6 +154,46 @@ def _approval_body(a: Approval) -> dict[str, Any]:
     }
 
 
+def _approval_context(s: Session, rows: list[Approval]) -> list[dict[str, Any]]:
+    """Approvals with the words the S-12 dialogs restate (DD-09): who asked, and the subject."""
+    names = views.user_names(s, [a.requested_by for a in rows] + [a.decided_by for a in rows])
+    excs = {
+        e.id: e
+        for e in s.scalars(
+            select(ExceptionRow).where(ExceptionRow.id.in_([a.exception_id for a in rows if a.exception_id]))
+        )
+    }
+    ctx = views.exception_context(s, list(excs.values()))
+    aliases = {
+        a.id: a
+        for a in s.scalars(
+            select(ItemAlias).where(ItemAlias.id.in_([a.alias_id for a in rows if a.alias_id]))
+        )
+    }
+    vendors = views.vendor_names(s)
+    from matchdesk.qbo.models import Item
+
+    items = dict(s.execute(select(Item.id, Item.sku)).all())
+    out = []
+    for a in rows:
+        body = _approval_body(a)
+        body["requested_by_name"] = names.get(a.requested_by)
+        body["decided_by_name"] = names.get(a.decided_by) if a.decided_by else None
+        body["requested_at"] = a.created_at.isoformat()
+        e = excs.get(a.exception_id) if a.exception_id else None
+        if e is not None:
+            body["exception"] = {**exception_body(e), **ctx[e.id]}
+        al = aliases.get(a.alias_id) if a.alias_id else None
+        if al is not None:
+            body["alias"] = {
+                **describe_alias(al),
+                "vendor_name": vendors.get(al.vendor_id),
+                "item_sku": items.get(al.item_id),
+            }
+        out.append(body)
+    return out
+
+
 def _limits(s: Session, tenant_id: uuid.UUID) -> tuple[Decimal, Decimal]:
     t = s.get(Tenant, tenant_id)
     assert t is not None
@@ -220,14 +261,17 @@ def register_exception_routes(app: FastAPI, engine: Engine) -> None:
                     InvoiceRow.vendor_id == vendor_id
                 )
             counters = Counter(r for r in s.scalars(q.with_only_columns(ExceptionRow.status)).all())
+            type_counters = Counter(r for r in s.scalars(q.with_only_columns(ExceptionRow.type)).all())
             page_q = q.order_by(ExceptionRow.id).limit(n + 1)
             if cursor is not None:
                 page_q = page_q.where(ExceptionRow.id > cursor)
             rows = list(s.scalars(page_q).all())
             stale = _stale_map(s, rows[:n])
+            context = views.exception_context(s, rows[:n])
             return {
-                "items": [exception_body(e, stale.get(e.id)) for e in rows[:n]],
+                "items": [{**exception_body(e, stale.get(e.id)), **context[e.id]} for e in rows[:n]],
                 "counters": dict(counters),
+                "type_counters": dict(type_counters),
                 "next_cursor": str(rows[n - 1].id) if len(rows) > n else None,
             }
 
@@ -362,7 +406,8 @@ def register_exception_routes(app: FastAPI, engine: Engine) -> None:
             q = select(Approval).where(Approval.status == status).order_by(Approval.created_at, Approval.id)
             if subject_type:
                 q = q.where(Approval.subject_type == subject_type)
-            return {"items": [_approval_body(a) for a in s.scalars(q).all()]}
+            rows = list(s.scalars(q).all())
+            return {"items": _approval_context(s, rows)}
 
     @app.post("/api/v1/approvals/{approval_id}/decision")
     def post_decision(
@@ -405,7 +450,25 @@ def register_exception_routes(app: FastAPI, engine: Engine) -> None:
                 q = q.where(ItemAlias.vendor_id == vendor_id)
             if status:
                 q = q.where(ItemAlias.status == status)
-            return {"items": [describe_alias(a) for a in s.scalars(q).all()]}
+            rows = list(s.scalars(q).all())
+            vendors = views.vendor_names(s)
+            from matchdesk.qbo.models import Item
+
+            items = {i.id: i for i in s.scalars(select(Item))}
+            names = views.user_names(s, [a.created_by for a in rows] + [a.approved_by for a in rows])
+            return {
+                "items": [
+                    {
+                        **describe_alias(a),
+                        "vendor_name": vendors.get(a.vendor_id),
+                        "item_sku": items[a.item_id].sku if a.item_id in items else None,
+                        "item_name": items[a.item_id].name if a.item_id in items else None,
+                        "created_by_name": names.get(a.created_by),
+                        "approved_by_name": names.get(a.approved_by) if a.approved_by else None,
+                    }
+                    for a in rows
+                ]
+            }
 
     @app.get("/api/v1/aliases/suggestions")
     def alias_suggestions(

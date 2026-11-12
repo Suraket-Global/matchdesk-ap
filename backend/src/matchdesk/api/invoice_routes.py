@@ -10,6 +10,7 @@ from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import Engine, select
 
+from matchdesk.api import views
 from matchdesk.api.common import Auth, StaleVersion, if_match, page_limit, require
 from matchdesk.core import NotFoundError
 from matchdesk.exceptions import related_invoices, request_runs
@@ -36,8 +37,11 @@ class ConfirmBody(BaseModel):
     accept_inconsistent: bool = False
 
 
-def _summary(inv: InvoiceRow, state: str | None) -> dict[str, Any]:
+def _summary(
+    inv: InvoiceRow, state: str | None, vendors: dict[uuid.UUID, str] | None = None
+) -> dict[str, Any]:
     return {
+        "vendor_name": (vendors or {}).get(inv.vendor_id) if inv.vendor_id else None,
         "id": str(inv.id),
         "document_id": str(inv.document_id),
         "doc_type": inv.doc_type,
@@ -86,7 +90,7 @@ def register_invoice_routes(app: FastAPI, engine: Engine) -> None:
                 q = q.where(InvoiceRow.vendor_id == vendor_id)
             rows = s.execute(q).all()
             return {
-                "items": [_summary(inv, st) for inv, st in rows[:n]],
+                "items": [_summary(inv, st, views.vendor_names(s)) for inv, st in rows[:n]],
                 "next_cursor": str(rows[n - 1][0].id) if len(rows) > n else None,
             }
 
@@ -176,8 +180,17 @@ def register_invoice_routes(app: FastAPI, engine: Engine) -> None:
                 .where(DocumentRow.batch_id == batch.id)
                 .order_by(DocumentRow.created_at, DocumentRow.id)
             ).all()
+            invoices: dict[uuid.UUID, list[InvoiceRow]] = {}
+            for inv in s.scalars(
+                select(InvoiceRow)
+                .where(InvoiceRow.document_id.in_([d.id for d in docs]))
+                .order_by(InvoiceRow.page_from)
+            ):
+                invoices.setdefault(inv.document_id, []).append(inv)
+            vendors = views.vendor_names(s)
             return {
                 "id": str(batch.id),
+                "created_at": batch.created_at.isoformat(),
                 "totals": batch_summary(s, batch.id),
                 "files": [
                     {
@@ -190,6 +203,17 @@ def register_invoice_routes(app: FastAPI, engine: Engine) -> None:
                         "duplicate_of_document_id": str(d.duplicate_of_document_id)
                         if d.duplicate_of_document_id
                         else None,
+                        "original_name": d.original_name,
+                        "invoices": [
+                            {
+                                "id": str(i.id),
+                                "doc_type": i.doc_type,
+                                "doc_number": i.doc_number,
+                                "vendor_name": vendors.get(i.vendor_id) if i.vendor_id else None,
+                                "verification_status": i.verification_status,
+                            }
+                            for i in invoices.get(d.id, [])
+                        ],
                     }
                     for d in docs
                 ],

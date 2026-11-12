@@ -86,8 +86,10 @@ def create_import(
     source_type: str,
     evidence_class: str,
     kept_by_name: str | None = None,
+    original_name: str | None = None,
 ) -> tuple[ReceivingImportRow, dict[str, Any]]:
-    """Store the file and a draft import; return it with a preview (headers, first rows)."""
+    """Store the file and a draft import; return it with a preview (headers, first rows). The
+    user-supplied file name is kept in the database only, never in a key or a log (TRD 8.7)."""
     mime = sniff_receiving(data)
     if mime is None:
         raise ReceivingFileError("only CSV and XLSX receiving files are accepted")
@@ -119,6 +121,7 @@ def create_import(
         byte_size=len(data),
         state="succeeded",
         correlation_id=uuid.UUID(corr),
+        original_name=(original_name or "")[:255] or None,
     )
     s.add(doc)
     s.flush()

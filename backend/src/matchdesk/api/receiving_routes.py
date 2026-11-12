@@ -7,6 +7,7 @@ requests the re-match, in the same transaction.
 from __future__ import annotations
 
 import uuid
+from collections.abc import Sequence
 from datetime import date
 from typing import Annotated, Any, Literal
 
@@ -26,7 +27,8 @@ from matchdesk.exceptions import (
     request_late_receipt_approval,
     request_runs,
 )
-from matchdesk.qbo.models import PoLineRow
+from matchdesk.intake.models import DocumentRow
+from matchdesk.qbo.models import PoLineRow, PurchaseOrderRow
 from matchdesk.receiving.models import ReceiptLineRow, ReceiptRow, ReceivingImportRow
 from matchdesk.tenancy import session
 
@@ -74,6 +76,13 @@ def _rematch(
     return str(run.id) if run else None
 
 
+def _file_names(s: Session, imports: Sequence[ReceivingImportRow]) -> dict[uuid.UUID, str | None]:
+    ids = [i.document_id for i in imports]
+    return dict(
+        s.execute(select(DocumentRow.id, DocumentRow.original_name).where(DocumentRow.id.in_(ids))).all()
+    )  # type: ignore[arg-type]
+
+
 def register_receiving_routes(app: FastAPI, engine: Engine) -> None:
     @app.post("/api/v1/receiving/imports", status_code=201)
     async def post_import(
@@ -89,15 +98,22 @@ def register_receiving_routes(app: FastAPI, engine: Engine) -> None:
         data = await file.read(MAX_UPLOAD_FILE_BYTES + 1)
         if len(data) > RECEIVING_MAX_BYTES:
             raise HTTPException(413, "File is larger than 20 MB")
-        return await run_in_threadpool(_create, p, data, source_type, evidence_class, kept_by_name)
+        return await run_in_threadpool(
+            _create, p, data, source_type, evidence_class, kept_by_name, file.filename
+        )
 
     def _create(
-        p: Any, data: bytes, source_type: str, evidence_class: str, kept_by: str | None
+        p: Any,
+        data: bytes,
+        source_type: str,
+        evidence_class: str,
+        kept_by: str | None,
+        name: str | None = None,
     ) -> dict[str, Any]:
         try:
             with session(p.tenant_id, engine) as s:
                 imp, prev = receiving.create_import(
-                    s, p.tenant_id, p.user_id, data, source_type, evidence_class, kept_by
+                    s, p.tenant_id, p.user_id, data, source_type, evidence_class, kept_by, name
                 )
                 return {**receiving.describe_import(imp), "preview": prev}
         except receiving.ReceivingFileError as exc:
@@ -174,8 +190,16 @@ def register_receiving_routes(app: FastAPI, engine: Engine) -> None:
             if cursor is not None:
                 q = q.where(ReceivingImportRow.id > cursor)
             rows = s.scalars(q).all()
+            names = _file_names(s, rows[:n])
             return {
-                "items": [receiving.describe_import(i) for i in rows[:n]],
+                "items": [
+                    {
+                        **receiving.describe_import(i),
+                        "file_name": names.get(i.document_id),
+                        "created_at": i.created_at.isoformat(),
+                    }
+                    for i in rows[:n]
+                ],
                 "next_cursor": str(rows[n - 1].id) if len(rows) > n else None,
             }
 
@@ -196,10 +220,20 @@ def register_receiving_routes(app: FastAPI, engine: Engine) -> None:
             for ln in lines:
                 by_receipt.setdefault(ln.receipt_id, []).append(ln)
             body = receiving.describe_import(imp)
+            body["file_name"] = _file_names(s, [imp]).get(imp.document_id)
+            body["created_at"] = imp.created_at.isoformat()
+            po_numbers = dict(
+                s.execute(
+                    select(PurchaseOrderRow.id, PurchaseOrderRow.po_number).where(
+                        PurchaseOrderRow.id.in_({r.purchase_order_id for r in receipts})
+                    )
+                ).all()
+            )
             body["receipts"] = [
                 {
                     "id": str(r.id),
                     "purchase_order_id": str(r.purchase_order_id),
+                    "po_number": po_numbers.get(r.purchase_order_id),
                     "received_date": r.received_date.isoformat(),
                     "receiver_ref": r.receiver_ref,
                     "receiver_marks_present": r.receiver_marks_present,

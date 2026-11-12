@@ -21,6 +21,7 @@ from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 
 from matchdesk import blobstore
+from matchdesk.api import views
 from matchdesk.api.auth_routes import PUBLIC_API_PATHS, register_auth_routes
 from matchdesk.api.common import (
     CSRF_HEADER,
@@ -36,6 +37,7 @@ from matchdesk.api.exception_routes import register_exception_routes
 from matchdesk.api.invoice_routes import register_invoice_routes
 from matchdesk.api.limits import MAX_FILE_BYTES, MAX_UPLOAD_FILE_BYTES, BodyLimitMiddleware
 from matchdesk.api.qbo_routes import register_qbo_routes
+from matchdesk.api.read_routes import register_read_routes
 from matchdesk.api.receiving_routes import register_receiving_routes
 from matchdesk.api.report_routes import register_report_routes
 from matchdesk.core import (
@@ -50,12 +52,13 @@ from matchdesk.core import (
     new_correlation_id,
     set_correlation_id,
 )
-from matchdesk.exceptions import request_run, stale_runs
+from matchdesk.exceptions import allowed_codes, request_run, stale_runs
 from matchdesk.exceptions.models import ExceptionRow, LineMatch, MatchRun
 from matchdesk.identity import Principal, csrf_matches, load_session
 from matchdesk.intake import add_file, create_batch, describe_fields
 from matchdesk.intake.models import DocumentRow, InvoiceLineRow, InvoiceRow, UploadBatch
 from matchdesk.qbo import QboNotConfiguredError, TokenEndpoint, token_endpoint_from_settings
+from matchdesk.qbo.models import PurchaseOrderRow
 from matchdesk.tenancy import get_engine, global_session, session
 from matchdesk.tenancy.models import IdempotencyKey
 
@@ -149,6 +152,7 @@ def create_app(mailer: Mailer | None = None, qbo_token_endpoint: TokenEndpoint |
     register_invoice_routes(app, engine())
     register_exception_routes(app, engine())
     register_report_routes(app, engine())
+    register_read_routes(app, engine())
     # Outermost of the application's own middleware: refuses oversize bodies before anything reads them.
     app.add_middleware(BodyLimitMiddleware)
 
@@ -298,9 +302,20 @@ def create_app(mailer: Mailer | None = None, qbo_token_endpoint: TokenEndpoint |
             stale = stale_runs(s, [lm.match_run_id for lm in results.values()])
             run_of_match = {lm.id: lm.match_run_id for lm in results.values()}
             any_stale = any(stale.values())
+            evidence = views.line_evidence(s, inv, list(lines))
+            ctx_by_exc = views.exception_context(s, list(excs))
+            po = s.get(PurchaseOrderRow, inv.purchase_order_id) if inv.purchase_order_id else None
             return {
                 "stale": any_stale,
                 "id": str(inv.id),
+                "document_id": str(inv.document_id),
+                "vendor_id": str(inv.vendor_id) if inv.vendor_id else None,
+                "vendor_name": views.vendor_names(s).get(inv.vendor_id) if inv.vendor_id else None,
+                "purchase_order_id": str(inv.purchase_order_id) if inv.purchase_order_id else None,
+                "po_number": po.po_number if po else inv.po_number_read,
+                "total": str(inv.total) if inv.total is not None else None,
+                "verification_status": inv.verification_status,
+                "qbo_bill": views.bill_status(s, inv),
                 "doc_type": inv.doc_type,
                 "doc_number": inv.doc_number,
                 "doc_date": inv.doc_date.isoformat() if inv.doc_date else None,
@@ -312,12 +327,25 @@ def create_app(mailer: Mailer | None = None, qbo_token_endpoint: TokenEndpoint |
                         "line_no": ln.line_no,
                         **_line_status(results.get(ln.id), stale),
                         "checks_run": results[ln.id].checks_run if ln.id in results else [],
+                        "supplier_item_code": ln.supplier_item_code,
+                        "description": ln.description,
+                        "qty": views.qty(ln.qty),
+                        "uom": ln.uom,
+                        "unit_price": views.qty(ln.unit_price),
+                        "amount": str(ln.amount) if ln.amount is not None else None,
+                        "line_kind": ln.line_kind,
+                        "page_no": ln.page_no,
+                        **evidence.get(ln.id, {"match": None}),
                     }
                     for ln in lines
                 ],
                 "exceptions": [
                     {
                         **_exc_body(e),
+                        **ctx_by_exc.get(e.id, {}),
+                        "allowed_codes": sorted(allowed_codes(e)),
+                        "resolution_note": e.resolution_note,
+                        "possibly_credited": e.possibly_credited_bill_id is not None,
                         "stale": stale.get(run_of_match.get(e.line_match_id), any_stale)  # type: ignore[arg-type]
                         if e.line_match_id
                         else any_stale,
@@ -332,7 +360,13 @@ def create_app(mailer: Mailer | None = None, qbo_token_endpoint: TokenEndpoint |
             e = s.get(ExceptionRow, exception_id)
             if e is None:
                 raise NotFoundError("exception")
-            body = _exc_body(e)
+            body = {
+                **_exc_body(e),
+                **views.exception_context(s, [e]).get(e.id, {}),
+                "invoice_id": str(e.invoice_id),
+                "allowed_codes": sorted(allowed_codes(e)),
+                "resolution_note": e.resolution_note,
+            }
             lm = s.get(LineMatch, e.line_match_id) if e.line_match_id else None
             if lm is not None:
                 body["stale"] = bool(stale_runs(s, [lm.match_run_id]).get(lm.match_run_id))
