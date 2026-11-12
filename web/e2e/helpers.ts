@@ -10,7 +10,7 @@ export function run(): { tag: string; files: string } {
   return JSON.parse(readFileSync(path.join(import.meta.dirname, ".run.json"), "utf8"));
 }
 
-async function linkFor(email: string, after: number): Promise<string> {
+export async function linkFor(email: string, after: number): Promise<string> {
   for (let i = 0; i < 40; i++) {
     const res = await fetch(`${MAILPIT}/search?query=${encodeURIComponent(`to:"${email}"`)}&limit=5`);
     const body = (await res.json()) as { messages: { ID: string; Created: string }[] };

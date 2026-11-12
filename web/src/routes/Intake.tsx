@@ -1,13 +1,13 @@
 import { useCallback, useState } from "react";
-import { CheckCircle2, FileText, Inbox, RotateCw, XCircle } from "lucide-react";
+import { CheckCircle2, FileText, Inbox, Mail, RotateCw, Trash2, XCircle } from "lucide-react";
 import { FileDropzone } from "../components/FileDropzone";
 import { TableSkeleton } from "../components/States";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, errorText, get, newKey, send, upload } from "../api/client";
-import type { Batch, BatchFile, BatchTotals, Page } from "../api/types";
+import type { Batch, BatchFile, BatchTotals, IntakeEmail, Page } from "../api/types";
 import { useSession } from "../app/session";
-import { Banner, Empty, ErrorState, Loading, NarrowNote, PageHead, StatusChip, ThrottledStatus, toast, usePageTitle } from "../components/ui";
+import { Banner, Dialog, Empty, ErrorState, Loading, NarrowNote, PageHead, StatusChip, ThrottledStatus, toast, usePageTitle } from "../components/ui";
 import { FAILURE_CODES } from "../lib/words";
 import { plural, when } from "../lib/format";
 
@@ -212,7 +212,7 @@ export function IntakeListPage() {
                     <td data-label="Uploaded">
                       <Link to={`/intake/batches/${b.id}`}>{when(b.created_at)}</Link>
                     </td>
-                    <td data-label="Source">Upload</td>
+                    <td data-label="Source">{b.source === "email" ? "Email" : "Upload"}</td>
                     <td className="num" data-label="Files">{b.totals.file_count}</td>
                     {SEGMENTS.map((s) => (
                       <td className="num" key={s.key} data-label={s.label}>
@@ -226,9 +226,7 @@ export function IntakeListPage() {
           </div>
         )}
       </section>
-      <p className="muted small" style={{ marginTop: 16 }}>
-        Email intake (forwarding invoices to an account address) is not built yet.
-      </p>
+      <EmailIntake />
     </>
   );
 }
@@ -361,5 +359,179 @@ export function BatchPage() {
         </table>
       </div>
     </>
+  );
+}
+
+/** S-06 email intake (T-3.3.4): the account's address, who may send to it, and messages held for a person. */
+function EmailIntake() {
+  const { can } = useSession();
+  const qc = useQueryClient();
+  const q = useQuery({ queryKey: ["intake-email"], queryFn: () => get<IntakeEmail>("/api/v1/intake/email"), refetchInterval: 15_000 });
+  const [sender, setSender] = useState("");
+  const [discard, setDiscard] = useState<IntakeEmail["messages"][number] | null>(null);
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ["intake-email"] });
+    qc.invalidateQueries({ queryKey: ["batches"] });
+  };
+  const add = useMutation({
+    mutationFn: () => send("POST", "/api/v1/intake/senders", { address_or_domain: sender }),
+    onSuccess: () => {
+      setSender("");
+      refresh();
+      toast("Sender allowed. Their next emailed invoices go straight into a batch.");
+    },
+  });
+  const remove = useMutation({
+    mutationFn: (id: string) => send("DELETE", `/api/v1/intake/senders/${id}`),
+    onSuccess: refresh,
+  });
+  const decide = useMutation({
+    mutationFn: (x: { id: string; decision: string }) => send<{ batch_id: string | null; status: string }>("POST", `/api/v1/intake/messages/${x.id}/decision`, { decision: x.decision }),
+    onSuccess: (r) => {
+      setDiscard(null);
+      refresh();
+      toast(r.status === "processed" ? "Released: its attachments are in a new batch." : "Discarded. Nothing was imported.");
+    },
+  });
+  const d = q.data;
+  if (!d) return null;
+  const held = d.messages.filter((m) => m.status === "held");
+  const recent = d.messages.filter((m) => m.status !== "held").slice(0, 8);
+  return (
+    <section className="panel email-intake" aria-labelledby="email-h" style={{ marginTop: 16 }}>
+      <div className="panel-head">
+        <h2 id="email-h">
+          <Mail size={17} aria-hidden="true" style={{ verticalAlign: "-3px", marginRight: 8 }} />
+          Invoices by email
+        </h2>
+      </div>
+      <div className="panel-body stack">
+        <p style={{ margin: 0 }}>
+          Suppliers or your team can email invoices to{" "}
+          {d.address ? <strong className="mono-address">{d.address}</strong> : <span className="muted">an address MatchDesk sets up for you</span>}. PDF, PNG and
+          JPEG attachments from an allowed sender go straight into a batch; anything else waits here for you.
+        </p>
+        <div>
+          <h3 className="small-head">Allowed senders</h3>
+          {d.senders.length ? (
+            <ul className="chips">
+              {d.senders.map((s) => (
+                <li key={s.id}>
+                  {s.address_or_domain}
+                  {can("edit_intake_settings") && (
+                    <button className="btn ghost icon-btn sm" aria-label={`Remove ${s.address_or_domain}`} onClick={() => remove.mutate(s.id)}>
+                      <Trash2 size={14} aria-hidden="true" />
+                    </button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="muted">None yet: every message is held for a person.</p>
+          )}
+          {can("edit_intake_settings") && (
+            <form
+              className="inline-form"
+              style={{ marginTop: 8 }}
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (sender.trim()) add.mutate();
+              }}
+            >
+              <div className="field">
+                <label htmlFor="sender">Allow an address or a whole domain</label>
+                <input id="sender" placeholder="billing@supplier.example or @supplier.example" value={sender} onChange={(e) => setSender(e.target.value)} />
+              </div>
+              <button className="btn" type="submit" disabled={add.isPending || !sender.trim()}>
+                Allow sender
+              </button>
+              {add.error && <span className="error-text">{errorText(add.error)}</span>}
+            </form>
+          )}
+        </div>
+        <div>
+          <h3 className="small-head">Held for you ({held.length})</h3>
+          {held.length === 0 ? (
+            <p className="muted">Nothing is waiting.</p>
+          ) : (
+            <div className="table-wrap">
+              <table className="compact stack-sm">
+                <caption className="sr-only">Held emails</caption>
+                <thead>
+                  <tr>
+                    <th scope="col">From</th>
+                    <th scope="col">Subject</th>
+                    <th scope="col" className="num">Attachments</th>
+                    <th scope="col">Received</th>
+                    <th scope="col">
+                      <span className="sr-only">Actions</span>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {held.map((m) => (
+                    <tr key={m.id}>
+                      <td data-label="From">{m.from_address}</td>
+                      <td data-label="Subject">{m.subject ?? <span className="muted">No subject</span>}</td>
+                      <td className="num" data-label="Attachments">{m.attachment_count}</td>
+                      <td data-label="Received">{when(m.received_at)}</td>
+                      <td data-label="Actions">
+                        {can("release_held_email") && (
+                          <span className="row-actions">
+                            <button className="btn small" onClick={() => setDiscard(m)}>
+                              Discard
+                            </button>
+                            <button className="btn small primary" disabled={decide.isPending} onClick={() => decide.mutate({ id: m.id, decision: "release" })}>
+                              Release into a batch
+                            </button>
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+        {recent.length > 0 && (
+          <details>
+            <summary className="small">Recent emails ({recent.length})</summary>
+            <ul className="plain-list small" style={{ marginTop: 8 }}>
+              {recent.map((m) => (
+                <li key={m.id}>
+                  <StatusChip status={m.status} /> {m.from_address}, {when(m.received_at)}
+                  {m.batch_id && (
+                    <>
+                      {" "}
+                      <Link to={`/intake/batches/${m.batch_id}`}>open its batch</Link>
+                    </>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </details>
+        )}
+      </div>
+      <Dialog
+        open={!!discard}
+        title="Discard this email?"
+        onClose={() => setDiscard(null)}
+        footer={
+          <>
+            <button className="btn" data-safe onClick={() => setDiscard(null)}>
+              Cancel
+            </button>
+            <button className="btn danger" disabled={decide.isPending} onClick={() => discard && decide.mutate({ id: discard.id, decision: "discard" })}>
+              Discard
+            </button>
+          </>
+        }
+      >
+        <p>
+          Nothing from {discard?.from_address} is imported. The message itself is deleted after 7 days.
+        </p>
+      </Dialog>
+    </section>
   );
 }

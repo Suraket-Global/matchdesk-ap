@@ -159,6 +159,7 @@ def register_invoice_routes(app: FastAPI, engine: Engine) -> None:
                 "items": [
                     {
                         "id": str(b.id),
+                        "source": b.source,
                         "file_count": b.file_count,
                         "created_at": b.created_at.isoformat(),
                         "totals": batch_summary(s, b.id),

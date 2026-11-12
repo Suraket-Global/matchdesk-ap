@@ -16,6 +16,7 @@ import {
   ChevronDown,
   FileText,
   History,
+  Eye,
   Inbox,
   LifeBuoy,
   Link2,
@@ -31,6 +32,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { Dialog, Loading, PageErrorBoundary, ToastHost } from "../components/ui";
+import { when } from "../lib/format";
 import { LoginPage, VerifyPage } from "../routes/Login";
 import { InvitePage } from "../routes/Invite";
 import { ForbiddenPage, NotFoundPage, SignedOutPage } from "../routes/System";
@@ -45,7 +47,8 @@ import { MatchViewPage } from "../routes/MatchView";
 import { PurchaseOrderPage } from "../routes/PurchaseOrder";
 import { AliasesPage } from "../routes/Aliases";
 import { ApprovalsPage } from "../routes/Approvals";
-import { ReportsPage, ReportPage, WeeklyPage } from "../routes/Reports";
+import { ReportsPage, ReportPage } from "../routes/Reports";
+import { WeeklyPage } from "../routes/Weekly";
 import { SettingsPage, TolerancesPage, UsersPage } from "../routes/Settings";
 import { AuditPage } from "../routes/Audit";
 import { OperatorPage } from "../routes/Operator";
@@ -145,6 +148,7 @@ const NAV_ICONS: Record<string, LucideIcon> = {
   receiving: PackageCheck,
   approvals: CheckSquare,
   reports: BarChart3,
+  weekly: CalendarDays,
   onboarding: ListChecks,
   quickbooks: Link2,
   aliases: ArrowLeftRight,
@@ -198,6 +202,21 @@ function Shell({ children }: { children: ReactNode }) {
             <span className="brand-word">MatchDesk</span>
           </NavLink>
         </div>
+        {me?.user.is_operator && !me.active_tenant_id && (
+          <nav aria-label="Main">
+            <div className="nav-group">
+              <h2>Operator</h2>
+              <ul>
+                <li>
+                  <NavLink to="/operator/tenants" className="nav-link" title={collapsed ? "Accounts" : undefined}>
+                    <Building2 size={17} aria-hidden="true" />
+                    <span className="label">Accounts</span>
+                  </NavLink>
+                </li>
+              </ul>
+            </div>
+          </nav>
+        )}
         {me?.active_tenant_id && (
           <nav aria-label="Main">
             {NAV_GROUPS.map((g) => {
@@ -213,7 +232,7 @@ function Shell({ children }: { children: ReactNode }) {
                       const descId = `nav-count-${n.icon}`;
                       return (
                         <li key={n.to}>
-                          <NavLink to={n.to} className="nav-link" aria-describedby={c > 0 ? descId : undefined} title={collapsed ? n.label : undefined}>
+                          <NavLink to={n.to} end={n.to === "/reports"} className="nav-link" aria-describedby={c > 0 ? descId : undefined} title={collapsed ? n.label : undefined}>
                             <I size={17} aria-hidden="true" />
                             <span className="label">{n.label}</span>
                             {c > 0 && (
@@ -263,6 +282,7 @@ function Shell({ children }: { children: ReactNode }) {
           )}
           <UserMenu />
         </header>
+        {me?.support && <SupportBanner />}
         {offline && (
           <div className="offline-banner" role="alert">
             <WifiOff size={16} aria-hidden="true" />
@@ -274,6 +294,42 @@ function Shell({ children }: { children: ReactNode }) {
         </main>
       </div>
       <IdleGuard />
+    </div>
+  );
+}
+
+/** While an operator reads an account under a support grant: read only, until when, and the way out. */
+function SupportBanner() {
+  const { me, signedIn } = useSession();
+  const navigate = useNavigate();
+  const qc = useQueryClient();
+  const [busy, setBusy] = useState(false);
+  if (!me?.support) return null;
+  return (
+    <div className="support-banner" role="status">
+      <Eye size={16} aria-hidden="true" />
+      <p>
+        <strong>Support access, read only.</strong> You are viewing {me.support.tenant_name ?? "this account"}
+        {me.support.ends_at ? ` until ${when(me.support.ends_at)}` : ""}. Nothing can be changed, and the account&apos;s audit log records this visit.
+      </p>
+      <button
+        className="btn small"
+        disabled={busy}
+        onClick={async () => {
+          setBusy(true);
+          try {
+            await send("DELETE", "/api/v1/operator/support-session");
+            const fresh = await get<NonNullable<typeof me>>("/api/v1/me");
+            qc.removeQueries({ predicate: (q) => q.queryKey[0] !== "me" });
+            signedIn(fresh);
+            navigate("/operator/tenants", { replace: true });
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        Leave the account
+      </button>
     </div>
   );
 }

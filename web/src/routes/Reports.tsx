@@ -10,6 +10,7 @@ import { Banner, Dialog, Empty, ErrorState, Loading, PageHead, StatusChip, toast
 import { cad, cadCents, compareDecimal, formatCents, money, sumCents } from "../lib/decimal";
 import { day, monthName, monthRange, plural, when } from "../lib/format";
 import { typeWord, zeroCounted } from "../lib/words";
+import { PilotSection } from "./Pilot";
 
 type Finding = NonNullable<Report["findings"]>[number];
 
@@ -509,7 +510,7 @@ export function ReportPage() {
             </span>
           </p>
         )}
-        <p className="small muted">Which version governs the pilot is recorded by MatchDesk in the pilot record (not shown here yet).</p>
+        <PilotSection r={r} />
       </section>
 
       <Dialog
@@ -557,22 +558,3 @@ export function ReportPage() {
     </div>
   );
 }
-
-/** S-14 (P1): the API has no weekly summary yet, so this page says so plainly. */
-export function WeeklyPage() {
-  usePageTitle("Weekly summary");
-  return (
-    <>
-      <PageHead title="Weekly summary" crumbs={<Link to="/reports">Back-test reports</Link>} />
-      <div className="panel">
-        <Empty title="Not built yet">
-          <p>
-            The weekly summary per supplier (documents, lines, pass rate, findings and open exceptions by week) is a later milestone. Until then, filter the{" "}
-            <Link to="/exceptions">exception queue</Link> by supplier.
-          </p>
-        </Empty>
-      </div>
-    </>
-  );
-}
-

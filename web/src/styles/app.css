@@ -2093,8 +2093,8 @@ dialog.drawer .modal-foot {
 
 /* ================================================================ reports */
 .report {
-  max-width: 1040px;
-  margin: 0 auto;
+  /* The same content width as the other screens (B6 review minor). */
+  max-width: none;
 }
 .cards,
 .stat-grid {
@@ -2678,4 +2678,121 @@ hr {
   margin-top: var(--s-5);
   padding-top: var(--s-4);
   border-top: 1px solid var(--border);
+}
+
+/* B7: support access banner (S-18), shown on every screen of a support session */
+.support-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: var(--s-2) var(--s-6);
+  background: var(--review-bg);
+  color: var(--review-fg);
+  border-bottom: 1px solid var(--border);
+}
+.support-banner p {
+  margin: 0;
+  flex: 1;
+}
+@media (max-width: 640px) {
+  .support-banner {
+    flex-wrap: wrap;
+    padding: var(--s-2) var(--s-4);
+  }
+}
+
+/* B7: weekly summary week picker; pilot card */
+.week-nav {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  margin-bottom: var(--s-4);
+}
+.week-label {
+  display: grid;
+  gap: 2px;
+  flex: 1;
+}
+.week-label input {
+  width: auto;
+  display: inline-block;
+}
+.plain-list {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 4px;
+}
+.pilot-card {
+  margin-bottom: var(--s-4);
+}
+.grant-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--s-4);
+  padding: var(--s-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+.grant-row .actions {
+  display: flex;
+  gap: var(--s-2);
+  flex: none;
+}
+@media (max-width: 640px) {
+  .grant-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+.small-head {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  margin: 0 0 var(--s-2);
+}
+.chips {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+}
+.chips li {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 4px 2px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  font-size: var(--fs-sm);
+}
+.mono-address {
+  overflow-wrap: anywhere;
+}
+.row-actions {
+  display: inline-flex;
+  gap: var(--s-2);
+  flex-wrap: wrap;
+}
+.operator-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: var(--s-4);
+  align-items: start;
+}
+.operator-grid .wide-field {
+  margin-top: var(--s-4);
+}
+.operator-grid .wide-field textarea {
+  width: 100%;
+}
+.operator-grid form > .btn {
+  margin-top: var(--s-3);
+}
+@media (max-width: 1024px) {
+  .operator-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }

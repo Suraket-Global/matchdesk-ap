@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { errorText, get, send } from "../api/client";
-import type { Invitation, Page, Tolerance, UserRow, Vendor } from "../api/types";
+import type { Invitation, Page, SupportGrant, Tolerance, UserRow, Vendor } from "../api/types";
 import { useSession } from "../app/session";
 import { SETTINGS_NAV } from "../app/routes";
 import { Banner, Dialog, ErrorState, Field, Loading, NarrowNote, PageHead, StatusChip, toast, usePageTitle } from "../components/ui";
@@ -374,15 +374,7 @@ export function UsersPage() {
             </tbody>
           </table>
         </div>
-        <section className="panel" aria-labelledby="support-h">
-          <div className="panel-head">
-            <h2 id="support-h">MatchDesk support access</h2>
-          </div>
-          <div className="panel-body">
-            <p>Current grant: none. MatchDesk staff cannot see this account's data.</p>
-            <p className="muted">Allowing support access for 24 hours or 7 days is not built yet.</p>
-          </div>
-        </section>
+        <SupportAccessPanel />
       </div>
       <Dialog
         open={!!change}
@@ -407,5 +399,112 @@ export function UsersPage() {
         {patch.error && <p className="error-text">{errorText(patch.error)}</p>}
       </Dialog>
     </>
+  );
+}
+
+function hoursWord(h: number): string {
+  return h % 24 === 0 ? plural(h / 24, "day") : plural(h, "hour");
+}
+
+/** S-16: MatchDesk support asks; a controller grants, declines or ends read-only access (T-5.1.5). */
+function SupportAccessPanel() {
+  const qc = useQueryClient();
+  const grants = useQuery({ queryKey: ["support-grants"], queryFn: () => get<Page<SupportGrant>>("/api/v1/support-grants") });
+  const [pick, setPick] = useState<{ g: SupportGrant; decision: "grant" | "decline" | "end" } | null>(null);
+  const decide = useMutation({
+    mutationFn: (x: { g: SupportGrant; decision: string }) => send<SupportGrant>("POST", `/api/v1/support-grants/${x.g.id}/decision`, { decision: x.decision }),
+    onSuccess: (g) => {
+      setPick(null);
+      qc.invalidateQueries({ queryKey: ["support-grants"] });
+      toast(g.status === "active" ? `Support access granted until ${when(g.ends_at)}.` : g.status === "declined" ? "Request declined." : "Support access ended.");
+    },
+  });
+  const items = grants.data?.items ?? [];
+  const active = items.filter((g) => g.status === "active");
+  const requested = items.filter((g) => g.status === "requested");
+  const past = items.filter((g) => !["active", "requested"].includes(g.status)).slice(0, 5);
+  return (
+    <section className="panel" aria-labelledby="support-h">
+      <div className="panel-head">
+        <h2 id="support-h">MatchDesk support access</h2>
+      </div>
+      <div className="panel-body stack">
+        <p style={{ margin: 0 }}>
+          {active.length
+            ? `MatchDesk support can read this account until ${when(active[0].ends_at)}. It can never change anything, and every visit is in the audit log.`
+            : "Current access: none. MatchDesk staff cannot see this account's data unless you grant it here."}
+        </p>
+        {grants.isLoading && <Loading />}
+        {[...active, ...requested].map((g) => (
+          <div key={g.id} className="grant-row">
+            <div>
+              <StatusChip status={g.status} />{" "}
+              <strong>{g.requested_by_name ?? "MatchDesk support"}</strong> asks for {hoursWord(g.hours_requested)} of read-only access.
+              <div className="small muted">
+                Reason: {g.reason}. Asked {when(g.requested_at)}
+                {g.status === "active" ? `; granted by ${g.granted_by_name ?? "a controller"}, ends ${when(g.ends_at)}` : ""}.
+              </div>
+            </div>
+            <div className="actions">
+              {g.status === "requested" && (
+                <>
+                  <button className="btn small" onClick={() => setPick({ g, decision: "decline" })}>
+                    Decline
+                  </button>
+                  <button className="btn small primary" onClick={() => setPick({ g, decision: "grant" })}>
+                    Grant {hoursWord(g.hours_requested)}
+                  </button>
+                </>
+              )}
+              {g.status === "active" && (
+                <button className="btn small danger" onClick={() => setPick({ g, decision: "end" })}>
+                  End access now
+                </button>
+              )}
+            </div>
+          </div>
+        ))}
+        {past.length > 0 && (
+          <details>
+            <summary className="small">Earlier requests ({past.length})</summary>
+            <ul className="plain-list small" style={{ marginTop: 8 }}>
+              {past.map((g) => (
+                <li key={g.id}>
+                  {g.status === "declined" ? "Declined" : "Ended"}: {hoursWord(g.hours_requested)} asked {when(g.requested_at)} ({g.reason})
+                </li>
+              ))}
+            </ul>
+          </details>
+        )}
+      </div>
+      <Dialog
+        open={!!pick}
+        title={pick?.decision === "grant" ? "Grant support access?" : pick?.decision === "decline" ? "Decline the request?" : "End support access now?"}
+        onClose={() => setPick(null)}
+        footer={
+          <>
+            <button className="btn" data-safe onClick={() => setPick(null)}>
+              Cancel
+            </button>
+            <button
+              className={`btn ${pick?.decision === "end" ? "danger" : "primary"}`}
+              disabled={decide.isPending}
+              onClick={() => pick && decide.mutate(pick)}
+            >
+              {pick?.decision === "grant" ? "Grant access" : pick?.decision === "decline" ? "Decline" : "End access"}
+            </button>
+          </>
+        }
+      >
+        <p>
+          {pick?.decision === "grant"
+            ? `MatchDesk support will be able to read this account's documents, exceptions and reports for ${hoursWord(pick.g.hours_requested)}, until about ${when(new Date(Date.now() + pick.g.hours_requested * 3_600_000).toISOString())}. It cannot change anything, and you can end it at any time.`
+            : pick?.decision === "decline"
+              ? "MatchDesk support will not be able to read this account. They can ask again."
+              : "MatchDesk support loses access at once."}
+        </p>
+        {decide.error && <p className="error-text">{errorText(decide.error)}</p>}
+      </Dialog>
+    </section>
   );
 }

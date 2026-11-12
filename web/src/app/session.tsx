@@ -21,6 +21,9 @@ const PERMISSIONS: Record<string, string[]> = {
   draft_report: ["controller", "clerk"],
   approve_report: ["controller"],
   manage_users: ["controller"],
+  edit_intake_settings: ["controller"],
+  release_held_email: ["controller", "clerk"],
+  send_weekly_summary: ["controller"],
 };
 
 interface SessionValue {
@@ -102,7 +105,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       me,
       loading: meQuery.isLoading,
       role,
-      tenantName: tenant?.tenant_name ?? null,
+      tenantName: tenant?.tenant_name ?? me?.support?.tenant_name ?? null,
       can: (action: string) => !!role && (PERMISSIONS[action] ?? []).includes(role),
       signedIn,
       signOut,

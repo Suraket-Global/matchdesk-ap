@@ -84,3 +84,16 @@ def test_m5_csv_labels_match_the_screen(app_engine, client):  # type: ignore[no-
     detail = rows[4:]
     assert detail and all(r[9] in ("Yes", "No") for r in detail)
     assert all("_" not in r[0] and "_" not in r[1] for r in detail)  # words, not codes
+
+
+def test_draft_shows_every_reason_approval_would_give(app_engine, client):  # type: ignore[no-untyped-def]
+    w = make_tenant(app_engine, "Fictional Distributor B7-DB")
+    add_receipt(app_engine, w, "100", date(2026, 9, 28))
+    inv = add_invoice(app_engine, w, "oct", "INV-B7DB", date(2026, 10, 6), "100", price="4.35")
+    client.post("/api/v1/match-runs", json={"invoice_ids": [str(inv)]}, headers=w.headers)
+    drain(app_engine)
+    d = client.post("/api/v1/reports/backtest", json=OCT, headers=w.headers).json()
+    assert client.get(f"/api/v1/reports/backtest/{d['id']}", headers=w.headers).json()["blocking"] == []
+    add_invoice(app_engine, w, "oct2", "INV-B7DB2", date(2026, 10, 8), "1", price="4.35")  # after the cut-off
+    got = client.get(f"/api/v1/reports/backtest/{d['id']}", headers=w.headers).json()["blocking"]
+    assert got, "a draft whose inputs changed must say so before the approve dialog"

@@ -1,10 +1,11 @@
+import { PilotCard } from "./Pilot";
 import { Link, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { errorText, get, send } from "../api/client";
 import type { Batch, InvoiceSummary, Page, PurchaseOrder, QboConnection, ReceivingImport, SyncRun } from "../api/types";
 import { useSession } from "../app/session";
 import { usePeriod } from "../app/period";
-import { Banner, ErrorState, Loading, PageHead, StatusChip, toast, usePageTitle } from "../components/ui";
+import { ErrorState, Loading, PageHead, StatusChip, toast, usePageTitle } from "../components/ui";
 import { Stepper } from "../components/Page";
 import { monthName, monthRange, plural, when } from "../lib/format";
 import { useState } from "react";
@@ -113,12 +114,7 @@ export function OnboardingPage() {
           {current < 0 ? "Setup is complete. Work the exception queue, then draft the back-test report." : `${done.filter(Boolean).length} of 4 done. Next: step ${current + 1}.`}
         </p>
       </div>
-      <Banner tone="info">
-        <p>
-          <strong>Pilot terms.</strong> The CAD 500 pilot covers 30 days: the back-test of one month and live checking.
-          The signed terms and refund threshold are kept in the pilot record; showing that record here is not built yet.
-        </p>
-      </Banner>
+      <PilotCard />
       <ol className="steps">
         <li className={cls(0)}>
           <div>

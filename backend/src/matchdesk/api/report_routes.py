@@ -86,9 +86,7 @@ def register_report_routes(app: FastAPI, engine: Engine) -> None:
             findings = reporting.findings_of(s, r.id)
             return {
                 **reporting.describe_report(r),
-                "blocking": reporting.blocking_reasons(s, r.period_start, r.period_end)
-                if r.status == "draft"
-                else [],
+                "blocking": reporting.draft_blocking(s, r) if r.status == "draft" else [],
                 # A new draft after approval is offered only when this is true (B6 review M6).
                 "changed_since_cutoff": reporting.changed_since_cutoff(s, r)
                 if r.status == "approved"

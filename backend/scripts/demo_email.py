@@ -26,7 +26,7 @@ from matchdesk.identity import Tenant
 from matchdesk.intake import sign, signing_key
 from matchdesk.tenancy import get_engine, global_session
 
-TENANT = "Demo Distributor Ltd (synthetic)"
+TENANT = os.environ.get("MATCHDESK_DEMO_TENANT", "Demo Distributor Ltd (synthetic)")  # e2e: tagged tenant
 
 
 def pdf(number: str) -> bytes:

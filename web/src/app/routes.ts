@@ -41,6 +41,7 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { to: "/approvals", label: "Approvals", roles: ["controller"], icon: "approvals" },
       { to: "/reports", label: "Reports", roles: ALL, icon: "reports" },
+      { to: "/reports/weekly", label: "Weekly summary", roles: ALL, icon: "weekly" },
     ],
   },
   {
@@ -50,7 +51,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { to: "/settings/quickbooks", label: "QuickBooks", roles: ALL, icon: "quickbooks" },
       { to: "/aliases", label: "Aliases", roles: ["controller", "clerk"], icon: "aliases" },
       { to: "/settings/tolerances", label: "Tolerances", roles: ALL, icon: "tolerances" },
-      { to: "/settings/users", label: "Users", roles: ["controller"], icon: "users" },
+      { to: "/settings/users", label: "Users and access", roles: ["controller"], icon: "users" },
       { to: "/audit", label: "Audit log", roles: ["controller", "support_reader"], icon: "audit" },
     ],
   },

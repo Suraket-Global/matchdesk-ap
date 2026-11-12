@@ -59,6 +59,13 @@ export const STATUS: Record<string, { tone: Tone; icon: string; word: string }> 
   deactivated: { tone: "waived", icon: "dash", word: "Deactivated" },
   connected: { tone: "matched", icon: "tick", word: "Connected" },
   disconnected: { tone: "waived", icon: "dash", word: "Not connected" },
+  requested: { tone: "draft", icon: "clock", word: "Requested" },
+  ended: { tone: "waived", icon: "dash", word: "Ended" },
+  declined: { tone: "waived", icon: "dash", word: "Declined" },
+  held: { tone: "draft", icon: "clock", word: "Held for you" },
+  processed: { tone: "matched", icon: "tick", word: "Accepted" },
+  discarded: { tone: "waived", icon: "dash", word: "Discarded" },
+  pilot: { tone: "neutral", icon: "dash", word: "Pilot" },
 };
 
 /** Status word with icon and tone from one table (DD-03). Green only for a line that passed every check. */

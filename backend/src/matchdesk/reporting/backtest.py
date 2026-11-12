@@ -353,6 +353,18 @@ def changed_since_cutoff(s: Session, report: BacktestReport) -> bool:
     return any(stale_runs(s, list({lm.match_run_id for lm, _ln in matches})).values())
 
 
+def draft_blocking(s: Session, report: BacktestReport) -> list[str]:
+    """Everything that stops this draft's approval, as the approve call would say it, so the screen
+    can show it before the controller opens the dialog (B7: the stale-draft reason came only on
+    approve)."""
+    reasons = blocking_reasons(s, report.period_start, report.period_end)
+    if report.is_stale:
+        reasons.append("this draft was built from out-of-date results; refresh it")
+    elif snapshot_changed(s, report):
+        reasons.append("results changed after this draft's data cut-off; refresh the draft")
+    return reasons
+
+
 def approve(s: Session, report: BacktestReport, user_id: uuid.UUID) -> BacktestReport:
     """Idempotent. Refused while any blocking check fails; supersedes an earlier approved version."""
     if report.status == "approved":
@@ -361,11 +373,7 @@ def approve(s: Session, report: BacktestReport, user_id: uuid.UUID) -> BacktestR
     s.refresh(report)  # a draft refreshed meanwhile is superseded and is no longer approvable
     if report.status != "draft":
         raise ConflictError(f"a report in status {report.status} cannot be approved")
-    reasons = blocking_reasons(s, report.period_start, report.period_end)
-    if report.is_stale:
-        reasons.append("this draft was built from out-of-date results; refresh it")
-    elif snapshot_changed(s, report):
-        reasons.append("results changed after this draft's data cut-off; refresh the draft")
+    reasons = draft_blocking(s, report)
     if reasons:
         raise ConflictError("; ".join(reasons))
     earlier = s.scalar(

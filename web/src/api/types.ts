@@ -5,6 +5,8 @@ export interface Me {
   memberships: { tenant_id: string; role: string; tenant_name: string }[];
   active_tenant_id: string | null;
   role: string | null;
+  /** Set while an operator reads an account under a support grant (B7, S-18). */
+  support?: { grant_id: string; tenant_name: string | null; ends_at: string | null } | null;
   idle_expires_at: string;
   absolute_expires_at: string;
   csrf_token: string;
@@ -245,6 +247,7 @@ export interface BatchTotals {
 
 export interface Batch {
   id: string;
+  source?: string;
   file_count?: number;
   created_at: string;
   totals: BatchTotals;
@@ -482,4 +485,93 @@ export interface Coverage {
   receipt_coverage_pct: string | null;
   coverage_class_a_pct: string | null;
   coverage_class_b_pct: string | null;
+}
+
+// ---------------------------------------------------------------- B7
+export interface Pilot {
+  id: string;
+  price: string;
+  period_start: string;
+  period_end: string;
+  refund_condition: string;
+  refund_threshold: string;
+  signed_terms_ref: string | null;
+  signed_by_name: string | null;
+  signed_by_role: string | null;
+  delivery_mode: string;
+  governing_report_id: string | null;
+  refund_determined_at: string | null;
+  refund_qualifying_amount: string | null;
+  refund_due: boolean | null;
+  payment_status: string;
+  outcome: string | null;
+  version: number;
+}
+
+export interface PilotRead {
+  pilot: Pilot | null;
+  governing: { report_id: string; period_start: string; period_end: string; version_no: number } | null;
+}
+
+export interface WeeklyRow {
+  vendor_id: string | null;
+  vendor_name: string | null;
+  documents: number;
+  lines: number;
+  lines_matched: number;
+  pass_rate_pct: string | null;
+  open_count: number;
+  open_value: string;
+  flagged_amount: string;
+}
+
+export interface Weekly {
+  week_start: string;
+  week_end: string;
+  suppliers: WeeklyRow[];
+  total: Omit<WeeklyRow, "vendor_id" | "vendor_name">;
+  sent: { week_start: string; trigger: string; recipients: number; sent_at: string }[];
+}
+
+export interface SupportGrant {
+  id: string;
+  tenant_id: string;
+  status: string;
+  reason: string;
+  hours_requested: number;
+  requested_by_name: string | null;
+  requested_at: string | null;
+  granted_by_name: string | null;
+  starts_at: string | null;
+  ends_at: string | null;
+  ended_early_at: string | null;
+}
+
+export interface OperatorTenant {
+  id: string;
+  name: string;
+  status: string;
+  created_at: string;
+  intake_address: string | null;
+  pilot: Pilot | null;
+  usage_units: number;
+  active_grant: boolean;
+  pending_requests: number;
+  usage?: { month: string; invoice: number; credit_note: number; units: number }[];
+  grants?: SupportGrant[];
+}
+
+export interface IntakeEmail {
+  address: string | null;
+  provider: string;
+  senders: { id: string; address_or_domain: string }[];
+  messages: {
+    id: string;
+    from_address: string;
+    subject: string | null;
+    attachment_count: number;
+    received_at: string;
+    status: string;
+    batch_id: string | null;
+  }[];
 }
