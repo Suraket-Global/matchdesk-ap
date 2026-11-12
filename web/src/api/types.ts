@@ -372,6 +372,20 @@ export interface Approval {
   version: number;
   exception?: ExceptionItem;
   alias?: Alias;
+  /** B8: the invoice lines a conversion re-matches. */
+  affected?: AffectedLine[];
+}
+
+export interface AffectedLine {
+  invoice_id: string;
+  invoice_line_id: string;
+  doc_number: string | null;
+  doc_date: string | null;
+  line_no: number;
+  qty: string | null;
+  uom: string | null;
+  converted_qty: string | null;
+  open_exceptions: string[];
 }
 
 export interface ReportSection {

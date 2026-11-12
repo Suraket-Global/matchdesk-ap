@@ -58,7 +58,10 @@ from matchdesk.exceptions.models import (
     LineMatch,
     ToleranceRule,
 )
+from matchdesk.exceptions.rules_admin import invoices_for_alias_code
 from matchdesk.identity import Membership, Principal, Tenant
+from matchdesk.intake.models import InvoiceLineRow, InvoiceRow
+from matchdesk.matching import normalise_code
 from matchdesk.tenancy import session
 
 
@@ -188,7 +191,52 @@ def _approval_context(s: Session, rows: list[Approval]) -> list[dict[str, Any]]:
                 "vendor_name": vendors.get(al.vendor_id),
                 "item_sku": items.get(al.item_id),
             }
+            body["affected"] = _alias_affected(s, al)
         out.append(body)
+    return out
+
+
+def _alias_affected(s: Session, al: ItemAlias) -> list[dict[str, Any]]:
+    """B8 S-12: the invoice lines a conversion re-matches, with the quantity before and after
+    conversion and the exceptions open on them now, so the consequence is read before approval."""
+    inv_ids = invoices_for_alias_code(s, al.vendor_id, al.supplier_item_code_norm, al.id)
+    if not inv_ids:
+        return []
+    invoices = {i.id: i for i in s.scalars(select(InvoiceRow).where(InvoiceRow.id.in_(inv_ids)))}
+    lines = [
+        ln
+        for ln in s.scalars(
+            select(InvoiceLineRow)
+            .where(InvoiceLineRow.invoice_id.in_(inv_ids))
+            .order_by(InvoiceLineRow.invoice_id, InvoiceLineRow.line_no)
+        )
+        if ln.supplier_item_code and normalise_code(ln.supplier_item_code) == al.supplier_item_code_norm
+    ]
+    open_excs: dict[uuid.UUID, list[str]] = {}
+    for e in s.scalars(
+        select(ExceptionRow).where(
+            ExceptionRow.invoice_line_id.in_([ln.id for ln in lines]),
+            ExceptionRow.status.in_(("open", "pending_approval")),
+        )
+    ):
+        if e.invoice_line_id is not None:
+            open_excs.setdefault(e.invoice_line_id, []).append(e.type)
+    out = []
+    for ln in lines:
+        inv = invoices[ln.invoice_id]
+        out.append(
+            {
+                "invoice_id": str(inv.id),
+                "invoice_line_id": str(ln.id),
+                "doc_number": inv.doc_number,
+                "doc_date": inv.doc_date.isoformat() if inv.doc_date else None,
+                "line_no": ln.line_no,
+                "qty": str(ln.qty) if ln.qty is not None else None,
+                "uom": ln.uom,
+                "converted_qty": str(ln.qty * al.conversion_factor) if ln.qty is not None else None,
+                "open_exceptions": sorted(open_excs.get(ln.id, [])),
+            }
+        )
     return out
 
 

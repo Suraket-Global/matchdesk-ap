@@ -107,7 +107,9 @@ async function controller(browser: Browser, size: Size): Promise<void> {
   if (size === 1440) {
     const weekly = await api<{ suppliers: { vendor_name: string | null; vendor_id: string | null; open_count: number; open_value: string }[] }>(page, "/api/v1/weekly-summary?week_start=2026-10-05");
     const ff = weekly.suppliers.find((s) => s.vendor_name === "Fictional Fasteners Ltd");
-    await page.getByRole("link", { name: String(ff?.open_count ?? 1), exact: true }).first().click();
+    // The supplier's open count (B7: a link named by its number; B8: named with supplier and week).
+    const row = page.locator("main tbody tr", { hasText: "Fictional Fasteners Ltd" });
+    await row.locator('a[href^="/exceptions"]').first().click();
     await settle(page);
     const rows = await page.locator('main a[href*="/invoices/"][href*="exc="]').count();
     measured.weekly_drilldown = {

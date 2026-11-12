@@ -5,7 +5,7 @@ import { ApiError, errorText, get, send } from "../api/client";
 import type { Alias, Approval, ExceptionPage, Page, ReceivingImport } from "../api/types";
 import { Dialog, Empty, ErrorState, Field, Loading, PageHead, toast, usePageTitle } from "../components/ui";
 import { cad } from "../lib/decimal";
-import { multiply, qty } from "../lib/decimal";
+import { qty } from "../lib/decimal";
 import { plural, when } from "../lib/format";
 import { typeWord, EVIDENCE_CLASSES } from "../lib/words";
 
@@ -20,6 +20,121 @@ function sentence(a: Approval): string {
   }
   if (a.subject_type === "late_receipt") return "Approve late receiving evidence: rows loaded after an exception was already open on their purchase-order lines start to count, and those lines are re-matched.";
   return "Approve this request.";
+}
+
+/** One request in four parts, in the order a controller reads it (B8): the proposed change, the
+ * records it touches, what approving does, and the decision. */
+function DecisionCard({ a, importName, onDecide }: { a: Approval; importName?: ReceivingImport; onDecide: (d: "approve" | "return") => void }) {
+  const al = a.alias;
+  const e = a.exception;
+  const affected = a.affected ?? [];
+  const invoices = new Set(affected.map((x) => x.invoice_id)).size;
+  return (
+    <article className="decision" aria-labelledby={`d-${a.id}`}>
+      <div className="d-change">
+        <h3 id={`d-${a.id}`} className="d-label">
+          Proposed change
+        </h3>
+        {al ? (
+          <>
+            <p className="d-big">
+              1 {al.supplier_uom ?? "supplier unit"} = {qty(al.conversion_factor)} {al.item_uom ?? "units"}
+            </p>
+            <p>
+              {al.vendor_name ?? "Supplier"} code <strong>{al.supplier_item_code}</strong> becomes our item <strong>{al.item_sku ?? "item"}</strong>.
+            </p>
+          </>
+        ) : e ? (
+          <>
+            <p className="d-big">Waive {cad(a.amount ?? e.reported_amount ?? e.variance_amount)}</p>
+            <p>
+              {typeWord(e.type)} on {e.vendor_name ?? "the supplier"} {e.doc_number}
+              {e.line_no ? `, line ${e.line_no}` : ""}.
+            </p>
+          </>
+        ) : (
+          <p className="d-big">Count late receiving evidence</p>
+        )}
+        <p className="muted small">
+          Asked by {a.requested_by_name ?? "a clerk"} {when(a.requested_at)}. {a.reason ? `Reason: "${a.reason}"` : "No reason given."}
+        </p>
+      </div>
+      <div className="d-records">
+        <h3 className="d-label">Affected records</h3>
+        {al && affected.length > 0 && (
+          <div className="table-wrap">
+            <table className="compact">
+              <caption className="sr-only">Invoice lines re-matched by this conversion</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Invoice line</th>
+                  <th scope="col" className="num">
+                    Billed
+                  </th>
+                  <th scope="col" className="num">
+                    After conversion
+                  </th>
+                  <th scope="col">Open now</th>
+                </tr>
+              </thead>
+              <tbody>
+                {affected.map((x) => (
+                  <tr key={x.invoice_line_id}>
+                    <td className="nowrap">
+                      <Link to={`/invoices/${x.invoice_id}?line=${x.invoice_line_id}&from=${encodeURIComponent("/approvals")}`}>
+                        {x.doc_number} line {x.line_no}
+                      </Link>
+                    </td>
+                    <td className="num">
+                      {qty(x.qty)} {x.uom ?? ""}
+                    </td>
+                    <td className="num">
+                      {qty(x.converted_qty)} {al.item_uom ?? ""}
+                    </td>
+                    <td className="small">{x.open_exceptions.length ? x.open_exceptions.map(typeWord).join(", ") : <span className="muted">None</span>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {al && affected.length === 0 && <p className="muted">No invoice uses this code yet; future invoices will.</p>}
+        {e && (
+          <p>
+            <Link to={`/invoices/${e.invoice_id}?line=${e.invoice_line_id ?? ""}&exc=${e.id}&from=${encodeURIComponent("/approvals")}`}>
+              {e.doc_number}
+              {e.line_no ? ` line ${e.line_no}` : ""}: open the evidence
+            </Link>
+          </p>
+        )}
+        {a.receiving_import_id && (
+          <p>
+            <Link to={`/receiving/imports/${a.receiving_import_id}`}>{importName?.file_name ?? "Open the import"}</Link>{" "}
+            <span className="muted small">{EVIDENCE_CLASSES[importName?.evidence_class ?? ""]?.name}</span>
+          </p>
+        )}
+      </div>
+      <div className="d-consequence">
+        <h3 className="d-label">If you approve</h3>
+        <p>
+          {al
+            ? `${plural(affected.length, "line")} on ${plural(invoices, "invoice")} ${affected.length === 1 ? "is" : "are"} matched again in ${al.item_uom ?? "our units"}: quantities are multiplied by ${qty(al.conversion_factor)} before they are compared with the purchase order and the receipts. Their exceptions are raised again or cleared by the new result.`
+            : e
+              ? "It is listed in the report as waived, with your name. A waiver never lowers the refund calculation."
+              : "Rows loaded after an exception was already open on their purchase-order lines start to count, and those lines are matched again."}
+        </p>
+        <p className="muted small">If you return it, nothing changes: {al ? "the alias stays pending and its lines stay in the queue" : "the request goes back to the clerk with your note"}.</p>
+      </div>
+      <div className="d-decide">
+        <button className="btn primary" onClick={() => onDecide("approve")}>
+          {e ? "Approve waiver" : "Approve"}
+        </button>
+        <button className="btn" onClick={() => onDecide("return")}>
+          Return with note
+        </button>
+      </div>
+    </article>
+  );
 }
 
 /** S-12: what the clerk cannot decide alone. Each decision restates itself before it is made (DD-09). */
@@ -89,68 +204,12 @@ export function ApprovalsPage() {
           .map(([key, title, list]) => (
             <section key={key} aria-labelledby={`g-${key}`}>
               <h2 id={`g-${key}`} style={{ marginBottom: 8 }}>
-                {title}
+                {title} <span className="muted">({list.length})</span>
               </h2>
-              <div className="table-wrap">
-                <table className="stack-sm">
-                  <thead>
-                    <tr>
-                      <th scope="col">Request</th>
-                      <th scope="col">Asked by</th>
-                      <th scope="col">Reason</th>
-                      <th scope="col">
-                        <span className="sr-only">Decision</span>
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {list.map((a) => (
-                      <tr key={a.id}>
-                        <td data-label="Request" style={{ maxWidth: 520 }}>
-                          {sentence(a)}
-                          {a.exception && (
-                            <div>
-                              <Link to={`/invoices/${a.exception.invoice_id}?line=${a.exception.invoice_line_id ?? ""}&exc=${a.exception.id}&from=${encodeURIComponent("/approvals")}`}>
-                                Open the evidence
-                              </Link>
-                            </div>
-                          )}
-                          {a.alias && (
-                            <div className="muted small">
-                              Example: 2 {a.alias.supplier_uom ?? "supplier units"} become {qty(multiply("2", a.alias.conversion_factor, 4))} {a.alias.item_uom ?? "our units"}.{" "}
-                              <Link to={`/invoices?vendor=${a.alias.vendor_id}`}>Invoices from this supplier</Link>
-                            </div>
-                          )}
-                          {a.receiving_import_id && (
-                            <div>
-                              <Link to={`/receiving/imports/${a.receiving_import_id}`}>
-                                {imports.data?.items.find((i) => i.id === a.receiving_import_id)?.file_name ?? "Open the import"}
-                              </Link>{" "}
-                              <span className="muted small">
-                                {EVIDENCE_CLASSES[imports.data?.items.find((i) => i.id === a.receiving_import_id)?.evidence_class ?? ""]?.name}
-                              </span>
-                            </div>
-                          )}
-                        </td>
-                        <td data-label="Asked by">
-                          {a.requested_by_name}
-                          <div className="muted small">{when(a.requested_at)}</div>
-                        </td>
-                        <td data-label="Reason">{a.reason ?? <span className="muted">None given</span>}</td>
-                        <td data-label="Actions">
-                          <div className="actions">
-                            <button className="btn" onClick={() => setOpen({ a, decision: "return" })}>
-                              Return with note
-                            </button>
-                            <button className="btn primary" onClick={() => setOpen({ a, decision: "approve" })}>
-                              Approve
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              <div className="stack">
+                {list.map((a) => (
+                  <DecisionCard key={a.id} a={a} importName={imports.data?.items.find((i) => i.id === a.receiving_import_id)} onDecide={(decision) => setOpen({ a, decision })} />
+                ))}
               </div>
             </section>
           ))}

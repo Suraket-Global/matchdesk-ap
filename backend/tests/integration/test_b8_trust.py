@@ -194,3 +194,44 @@ def test_quickbooks_status_is_the_servers(app_engine, client):  # type: ignore[n
     c = client.get("/api/v1/qbo/connection", headers=w.headers).json()
     assert c["source"] == "demo_data" and c["mode"] != "intuit"
     assert c["status"] == "not_connected" and c["last_sync"] is None
+
+
+def test_conversion_approval_lists_the_lines_it_rematches(app_engine, client):  # type: ignore[no-untyped-def]
+    """S-12 (B8): a pending conversion carries the affected lines, before and after conversion."""
+    from matchdesk.intake.models import InvoiceLineRow
+
+    w = make_tenant(app_engine, "Fictional Distributor B8-AP")
+    _c, ctrl = add_user(app_engine, w, "controller")
+    inv = add_invoice(app_engine, w, "ap", "INV-B8AP", date(2026, 10, 14), "4", uom="CS")
+    with session(w.tenant_id, app_engine) as s:
+        line = s.query(InvoiceLineRow).filter_by(invoice_id=inv).one()
+        line.supplier_item_code = "CT-25"
+    r = client.post(
+        "/api/v1/aliases",
+        json={
+            "vendor_id": str(w.vendor_id),
+            "supplier_item_code": "CT-25",
+            "item_id": str(w.item_id),
+            "conversion_factor": "25",
+            "supplier_uom": "CS",
+            "item_uom": "EA",
+        },
+        headers=w.headers,
+    )
+    assert r.status_code == 201, r.text
+    pending = client.get("/api/v1/approvals?status=pending", headers=ctrl).json()["items"]
+    conv = next(a for a in pending if a["subject_type"] == "alias_conversion")
+    assert conv["affected"] == [
+        {
+            "invoice_id": str(inv),
+            "invoice_line_id": conv["affected"][0]["invoice_line_id"],
+            "doc_number": "INV-B8AP",
+            "doc_date": "2026-10-14",
+            "line_no": 1,
+            "qty": conv["affected"][0]["qty"],
+            "uom": "CS",
+            "converted_qty": conv["affected"][0]["converted_qty"],
+            "open_exceptions": [],
+        }
+    ]
+    assert Decimal(conv["affected"][0]["qty"]) == 4 and Decimal(conv["affected"][0]["converted_qty"]) == 100

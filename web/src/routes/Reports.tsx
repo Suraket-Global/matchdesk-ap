@@ -10,7 +10,8 @@ import { Banner, Dialog, Empty, ErrorState, Loading, PageHead, StatusChip, toast
 import { cad, cadCents, compareDecimal, formatCents, money, sumCents } from "../lib/decimal";
 import { day, monthName, monthRange, plural, when } from "../lib/format";
 import { typeWord, zeroCounted } from "../lib/words";
-import { PilotSection } from "./Pilot";
+import { PilotSection, usePilot } from "./Pilot";
+import { queueLink } from "../lib/queue";
 
 type Finding = NonNullable<Report["findings"]>[number];
 
@@ -51,6 +52,10 @@ export function ReportsPage() {
     },
   });
   const rows = [...(list.data?.items ?? [])].sort((a, b) => b.period_start.localeCompare(a.period_start) || b.version_no - a.version_no);
+  const pilot = usePilot();
+  const governingId = pilot.data?.governing?.report_id;
+  const latest = rows[0];
+  const draftWaiting = rows.find((x) => x.status === "draft");
   return (
     <>
       <PageHead
@@ -73,6 +78,27 @@ export function ReportsPage() {
           </button>
           {create.error && <span className="error-text">{errorText(create.error)}</span>}
         </div>
+      )}
+      {latest && (
+        <p className="next-decision" role="status">
+          {draftWaiting ? (
+            <>
+              <strong>Next decision:</strong> draft version {draftWaiting.version_no} for {monthName(draftWaiting.period_start.slice(0, 7))} is waiting for approval.{" "}
+              <Link to={`/reports/backtest/${draftWaiting.id}`}>Review the draft</Link>
+            </>
+          ) : governingId ? (
+            <>
+              <strong>Governing version:</strong> {(() => {
+                const g = rows.find((x) => x.id === governingId);
+                return g ? `${monthName(g.period_start.slice(0, 7))}, version ${g.version_no}. The refund is decided on it alone.` : "set on the pilot record.";
+              })()}
+            </>
+          ) : (
+            <>
+              <strong>Next decision:</strong> choose the governing version on an approved report (section 7).
+            </>
+          )}
+        </p>
       )}
       {list.isLoading && <Loading />}
       {list.error && <ErrorState error={list.error} />}
@@ -108,6 +134,7 @@ export function ReportsPage() {
                   <td className="num" data-label="Version">{r.version_no}</td>
                   <td data-label="Status">
                     <StatusChip status={reportStatus(r)} />
+                    {r.id === governingId && <span className="gov-tag">Governing</span>}
                     {r.is_stale && r.status === "approved" && <div className="small muted">Out of date</div>}
                   </td>
                   <td className="num" data-label="Flagged discrepancies (CAD)">{formatCents(sumCents([r.findings_amount, r.not_received_amount]))}</td>
@@ -124,7 +151,7 @@ export function ReportsPage() {
   );
 }
 
-function FindingsTable({ rows, caption, showPaid = true }: { rows: Finding[]; caption: string; showPaid?: boolean }) {
+function FindingsTable({ rows, caption, showPaid = true, period }: { rows: Finding[]; caption: string; showPaid?: boolean; period?: { start: string; end: string } }) {
   if (!rows.length) return <p className="muted">None.</p>;
   return (
     <div className="table-wrap">
@@ -153,7 +180,7 @@ function FindingsTable({ rows, caption, showPaid = true }: { rows: Finding[]; ca
                 </td>
                 <td data-label="Supplier">{s.vendor_name}</td>
                 <td data-label="Document">
-                  <Link to={`/exceptions?status=open,pending_approval,resolved,waived&sel=${f.exception_id}`}>{s.doc_number}</Link>
+                  <Link to={`${period ? queueLink({ from: period.start, to: period.end, status: "open,pending_approval,resolved,waived" }) : "/exceptions?status=open,pending_approval,resolved,waived"}&sel=${f.exception_id}`}>{s.doc_number}</Link>
                   {s.line_no ? ` line ${s.line_no}` : ""}
                 </td>
                 <td data-label="PO">{s.po_number}</td>
@@ -195,6 +222,7 @@ export function ReportPage() {
   const navigate = useNavigate();
   const q = useQuery({ queryKey: ["report", reportId], queryFn: () => get<Report>(`/api/v1/reports/backtest/${reportId}`) });
   const r = q.data;
+  const pilot = usePilot();
   const users = useQuery({
     queryKey: ["users"],
     queryFn: () => get<Page<{ user_id: string; display_name: string | null; email: string }>>("/api/v1/users"),
@@ -265,6 +293,8 @@ export function ReportPage() {
     bySupplier.set(v, [...(bySupplier.get(v) ?? []), x]);
   }
   const newer = (list.data?.items ?? []).find((o) => o.period_start === r.period_start && o.version_no > r.version_no);
+  const isGoverning = pilot.data?.governing?.report_id === r.id;
+  const ALL_STATUSES = "open,pending_approval,resolved,waived";
   const blocking = r.blocking ?? [];
   return (
     <div className="report">
@@ -308,6 +338,7 @@ export function ReportPage() {
           <p>
             <strong>
               APPROVED{approver ? ` by ${approver.display_name || approver.email}` : ""} on {when(r.approved_at)} · version {r.version_no}
+              {isGoverning ? " · GOVERNING VERSION: the refund is decided on this version" : ""}
             </strong>
             {(r.is_stale || r.changed_since_cutoff) && " · results changed after its data cut-off; you can create a new draft version."}
           </p>
@@ -368,10 +399,27 @@ export function ReportPage() {
           <span className="small">of invoiced PO lines have a counting receipt</span>
         </div>
       </div>
-      <p className="muted" style={{ marginTop: -8, marginBottom: 24 }}>
-        Flagged discrepancies {flaggedCount}, {cadCents(flagged)}. Confirmed overcharges by the controller {confirmed.length},{" "}
-        {cadCents(sumCents(confirmed.map((c) => c.amount)))}. Credit actually recovered: not recorded yet.
-      </p>
+      <dl className="three-counts" aria-label="Three separate counts">
+        <div>
+          <dt>Flagged by the rules</dt>
+          <dd>
+            <span className="num">{cadCents(flagged)}</span> <span className="muted small">{plural(flaggedCount, "item")}</span>
+          </dd>
+        </div>
+        <div>
+          <dt>Confirmed by the controller</dt>
+          <dd>
+            <span className="num">{cadCents(sumCents(confirmed.map((c) => c.amount)))}</span> <span className="muted small">{plural(confirmed.length, "item")}</span>
+          </dd>
+        </div>
+        <div>
+          <dt>Credit recovered</dt>
+          <dd className="muted">Not recorded yet</dd>
+        </div>
+        <p className="small muted">
+          Totals open the queue with this report&apos;s dates. The queue is live; this version is frozen at its data cut-off, so later resolutions show there, not here.
+        </p>
+      </dl>
 
       <section>
         <h2>1. Documents and lines</h2>
@@ -406,7 +454,7 @@ export function ReportPage() {
               {byType.map(([t, xs]) => (
                 <tr key={t}>
                   <td>
-                    <Link to={`/exceptions?type=${t}&status=open,pending_approval,resolved,waived`}>{typeWord(t)}</Link>
+                    <Link to={queueLink({ from: r.period_start, to: r.period_end, type: t, status: ALL_STATUSES })}>{typeWord(t)}</Link>
                   </td>
                   <td className="num">{xs.length}</td>
                   <td className="num">{formatCents(sumCents(xs.map((x) => x.amount)))}</td>
@@ -448,7 +496,7 @@ export function ReportPage() {
             .join(", ") || "none"}
           .
         </p>
-        <FindingsTable rows={[...findings, ...notReceived].sort(byAmount)} caption="Flagged discrepancies" />
+        <FindingsTable rows={[...findings, ...notReceived].sort(byAmount)} caption="Flagged discrepancies" period={{ start: r.period_start, end: r.period_end }} />
       </section>
       <section>
         <h2>3. Receipt coverage and what could not be checked</h2>
@@ -475,11 +523,11 @@ export function ReportPage() {
           A missing receiving record is never treated as received. Where the receiving log covers the order and shows nothing, the line is "not received";
           otherwise it is unverified and is not counted as a finding.
         </p>
-        <FindingsTable rows={unverified} caption="Unverified items" showPaid={false} />
+        <FindingsTable rows={unverified} caption="Unverified items" showPaid={false} period={{ start: r.period_start, end: r.period_end }} />
       </section>
       <section>
         <h2>4. Waived items</h2>
-        <FindingsTable rows={waived} caption="Waived items" showPaid={false} />
+        <FindingsTable rows={waived} caption="Waived items" showPaid={false} period={{ start: r.period_start, end: r.period_end }} />
       </section>
       <section>
         <h2>5. Undecided items</h2>
@@ -488,11 +536,11 @@ export function ReportPage() {
           {stillOpen.length > 0 &&
             `${plural(stillOpen.length, "item")} still open in the exception queue ${stillOpen.length === 1 ? "is" : "are"} counted in the sections above with ${stillOpen.length === 1 ? "its" : "their"} queue status.`}
         </p>
-        <FindingsTable rows={[...open].sort(byAmount)} caption="Undecided items" showPaid={false} />
+        <FindingsTable rows={[...open].sort(byAmount)} caption="Undecided items" showPaid={false} period={{ start: r.period_start, end: r.period_end }} />
       </section>
       <section>
         <h2>6. Documents with self-inconsistent totals and duplicates</h2>
-        <FindingsTable rows={f.filter((x) => x.type === "duplicate" || x.type === "possible_duplicate" || (x.snapshot as Record<string, unknown>).label === "inconsistent_total")} caption="Inconsistent or duplicate documents" showPaid={false} />
+        <FindingsTable rows={f.filter((x) => x.type === "duplicate" || x.type === "possible_duplicate" || (x.snapshot as Record<string, unknown>).label === "inconsistent_total")} caption="Inconsistent or duplicate documents" showPaid={false} period={{ start: r.period_start, end: r.period_end }} />
       </section>
       <section>
         <h2>7. Pilot terms and refund calculation</h2>

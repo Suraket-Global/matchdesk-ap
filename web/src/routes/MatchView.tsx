@@ -296,8 +296,10 @@ export function MatchViewPage() {
                 {/* The list the person came from, named with its scope so they can tell which queue (B8). */}
                 <Link to={fromUrl} className="back-link">
                   <ArrowLeft size={14} aria-hidden="true" />
-                  {crumbFor(fromUrl)}
-                  {scopeWords && <span className="muted">: {scopeWords}</span>}
+                  <span>
+                    {crumbFor(fromUrl)}
+                    {scopeWords && <span className="muted">{`: ${scopeWords}`}</span>}
+                  </span>
                 </Link>
               </li>
             </ol>
@@ -388,7 +390,6 @@ export function MatchViewPage() {
             </h2>
             {line && (
               <div className="w-head">
-                {lineChip(line, inv.exceptions)}
                 {lineExcs.map((e) => (
                   <span key={e.id} className="muted">
                     {typeWord(e.type)}{" "}
@@ -551,7 +552,7 @@ export function MatchViewPage() {
             <section className="panel action-panel resolution-bar" role="region" aria-label="Resolution">
               <div className="panel-head">
                 <h2>{typeWord(current.type)}</h2>
-                {chipFor(current)}
+                {current.status !== "open" && chipFor(current)}
               </div>
               <div className="panel-body">
                 <div>

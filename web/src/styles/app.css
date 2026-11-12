@@ -2978,16 +2978,15 @@ hr {
   font-variant-numeric: tabular-nums;
 }
 .ledger {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  display: flex;
   margin: 0 0 var(--s-4);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
   background: var(--surface);
-  overflow: hidden;
 }
 .l-cell {
   position: relative;
+  flex: 1 1 0;
   display: grid;
   align-content: start;
   gap: 2px;
@@ -2998,16 +2997,36 @@ hr {
 .l-cell:last-child {
   border-right: 0;
 }
+/* The operator sits on the border between two figures: billed − received = excess × price = exposure. */
 .l-cell .op {
   position: absolute;
-  left: var(--s-2);
+  left: -11px;
   top: 50%;
   transform: translateY(-50%);
-  color: var(--text-3);
-  font-size: var(--fs-lg);
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--text-2);
+  font-size: var(--fs-md);
+  line-height: 1;
+  z-index: 1;
+}
+.l-cell {
+  padding-left: var(--s-5);
 }
 .l-cell:first-child {
   padding-left: var(--s-4);
+  border-radius: var(--r-md) 0 0 var(--r-md);
+}
+.l-cell:last-child {
+  border-radius: 0 var(--r-md) var(--r-md) 0;
+}
+.l-cell .v.num {
+  text-align: left;
 }
 .l-cell .k {
   font-size: var(--fs-xs);
@@ -3177,6 +3196,7 @@ details.fold > summary {
     display: none;
   }
   .ledger {
+    display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .l-cell {
@@ -3184,6 +3204,22 @@ details.fold > summary {
   }
   .l-cell.total {
     grid-column: 1 / -1;
+  }
+  .l-cell,
+  .l-cell:first-child,
+  .l-cell:last-child {
+    padding-left: var(--s-4);
+    border-radius: 0;
+  }
+  .l-cell .op {
+    position: static;
+    transform: none;
+    width: auto;
+    height: auto;
+    border: 0;
+    background: none;
+    justify-self: start;
+    font-size: var(--fs-xs);
   }
   .l-cell .v {
     font-size: var(--fs-lg);
@@ -3195,5 +3231,108 @@ details.fold > summary {
   }
   .match-head .pager .btn {
     flex: 1;
+  }
+}
+
+/* B8 S-12: a decision reads change, records, consequence, decision. */
+.decision {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) minmax(0, 1fr) auto;
+  gap: var(--s-5);
+  padding: var(--s-5);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  align-items: start;
+}
+.decision .d-label {
+  margin: 0 0 var(--s-2);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--text-3);
+}
+.decision .d-big {
+  margin: 0 0 var(--s-1);
+  font-size: var(--fs-2xl);
+  line-height: var(--lh-2xl, 32px);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.decision p {
+  margin: 0 0 var(--s-2);
+}
+.decision .d-consequence {
+  padding-left: var(--s-4);
+  border-left: 3px solid var(--review-border);
+}
+.decision .d-decide {
+  display: grid;
+  gap: var(--s-2);
+  min-width: 150px;
+}
+@media (max-width: 1279px) {
+  .decision {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+  .decision .d-decide {
+    grid-column: 1 / -1;
+    grid-auto-flow: column;
+    justify-content: start;
+  }
+}
+@media (max-width: 639px) {
+  .decision {
+    grid-template-columns: minmax(0, 1fr);
+    padding: var(--s-4);
+  }
+  .decision .d-decide {
+    grid-auto-flow: row;
+    justify-content: stretch;
+  }
+}
+
+/* B8 S-13: governing version, next decision, three separate counts. */
+.next-decision {
+  margin: 0 0 var(--s-4);
+  padding: var(--s-3) var(--s-4);
+  border-left: 3px solid var(--accent);
+  background: var(--surface);
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
+}
+.gov-tag {
+  display: inline-block;
+  margin-left: var(--s-2);
+  padding: 1px var(--s-2);
+  border: 1px solid var(--text);
+  border-radius: var(--r-xs);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+}
+.three-counts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--s-2) var(--s-4);
+  margin: -8px 0 var(--s-6);
+  padding: var(--s-3) var(--s-4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+.three-counts dt {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+.three-counts dd {
+  margin: 0;
+  font-size: var(--fs-lg);
+  font-weight: 600;
+}
+.three-counts p {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+@media (max-width: 639px) {
+  .three-counts {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
