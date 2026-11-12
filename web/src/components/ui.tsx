@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { Component, useEffect, useId, useRef, useState, type ErrorInfo, type ReactNode } from "react";
 import { errorText } from "../api/client";
 
 /* ------------------------------------------------------------ page title and focus (App-flow 5) */
@@ -291,4 +291,32 @@ export function ThrottledStatus({ text, final }: { text: string; final?: boolean
 
 export function NarrowNote() {
   return <p className="narrow-note banner warn">Open in a wider window to work on this.</p>;
+}
+
+/* ------------------------------------------------------------ error boundary */
+
+
+export class PageErrorBoundary extends Component<{ children: ReactNode; resetKey: string }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  componentDidCatch(_error: Error, _info: ErrorInfo) {
+    /* shown on screen; nothing is sent anywhere */
+  }
+  componentDidUpdate(prev: { resetKey: string }) {
+    if (prev.resetKey !== this.props.resetKey && this.state.failed) this.setState({ failed: false });
+  }
+  render() {
+    if (this.state.failed)
+      return (
+        <div className="banner error" role="alert">
+          <p>This page could not be shown. Your saved work is safe on the server. Reload the page; if it happens again, note the time and tell support.</p>
+          <button className="btn small" onClick={() => window.location.reload()}>
+            Reload
+          </button>
+        </div>
+      );
+    return this.props.children;
+  }
 }

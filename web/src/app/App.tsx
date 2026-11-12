@@ -5,7 +5,7 @@ import { SessionProvider, useSession } from "./session";
 import { NAV } from "./routes";
 import { get, lastServerContact, send } from "../api/client";
 import type { Approval, Page, QboConnection } from "../api/types";
-import { Dialog, Loading, ToastHost } from "../components/ui";
+import { Dialog, Loading, PageErrorBoundary, ToastHost } from "../components/ui";
 import { LoginPage, VerifyPage } from "../routes/Login";
 import { InvitePage } from "../routes/Invite";
 import { ForbiddenPage, NotFoundPage, SignedOutPage } from "../routes/System";
@@ -171,7 +171,7 @@ function Shell({ children }: { children: ReactNode }) {
         </div>
       )}
       <main id="main" ref={mainRef} tabIndex={-1}>
-        {children}
+        <PageErrorBoundary resetKey={location.pathname}>{children}</PageErrorBoundary>
       </main>
       <IdleGuard />
     </>
@@ -253,8 +253,9 @@ function UserMenu() {
           <button
             onClick={async () => {
               setOpen(false);
-              await signOut();
+              // Leave the signed-in routes first, so they do not redirect to sign-in meanwhile.
               navigate("/signed-out", { replace: true });
+              await signOut();
             }}
           >
             Sign out
@@ -294,8 +295,8 @@ function IdleGuard() {
             className="btn"
             onClick={async () => {
               setWarn(false);
-              await signOut();
               navigate("/signed-out");
+              await signOut();
             }}
           >
             Sign out now

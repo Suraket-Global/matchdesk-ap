@@ -28,3 +28,6 @@ web/dist/
 web/test-results/
 web/playwright-report/
 *.tsbuildinfo
+
+# Playwright run state
+web/e2e/.run.json

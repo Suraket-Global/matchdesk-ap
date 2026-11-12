@@ -301,7 +301,6 @@ export function ReceivingImportPage() {
       qc.invalidateQueries({ queryKey: ["receiving"] });
       qc.invalidateQueries({ queryKey: ["exceptions"] });
       qc.invalidateQueries({ queryKey: ["invoice"] });
-      toast(`Imported ${plural(r.rows_valid ?? 0, "row")}.`);
     },
   });
   const voidIt = useMutation({

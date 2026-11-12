@@ -903,6 +903,7 @@ dialog.modal::backdrop {
   grid-template-areas:
     "doc po rec"
     "doc calc calc";
+  grid-template-rows: auto 1fr;
   gap: 16px;
   align-items: start;
   padding-bottom: 96px;
@@ -926,6 +927,7 @@ dialog.modal::backdrop {
       "doc calc"
       "doc po"
       "doc rec";
+    grid-template-rows: auto auto 1fr;
   }
 }
 @media (max-width: 1023px) {
@@ -936,6 +938,7 @@ dialog.modal::backdrop {
       "po"
       "rec"
       "doc";
+    grid-template-rows: none;
   }
 }
 .workings {
@@ -1238,4 +1241,12 @@ dialog.modal::backdrop {
   body {
     background: #fff;
   }
+}
+
+/* Grid and flex children may shrink below their content, so wide tables scroll inside their own region. */
+.stack > *,
+.grid-2 > *,
+.review-grid > *,
+.match-grid > * {
+  min-width: 0;
 }

@@ -282,9 +282,10 @@ export function ReviewPage() {
                 const src = r.field_sources[f.key] ?? (f.source ? r.field_sources[f.source] : undefined);
                 return (
                   <div className="field" key={f.key}>
-                    <label htmlFor={`h-${f.key}`}>
-                      {f.label} <Provenance src={src} onHistory={() => setHistory({ label: f.label, original: src?.original })} />
-                    </label>
+                    <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                      <label htmlFor={`h-${f.key}`}>{f.label}</label>
+                      <Provenance src={src} onHistory={() => setHistory({ label: f.label, original: src?.original })} />
+                    </span>
                     {f.key === "doc_type" ? (
                       <select id={`h-${f.key}`} value={header[f.key] ?? ""} onChange={(e) => set(f.key, e.target.value)}>
                         <option value="invoice">Invoice</option>
