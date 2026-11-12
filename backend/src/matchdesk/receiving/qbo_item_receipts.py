@@ -11,7 +11,10 @@ goods recorded it before the bill, and that person is not someone who enters bil
 or clears exceptions. Each exported row is tested here; a row that fails is listed
 with its reason in the import's rejected rows and never becomes a receipt line.
 Which export carries the creator and creation time is unverified until T-1.1.1;
-a row without them is rejected, never assumed independent.
+a row without them is rejected, never assumed independent. The same holds for the linked
+bill's creator and creation time: without them neither "before the bill" nor "not the person
+who entered the bill" can be checked, so the row is rejected (B3/B4 review C1). An item
+receipt whose bill does not exist yet is imported again once the bill is entered.
 
 Pure: no database, no clock.
 """
@@ -31,6 +34,8 @@ class ItemReceiptRejection(StrEnum):
     ENTERED_BY_AP_STAFF = "entered_by_ap_staff"
     ENTERED_BY_BILL_ENTERER = "entered_by_bill_enterer"
     ENTERED_AFTER_BILL = "entered_after_bill"
+    LINKED_BILL_CREATOR_UNKNOWN = "linked_bill_creator_unknown"
+    LINKED_BILL_CREATED_AT_UNKNOWN = "linked_bill_created_at_unknown"
 
 
 @dataclass(frozen=True)
@@ -61,8 +66,12 @@ def item_receipt_rejection(row: QboItemReceiptRow, ap_staff: frozenset[str]) -> 
     creator = _norm(row.created_by)
     if creator in {_norm(s) for s in ap_staff}:
         return ItemReceiptRejection.ENTERED_BY_AP_STAFF
-    if row.linked_bill_created_by is not None and _norm(row.linked_bill_created_by) == creator:
+    if row.linked_bill_created_by is None or not row.linked_bill_created_by.strip():
+        return ItemReceiptRejection.LINKED_BILL_CREATOR_UNKNOWN
+    if row.linked_bill_created_at is None:
+        return ItemReceiptRejection.LINKED_BILL_CREATED_AT_UNKNOWN
+    if _norm(row.linked_bill_created_by) == creator:
         return ItemReceiptRejection.ENTERED_BY_BILL_ENTERER
-    if row.linked_bill_created_at is not None and row.created_at >= row.linked_bill_created_at:
+    if row.created_at >= row.linked_bill_created_at:
         return ItemReceiptRejection.ENTERED_AFTER_BILL
     return None

@@ -255,6 +255,7 @@ def create_draft(
     report.findings_amount = round_cents(sums["finding"])
     report.qualifying_amount = round_cents(qualifying)
     report.is_stale = any(stale.values())
+    s.flush()  # every finding row is inserted while the report is still ``generating`` (M5)
     report.status = "draft"
     s.flush()
     write_audit(
@@ -281,6 +282,28 @@ def _class_b_lines(s: Session, po_line_ids: list[uuid.UUID]) -> set[uuid.UUID]:
     return {r[0] for r in rows if r[0] in counting}
 
 
+def snapshot_changed(s: Session, report: BacktestReport) -> bool:
+    """True when the draft no longer matches what a rebuild would freeze now: a document entered or
+    left the period, or an exception in scope changed section, amount or qualifying after
+    ``data_cutoff_at`` (B3/B4 review M4). Compares the frozen rows with the current ones, no clock."""
+    invoices = _period_invoices(s, report.period_start, report.period_end)
+    if len(invoices) != int(report.totals.get("documents", -1)):
+        return True
+    ids = [i.id for i in invoices]
+    current: set[tuple[uuid.UUID, str, Decimal, bool]] = set()
+    for e in s.scalars(select(ExceptionRow).where(ExceptionRow.invoice_id.in_(ids))):
+        section = section_of(e)
+        if section is None:
+            continue
+        amount = round_cents(dec(e.reported_amount) if e.reported_amount is not None else ZERO)
+        current.add((e.id, section, amount, bool(e.qualifying)))
+    frozen = {
+        (f.exception_id, f.section, round_cents(dec(f.amount)), bool(f.qualifying))
+        for f in findings_of(s, report.id)
+    }
+    return current != frozen
+
+
 def approve(s: Session, report: BacktestReport, user_id: uuid.UUID) -> BacktestReport:
     """Idempotent. Refused while any blocking check fails; supersedes an earlier approved version."""
     if report.status == "approved":
@@ -290,6 +313,8 @@ def approve(s: Session, report: BacktestReport, user_id: uuid.UUID) -> BacktestR
     reasons = blocking_reasons(s, report.period_start, report.period_end)
     if report.is_stale:
         reasons.append("this draft was built from out-of-date results; refresh it")
+    elif snapshot_changed(s, report):
+        reasons.append("results changed after this draft's data cut-off; refresh the draft")
     if reasons:
         raise ConflictError("; ".join(reasons))
     earlier = s.scalar(
@@ -318,9 +343,10 @@ def approve(s: Session, report: BacktestReport, user_id: uuid.UUID) -> BacktestR
 
 
 def refund_evaluation(report: BacktestReport, threshold: Decimal = DEFAULT_THRESHOLD) -> RefundCalculation:
-    """From the stored qualifying total of an approved (governing) report only (IT-17)."""
-    if report.approved_at is None:
-        raise ConflictError("the refund criterion is evaluated on an approved report only")
+    """From the stored qualifying total of the approved (governing) report only (IT-17). A superseded
+    version is refused (B3/B4 review M6); the threshold is the server's, never the caller's."""
+    if report.status != "approved" or report.approved_at is None:
+        raise ConflictError("the refund criterion is evaluated on the approved report version only")
     qualifying = dec(report.qualifying_amount or 0)
     return RefundCalculation(
         qualifying, dec(report.unverified_amount or 0), refund_due=qualifying < dec(threshold)

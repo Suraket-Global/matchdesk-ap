@@ -26,7 +26,7 @@ from matchdesk.intake.documents import identify_vendor, link_po
 from matchdesk.intake.models import DocumentRow, InvoiceLineRow, InvoiceRow
 from matchdesk.matching import normalise_number
 from matchdesk.qbo.models import Vendor
-from matchdesk.tenancy import transition
+from matchdesk.tenancy import lock_for_update, transition
 
 EDITABLE_HEADER = (
     "doc_type",
@@ -117,6 +117,7 @@ def describe_fields(s: Session, inv: InvoiceRow) -> dict[str, Any]:
 
 
 def _check_version(s: Session, inv: InvoiceRow, expected: int) -> None:
+    lock_for_update(s, inv)  # B3/B4 review M3: compare the version under a row lock
     if inv.version != expected:
         raise VersionConflict(describe_fields(s, inv))
 

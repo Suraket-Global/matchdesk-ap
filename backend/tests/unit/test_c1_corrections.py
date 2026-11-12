@@ -30,7 +30,23 @@ def row(**kw: object) -> QboItemReceiptRow:
 
 def test_ut32a_receiver_entry_before_bill_counts():
     assert item_receipt_rejection(row(), AP) is None
-    assert item_receipt_rejection(row(linked_bill_created_by=None, linked_bill_created_at=None), AP) is None
+
+
+@pytest.mark.parametrize(
+    ("kw", "reason"),
+    [
+        ({"linked_bill_created_by": None}, ItemReceiptRejection.LINKED_BILL_CREATOR_UNKNOWN),
+        ({"linked_bill_created_by": " "}, ItemReceiptRejection.LINKED_BILL_CREATOR_UNKNOWN),
+        ({"linked_bill_created_at": None}, ItemReceiptRejection.LINKED_BILL_CREATED_AT_UNKNOWN),
+        (
+            {"linked_bill_created_by": None, "linked_bill_created_at": None},
+            ItemReceiptRejection.LINKED_BILL_CREATOR_UNKNOWN,
+        ),
+    ],
+)
+def test_c1_review_unknown_linked_bill_is_never_class_a(kw: dict[str, object], reason: ItemReceiptRejection):
+    """B3/B4 review C1: missing bill audit columns used to count the row as class A (false pass #3)."""
+    assert item_receipt_rejection(row(**kw), AP) == reason
 
 
 @pytest.mark.parametrize(

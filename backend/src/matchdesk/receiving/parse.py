@@ -2,7 +2,9 @@
 
 CSV (UTF-8, comma or semicolon) and XLSX (first worksheet). XLSX is a zip container and is
 opened only within the TRD 8.7 limits: at most 100 entries, at most 100 MB expanded and 100 times
-its compressed size, no document-type declarations (so no entity expansion), at most 50,000 rows.
+its compressed size, no document-type declarations (so no entity expansion), at most 50,000 rows,
+cell references within Excel's own last column (XFD, index 16383) and at most 200 columns per row
+(B3/B4 review M7: a reference such as ``ZZZZZZZZZZ1`` used to build a list of billions of cells).
 Standard library only; nothing in a file is ever executed.
 """
 
@@ -18,6 +20,8 @@ MAX_ROWS = 50_000
 MAX_ENTRIES = 100
 MAX_EXPANDED = 100 * 1024 * 1024
 MAX_RATIO = 100
+MAX_COLUMN_INDEX = 16_383  # XFD, the last column Excel allows
+MAX_COLUMNS = 200
 NS = {"m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
 CSV_TYPE = "text/csv"
 XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -76,9 +80,14 @@ def _csv(data: bytes) -> list[list[str]]:
 
 def _col_index(ref: str) -> int:
     letters = re.match(r"[A-Z]+", ref)
+    text = letters.group(0) if letters else "A"
+    if len(text) > 3:
+        raise ReceivingFileError("XLSX cell reference beyond the last column")
     n = 0
-    for ch in letters.group(0) if letters else "A":
+    for ch in text:
         n = n * 26 + (ord(ch) - 64)
+    if n - 1 > MAX_COLUMN_INDEX:
+        raise ReceivingFileError("XLSX cell reference beyond the last column")
     return n - 1
 
 
@@ -129,6 +138,8 @@ def _xlsx(data: bytes) -> list[list[str]]:
             else:
                 value = v.text if v is not None and v.text is not None else ""
             cells[idx] = value
+        if cells and max(cells) + 1 > MAX_COLUMNS:
+            raise ReceivingFileError(f"XLSX row wider than {MAX_COLUMNS} columns")
         if cells and any(v.strip() for v in cells.values()):
             rows.append([cells.get(i, "") for i in range(max(cells) + 1)])
     return rows

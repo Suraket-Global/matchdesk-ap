@@ -40,7 +40,7 @@ from matchdesk.receiving.models import (
 from matchdesk.receiving.parse import CSV_TYPE, ReceivingFileError, read_table, sniff_receiving
 from matchdesk.receiving.qbo_item_receipts import SOURCE_TYPE as QBO_EXPORT
 from matchdesk.receiving.qbo_item_receipts import QboItemReceiptRow, item_receipt_rejection
-from matchdesk.tenancy import transition
+from matchdesk.tenancy import lock_for_update, transition
 
 TARGETS = (
     "po_number",
@@ -238,8 +238,16 @@ def save_mapping(
     return imp
 
 
+def latest_attestation(s: Session) -> ReceivingAttestation | None:
+    return s.scalar(
+        select(ReceivingAttestation)
+        .order_by(ReceivingAttestation.created_at.desc(), ReceivingAttestation.id.desc())
+        .limit(1)
+    )
+
+
 def latest_ap_staff(s: Session) -> frozenset[str]:
-    row = s.scalar(select(ReceivingAttestation).order_by(ReceivingAttestation.created_at.desc()).limit(1))
+    row = latest_attestation(s)
     return frozenset(str(n) for n in (row.ap_staff if row else []))
 
 
@@ -419,6 +427,13 @@ def commit(
     )
     if other is not None:
         raise ConflictError("this receiving file was already imported")
+    if imp.source_type == QBO_EXPORT and latest_attestation(s) is None:
+        # Without the attestation nobody has named the accounts-payable users, so no row can be
+        # shown to be independent (B3/B4 review C1).
+        raise ConflictError(
+            "the controller must attest the receiving evidence and name the accounts-payable users "
+            "before a QuickBooks item-receipt export is committed"
+        )
     v = validate(s, imp)
     receipts: dict[tuple[uuid.UUID, date, str | None], ReceiptRow] = {}
     touched: set[uuid.UUID] = set()
@@ -557,6 +572,7 @@ def confirm_receipt(
     assert imp is not None
     if imp.evidence_class != "B":
         raise ConflictError("only a class B delivery document is confirmed this way")
+    lock_for_update(s, receipt)  # B3/B4 review M3
     if receipt.version != expected_version:
         raise ConflictError("stale version")
     receipt.receiver_marks_present = receiver_marks_present

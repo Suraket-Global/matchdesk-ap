@@ -19,6 +19,7 @@ from matchdesk.audit import write_audit
 from matchdesk.core import ConflictError, ForbiddenError, dec
 from matchdesk.exceptions.models import Approval, ExceptionEvent, ExceptionRow, ItemAlias, LineMatch
 from matchdesk.exceptions.permissions import check_resolution_allowed
+from matchdesk.tenancy import advisory_lock, lock_for_update
 
 OPEN_STATES = ("open", "pending_approval")
 
@@ -156,6 +157,10 @@ def unapproved_waivers(s: Session, user_id: uuid.UUID, now: datetime) -> Decimal
     return dec(str(total or 0))
 
 
+def waiver_lock_key(tenant_id: uuid.UUID, user_id: uuid.UUID) -> str:
+    return f"waiver-cap:{tenant_id}:{user_id}"
+
+
 def _waiver_amount(exc: ExceptionRow) -> Decimal:
     return dec(str(exc.reported_amount if exc.reported_amount is not None else exc.variance_amount or 0))
 
@@ -176,6 +181,7 @@ def resolve(
 ) -> Outcome:
     """Resolve one exception with a code and note. A clerk's waiver above the item limit, or one that
     takes the clerk's unapproved waivers in 30 days above the cap, becomes pending (MH-11)."""
+    lock_for_update(s, exc)
     if exc.version != expected_version:
         raise StaleExceptionVersion(exc)
     check_code(role, exc, code, bulk=bulk)
@@ -186,6 +192,8 @@ def resolve(
     now = datetime.now(UTC)
     before = exc.status
     if code == "waived" and role != "controller":
+        # One person's waivers are checked against the cap one at a time (B3/B4 review M2).
+        advisory_lock(s, waiver_lock_key(exc.tenant_id, user_id))
         amount = _waiver_amount(exc)
         reason = None
         if amount > waiver_limit:
@@ -257,7 +265,14 @@ def bulk_resolve(
     """Per-item results. ``receipt_absent`` is never waived in bulk; the period cap applies to the
     batch total of the waivers (IT-22, IT-27)."""
     rows = {
-        e.id: e for e in s.scalars(select(ExceptionRow).where(ExceptionRow.id.in_([i for i, _v in items])))
+        e.id: e
+        for e in s.scalars(
+            select(ExceptionRow)
+            .where(ExceptionRow.id.in_([i for i, _v in items]))
+            .order_by(ExceptionRow.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
     }
     eligible: list[tuple[ExceptionRow, int]] = []
     results: list[dict] = []
@@ -306,6 +321,7 @@ def bulk_resolve(
 
 
 def withdraw(s: Session, exc: ExceptionRow, user_id: uuid.UUID, expected_version: int) -> ExceptionRow:
+    lock_for_update(s, exc)
     if exc.version != expected_version:
         raise StaleExceptionVersion(exc)
     approval = s.scalar(select(Approval).where(Approval.exception_id == exc.id, Approval.status == "pending"))
@@ -328,6 +344,7 @@ def reopen(
     """Controller only (IT-23). The earlier resolution stays in the events."""
     if role != "controller":
         raise ForbiddenError("only the controller reopens an exception")
+    lock_for_update(s, exc)
     if exc.version != expected_version:
         raise StaleExceptionVersion(exc)
     if exc.status not in ("resolved", "waived"):
@@ -379,10 +396,23 @@ def decide(
     single controller, recorded as ``self_approved`` (schema.md 4.1)."""
     if role != "controller":
         raise ForbiddenError("only the controller decides approvals")
+    lock_for_update(s, approval)
     if approval.version != expected_version:
         raise ConflictError("stale version")
     if approval.status != "pending":
         raise ConflictError(f"an approval in status {approval.status} cannot be decided")
+    waived_exc: ExceptionRow | None = None
+    if approval.subject_type == "waiver":
+        waived_exc = s.get(ExceptionRow, approval.exception_id)
+        assert waived_exc is not None
+        lock_for_update(s, waived_exc)
+        # A re-match may have changed or closed the exception since the request (B3/B4 review M1).
+        if waived_exc.status != "pending_approval" or _waiver_amount(waived_exc) != dec(
+            str(approval.amount if approval.amount is not None else 0)
+        ):
+            raise ConflictError(
+                "the exception changed after this waiver was requested; it is no longer waiting for approval"
+            )
     self_decision = approval.requested_by == user_id
     if self_decision and controller_count > 1:
         raise ForbiddenError("a requester cannot approve their own request while another controller exists")
@@ -394,7 +424,7 @@ def decide(
     effect = ""
     subject: uuid.UUID
     if approval.subject_type == "waiver":
-        exc = s.get(ExceptionRow, approval.exception_id)
+        exc = waived_exc
         assert exc is not None
         subject = exc.id
         before = exc.status

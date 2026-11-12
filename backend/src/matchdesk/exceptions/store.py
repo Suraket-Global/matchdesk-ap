@@ -16,7 +16,7 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from matchdesk.audit import write_audit
-from matchdesk.exceptions.models import ExceptionEvent, ExceptionRow, LineMatch, MatchRun
+from matchdesk.exceptions.models import Approval, ExceptionEvent, ExceptionRow, LineMatch, MatchRun
 from matchdesk.matching import ExceptionResult, ExceptionStatus, LineStatus, MatchResult
 
 PERSON_RESOLUTIONS = frozenset({"resolved", "waived", "pending_approval"})
@@ -108,6 +108,7 @@ def store_result(s: Session, tenant_id: uuid.UUID, run: MatchRun, result: MatchR
                 _event(s, tenant_id, row, run, "reopened", before_status, "open")
             elif before_status != row.status:
                 _event(s, tenant_id, row, run, "resolved", before_status, row.status)
+        _withdraw_stale_approval(s, tenant_id, row, run, before_status)
         row.version += 1
     for fp, row in existing.items():
         if fp not in produced and row.status != "auto_closed":
@@ -116,6 +117,7 @@ def store_result(s: Session, tenant_id: uuid.UUID, run: MatchRun, result: MatchR
             row.line_match_id = None
             row.version += 1
             _event(s, tenant_id, row, run, "auto_closed", before, "auto_closed")
+            _withdraw_stale_approval(s, tenant_id, row, run, before)
 
     run.lines_evaluated = len(result.lines)
     run.lines_matched = sum(1 for lr in result.lines if lr.status == LineStatus.MATCHED)
@@ -130,6 +132,41 @@ def store_result(s: Session, tenant_id: uuid.UUID, run: MatchRun, result: MatchR
         entity_type="match_run",
         entity_id=run.id,
         after={"lines": run.lines_evaluated, "matched": run.lines_matched},
+    )
+
+
+def _withdraw_stale_approval(
+    s: Session, tenant_id: uuid.UUID, row: ExceptionRow, run: MatchRun, before_status: str
+) -> None:
+    """A waiver waiting for approval was requested for one status and amount. When a re-match moves
+    the exception out of ``pending_approval`` or changes the amount, the pending approval is withdrawn
+    and the exception is open again, so the controller never applies a waiver to an exception that
+    changed (B3/B4 review M1)."""
+    if before_status != "pending_approval":
+        return
+    approval = s.scalar(
+        select(Approval).where(
+            Approval.exception_id == row.id, Approval.subject_type == "waiver", Approval.status == "pending"
+        )
+    )
+    if approval is None:
+        return
+    amount = row.reported_amount if row.reported_amount is not None else row.variance_amount
+    if row.status == "pending_approval" and amount == approval.amount:
+        return
+    approval.status, approval.version = "withdrawn", approval.version + 1
+    if row.status == "pending_approval":
+        row.status = "open"
+        _event(s, tenant_id, row, run, "reopened", "pending_approval", "open")
+    s.flush()
+    write_audit(
+        s,
+        tenant_id,
+        actor_type="job",
+        action="approval.withdrawn_by_rematch",
+        entity_type="approval",
+        entity_id=approval.id,
+        after={"exception_id": str(row.id), "status": row.status, "match_run_id": str(run.id)},
     )
 
 

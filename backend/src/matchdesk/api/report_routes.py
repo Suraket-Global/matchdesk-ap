@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import uuid
 from datetime import date
-from decimal import Decimal
 from typing import Annotated, Any, Literal
 
 from fastapi import FastAPI, Header, HTTPException, Response
@@ -122,9 +121,11 @@ def register_report_routes(app: FastAPI, engine: Engine) -> None:
             )
 
     @app.get("/api/v1/reports/backtest/{report_id}/refund-evaluation")
-    def refund(
-        report_id: uuid.UUID, p: Auth, threshold: Decimal = reporting.DEFAULT_THRESHOLD
-    ) -> dict[str, Any]:
+    def refund(report_id: uuid.UUID, p: Auth) -> dict[str, Any]:
+        # The threshold is the pilot term (schema.md pilot_engagements.refund_threshold, default
+        # 500.00). That table is not built yet, so the server constant applies; a caller can no
+        # longer choose it (B3/B4 review M6).
+        threshold = reporting.DEFAULT_THRESHOLD
         require(p, "read")
         with session(p.tenant_id, engine) as s:
             r = _load(s, report_id)

@@ -76,7 +76,7 @@ def test_report_totals_approval_versions_refund_and_export(app_engine, client): 
     ev10 = client.get(
         f"/api/v1/reports/backtest/{r1['id']}/refund-evaluation?threshold=10.00", headers=w.headers
     )
-    assert ev10.json()["refund_due"] is False
+    assert ev10.json()["threshold"] == "500.00"  # the caller cannot choose it (review M6)
     # IT-17 (e): the controller waives the finding; a new version still counts it.
     pv = client.get("/api/v1/exceptions", params={"type": "price_variance"}, headers=w.headers).json()[
         "items"
@@ -94,11 +94,10 @@ def test_report_totals_approval_versions_refund_and_export(app_engine, client): 
     assert client.post(f"/api/v1/reports/backtest/{r2['id']}/approve", headers=ctrl).status_code == 200
     v1 = client.get(f"/api/v1/reports/backtest/{r1['id']}", headers=w.headers).json()
     assert v1["status"] == "superseded" and v1["qualifying_amount"] == "15.00"
+    # A superseded version is not the governing report (review M6).
     assert (
-        client.get(f"/api/v1/reports/backtest/{r1['id']}/refund-evaluation", headers=w.headers).json()[
-            "qualifying_total"
-        ]
-        == "15.00"
+        client.get(f"/api/v1/reports/backtest/{r1['id']}/refund-evaluation", headers=w.headers).status_code
+        == 409
     )
     with pytest.raises(DBAPIError, match="immutable"), session(w.tenant_id, app_engine) as s:
         s.execute(text("update backtest_reports set qualifying_amount = 0 where id = :i"), {"i": r1["id"]})

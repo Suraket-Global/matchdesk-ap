@@ -72,3 +72,17 @@ def transition(
         )
         return False
     return True
+
+
+def lock_for_update(s: Session, row: Any) -> None:
+    """Re-read ``row`` with ``SELECT ... FOR UPDATE`` before its version is compared, so two requests
+    holding the same ``If-Match`` cannot both pass the check (B3/B4 review M3). A second request
+    waits for the first to commit and then sees the newer version."""
+    s.refresh(row, with_for_update=True)
+
+
+def advisory_lock(s: Session, key: str) -> None:
+    """Transaction-scoped advisory lock on a text key (released at commit or rollback). Used where a
+    rule reads a total and then writes against it: the waiver period cap per person (M2) and back-test
+    drafts per period (m5)."""
+    s.execute(text("select pg_advisory_xact_lock(hashtextextended(:k, 0))"), {"k": key})

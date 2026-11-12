@@ -34,6 +34,7 @@ from matchdesk.matching import (
     normalise_code,
 )
 from matchdesk.qbo.models import Item
+from matchdesk.tenancy import lock_for_update
 
 TOLERANCE_FIELDS = ("qty_tolerance", "price_tol_abs", "price_tol_pct", "charge_allowance")
 
@@ -176,6 +177,7 @@ def retire_alias(
 ) -> MatchRun | None:
     if not reason.strip():
         raise ValueError("a reason is required")
+    lock_for_update(s, alias)  # B3/B4 review M3
     if alias.version != expected_version:
         raise ConflictError("stale version")
     if alias.status == "retired":
