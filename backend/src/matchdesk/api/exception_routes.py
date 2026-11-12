@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import uuid
 from collections import Counter
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Annotated, Any, Literal
 
@@ -239,6 +239,8 @@ def register_exception_routes(app: FastAPI, engine: Engine) -> None:
         invoice_id: uuid.UUID | None = None,
         qualifying: bool | None = None,
         resolved_since: datetime | None = None,
+        period_start: date | None = None,
+        period_end: date | None = None,
     ) -> dict[str, Any]:
         require(p, "read")
         n = page_limit(limit)
@@ -256,10 +258,15 @@ def register_exception_routes(app: FastAPI, engine: Engine) -> None:
                 q = q.where(ExceptionRow.qualifying.is_(qualifying))
             if resolved_since is not None:
                 q = q.where(ExceptionRow.resolved_at >= resolved_since)
+            if vendor_id or period_start or period_end:
+                q = q.join(InvoiceRow, InvoiceRow.id == ExceptionRow.invoice_id)
             if vendor_id:
-                q = q.join(InvoiceRow, InvoiceRow.id == ExceptionRow.invoice_id).where(
-                    InvoiceRow.vendor_id == vendor_id
-                )
+                q = q.where(InvoiceRow.vendor_id == vendor_id)
+            # The selected test month: documents dated in it (B6 review minor; S-14 uses the same).
+            if period_start:
+                q = q.where(InvoiceRow.doc_date >= period_start)
+            if period_end:
+                q = q.where(InvoiceRow.doc_date <= period_end)
             counters = Counter(r for r in s.scalars(q.with_only_columns(ExceptionRow.status)).all())
             type_counters = Counter(r for r in s.scalars(q.with_only_columns(ExceptionRow.type)).all())
             page_q = q.order_by(ExceptionRow.id).limit(n + 1)

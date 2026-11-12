@@ -1,8 +1,9 @@
+import { E2E_MAILPIT } from "../e2e/stack";
 import path from "node:path";
 import { expect, test, type Browser, type Page } from "@playwright/test";
 import { ROOT } from "../e2e/stack";
 
-const MAILPIT = "http://127.0.0.1:8025/api/v1";
+const MAILPIT = E2E_MAILPIT;
 const OUT = process.env.SHOTS_DIR ?? path.join(ROOT, "docs/screenshots", process.env.SHOTS ?? "after");
 const SIZES = { desktop: { width: 1440, height: 900 }, mobile: { width: 375, height: 812 } } as const;
 

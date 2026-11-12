@@ -168,6 +168,10 @@ describe("W6: bulk result keeps the names", () => {
       );
     }
     wrap(<Host />);
+    // B6 review minor: nothing is pre-selected, so Resolve waits for a choice.
+    expect(screen.getByRole("button", { name: /Resolve 1 item$/ })).toBeDisabled();
+    expect(screen.getAllByRole("radio").every((r) => !(r as HTMLInputElement).checked)).toBe(true);
+    await userEvent.click(screen.getAllByRole("radio")[0]);
     await userEvent.click(screen.getByRole("button", { name: /Resolve 1 item$/ }));
     await screen.findByText(/1 resolved/);
     await userEvent.click(screen.getByText("reload queue"));

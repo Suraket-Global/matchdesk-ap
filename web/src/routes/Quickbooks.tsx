@@ -65,10 +65,16 @@ export function QuickbooksPage() {
       {recorded && (
         <Banner tone="warn">
           <p>
-            <strong>Recorded-response mode.</strong> This server reads invented QuickBooks responses recorded for the demo, not
-            a real QuickBooks company. The live connection is not built: it needs the owner&apos;s Intuit developer account and
-            the sandbox check (task T-1.1.1). The step that remains is to run that check, then write the live reader from what
-            it records.
+            <strong>Demo data.</strong> This server reads invented QuickBooks data recorded for the demonstration, not a real
+            QuickBooks company. Connecting a real company is not available on this server yet.
+          </p>
+        </Banner>
+      )}
+      {!recorded && (
+        <Banner tone="warn">
+          <p>
+            <strong>Live QuickBooks.</strong> This server is set to read a real QuickBooks company, but reading from a real company is
+            not available yet. Connecting and reading are refused until it is; nothing is read or changed.
           </p>
         </Banner>
       )}

@@ -1,6 +1,16 @@
 import { useEffect, useId, useRef, type ReactNode } from "react";
 import { X } from "lucide-react";
 
+/** Focus goes back to the control that opened the dialog; if that control is gone (the row it was
+ * on was resolved), to the page title. Also when the dialog unmounts instead of closing, which is how
+ * most screens close it (B6 review minor: focus was lost after dialogs). */
+function restoreFocus(opener: Element | null) {
+  window.setTimeout(() => {
+    if (opener instanceof HTMLElement && document.contains(opener)) opener.focus();
+    else document.querySelector<HTMLElement>("main h1")?.focus();
+  }, 0);
+}
+
 function useModal(open: boolean) {
   const ref = useRef<HTMLDialogElement>(null);
   const opener = useRef<Element | null>(null);
@@ -15,9 +25,16 @@ function useModal(open: boolean) {
       safe?.focus();
     } else if (!open && d.open) {
       d.close();
-      if (opener.current instanceof HTMLElement && document.contains(opener.current)) opener.current.focus();
+      restoreFocus(opener.current);
+      opener.current = null;
     }
   }, [open]);
+  useEffect(
+    () => () => {
+      if (opener.current) restoreFocus(opener.current);
+    },
+    [],
+  );
   return ref;
 }
 

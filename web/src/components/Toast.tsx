@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { AlertCircle, CheckCircle2 } from "lucide-react";
 
 type Tone = "success" | "error";
@@ -19,26 +19,32 @@ export function toast(text: string, tone: Tone = "success"): void {
 export function ToastHost() {
   const [items, setItems] = useState<Item[]>([]);
   useEffect(() => {
-    const timers = new Set<number>();
-    push = (text, tone) => {
-      const id = ++seq;
-      setItems((s) => [...s.slice(-2), { id, text, tone }]);
-      const t = window.setTimeout(() => setItems((s) => s.filter((i) => i.id !== id)), 6000);
-      timers.add(t);
-    };
+    push = (text, tone) => setItems((s) => [...s.slice(-2), { id: ++seq, text, tone }]);
     return () => {
       push = null;
-      timers.forEach((t) => window.clearTimeout(t));
     };
   }, []);
+  const remove = useCallback((id: number) => setItems((s) => s.filter((i) => i.id !== id)), []);
   return (
     <div className="toasts" role="status" aria-live="polite">
       {items.map((i) => (
-        <div key={i.id} className={`toast ${i.tone === "error" ? "error" : ""}`}>
-          {i.tone === "error" ? <AlertCircle size={18} aria-hidden="true" /> : <CheckCircle2 size={18} aria-hidden="true" />}
-          {i.text}
-        </div>
+        <ToastItem key={i.id} item={i} onDone={remove} />
       ))}
+    </div>
+  );
+}
+
+/** Each toast owns its six-second timer, so a re-mounted host never leaves one on screen for good
+ * (B6 review minor: "Confirmed. Matching…" stayed). */
+function ToastItem({ item, onDone }: { item: Item; onDone: (id: number) => void }) {
+  useEffect(() => {
+    const t = window.setTimeout(() => onDone(item.id), 6000);
+    return () => window.clearTimeout(t);
+  }, [item.id, onDone]);
+  return (
+    <div className={`toast ${item.tone === "error" ? "error" : ""}`}>
+      {item.tone === "error" ? <AlertCircle size={18} aria-hidden="true" /> : <CheckCircle2 size={18} aria-hidden="true" />}
+      {item.text}
     </div>
   );
 }

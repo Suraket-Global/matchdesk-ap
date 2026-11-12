@@ -1,11 +1,12 @@
-const DATE = new Intl.DateTimeFormat("en-CA", { day: "numeric", month: "short", year: "numeric" });
-const DATETIME = new Intl.DateTimeFormat("en-CA", {
+// One display format everywhere: "3 Oct 2026", "3 Oct, 14:05" (B6 review minor).
+const DATE = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric" });
+const DATETIME = new Intl.DateTimeFormat("en-GB", {
   day: "numeric",
   month: "short",
   hour: "2-digit",
   minute: "2-digit",
 });
-const TIME = new Intl.DateTimeFormat("en-CA", { hour: "2-digit", minute: "2-digit" });
+const TIME = new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit" });
 
 /** "2026-10-03" -> "3 Oct 2026" without shifting the day by time zone. */
 export function day(iso: string | null | undefined): string {
@@ -55,7 +56,7 @@ export function monthRange(ym: string): { start: string; end: string } {
 
 export function monthName(ym: string): string {
   const [y, m] = ym.split("-").map((p) => Number(p));
-  return new Intl.DateTimeFormat("en-CA", { month: "long", year: "numeric" }).format(new Date(y, m - 1, 1));
+  return new Intl.DateTimeFormat("en-GB", { month: "long", year: "numeric" }).format(new Date(y, m - 1, 1));
 }
 
 /** A same-site path to go back to, or the fallback. Refuses absolute URLs, `//host`, backslashes and

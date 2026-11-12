@@ -47,7 +47,9 @@ function sentence(t: BatchTotals): string {
   const inProgress = t.queued + t.processing;
   const parts = [`${t.ready} ready`, `${t["needs review"]} need review`, `${t.failed} failed`];
   if (t["duplicate file"]) parts.push(`${t["duplicate file"]} duplicate`);
-  return `Reading ${plural(t.file_count, "file")}. ${parts.join(", ")}, ${inProgress} still in progress.${inProgress ? " You can leave this page; nothing will be lost." : ""}`;
+  // "Reading" only while files are in progress; afterwards the totals alone (B6 review minor).
+  if (!inProgress) return `${plural(t.file_count, "file")} read: ${parts.join(", ")}.`;
+  return `Reading ${plural(t.file_count, "file")}. ${parts.join(", ")}, ${inProgress} still in progress. You can leave this page; nothing will be lost.`;
 }
 
 /** Upload files into a batch, four at a time, each with its own idempotency key (S-06). */
@@ -185,7 +187,7 @@ export function IntakeListPage() {
         {batches.data && items.length === 0 && (
           <div className="panel">
             <Empty title="No invoices uploaded yet" icon={<Inbox size={22} />}>
-              <p>Drop the month&apos;s invoice PDFs above. The demo files are in play-files/invoices.</p>
+              <p>Drop the month&apos;s invoice PDFs above, or forward them by email to your intake address.</p>
             </Empty>
           </div>
         )}
@@ -315,7 +317,9 @@ export function BatchPage() {
             </tr>
           </thead>
           <tbody>
-            {(b.files ?? []).map((f) => (
+            {[...(b.files ?? [])]
+              .sort((x, y) => (x.original_name ?? "").localeCompare(y.original_name ?? "", undefined, { numeric: true }) || x.id.localeCompare(y.id))
+              .map((f) => (
               <tr key={f.id}>
                 <td data-label="File">
                   <span className="cell-main">{f.original_name ?? "file"}</span>
@@ -334,7 +338,13 @@ export function BatchPage() {
                     </div>
                   )}
                 </td>
-                <td data-label="Supplier">{f.invoices.map((i) => i.vendor_name).filter(Boolean).join(", ") || <span className="muted">Not known yet</span>}</td>
+                <td data-label="Supplier">
+                  {[...new Set(f.invoices.map((i) => i.vendor_name).filter(Boolean))].join(", ") || (
+                    <span className="muted">
+                      {f.duplicate_of_document_id ? "See the original file" : f.displayed_state === "queued" || f.displayed_state === "processing" ? "Not read yet" : "Not identified"}
+                    </span>
+                  )}
+                </td>
                 <td data-label="Document">
                   {f.invoices.map((i) => (
                     <div key={i.id}>

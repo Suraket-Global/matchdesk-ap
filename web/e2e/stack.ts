@@ -4,8 +4,12 @@ import path from "node:path";
 // B6 (outside QA finding 2): Playwright runs on its own stack: database matchdesk_e2e, API on 8102,
 // its own worker and file folder, the web dev server on 5174. The dev database is never written.
 export const ROOT = path.resolve(import.meta.dirname, "..", "..");
-export const E2E_WEB = "http://127.0.0.1:5174";
-export const E2E_API = "http://127.0.0.1:8102";
+// B7: two profiles, each with its own database, ports and Mailpit (backend/scripts/e2e_stack.sh).
+const SHOTS = process.env.MATCHDESK_STACK === "shots";
+export const E2E_WEB_PORT = SHOTS ? 5175 : 5174;
+export const E2E_WEB = `http://127.0.0.1:${E2E_WEB_PORT}`;
+export const E2E_API = SHOTS ? "http://127.0.0.1:8103" : "http://127.0.0.1:8102";
+export const E2E_MAILPIT = SHOTS ? "http://127.0.0.1:8027/api/v1" : "http://127.0.0.1:8026/api/v1";
 const STACK = path.join(ROOT, "backend/scripts/e2e_stack.sh");
 
 export function stack(...args: string[]): void {

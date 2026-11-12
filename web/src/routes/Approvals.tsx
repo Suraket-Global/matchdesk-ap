@@ -92,7 +92,7 @@ export function ApprovalsPage() {
                 {title}
               </h2>
               <div className="table-wrap">
-                <table>
+                <table className="stack-sm">
                   <thead>
                     <tr>
                       <th scope="col">Request</th>
@@ -106,7 +106,7 @@ export function ApprovalsPage() {
                   <tbody>
                     {list.map((a) => (
                       <tr key={a.id}>
-                        <td style={{ maxWidth: 520 }}>
+                        <td data-label="Request" style={{ maxWidth: 520 }}>
                           {sentence(a)}
                           {a.exception && (
                             <div>
@@ -132,12 +132,12 @@ export function ApprovalsPage() {
                             </div>
                           )}
                         </td>
-                        <td>
+                        <td data-label="Asked by">
                           {a.requested_by_name}
                           <div className="muted small">{when(a.requested_at)}</div>
                         </td>
-                        <td>{a.reason ?? <span className="muted">None given</span>}</td>
-                        <td>
+                        <td data-label="Reason">{a.reason ?? <span className="muted">None given</span>}</td>
+                        <td data-label="Actions">
                           <div className="actions">
                             <button className="btn" onClick={() => setOpen({ a, decision: "return" })}>
                               Return with note
@@ -196,7 +196,7 @@ export function ApprovalsPage() {
         {(recent.data?.items ?? []).length > 0 && (
           <section aria-labelledby="done-h">
             <h2 id="done-h" style={{ marginBottom: 8 }}>
-              Recently approved
+              Approved earlier (the last 10)
             </h2>
             <ul className="panel panel-body" style={{ margin: 0, paddingLeft: 32 }}>
               {recent.data!.items.slice(-10).map((a) => (
