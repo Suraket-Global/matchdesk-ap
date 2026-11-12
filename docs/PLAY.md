@@ -42,7 +42,7 @@ You see the **Onboarding checklist**: QuickBooks is connected and 7 purchase ord
 
 ## 2. Load the receiving file
 
-1. Choose **Receiving** in the top bar.
+1. Choose **Receiving** in the sidebar on the left (under Work).
 2. Under **Load a receiving file**: choose `play-files/receiving-warehouse-log.csv`, keep **Warehouse receiving log** and **A · Warehouse record**, type `Demo Receiver` under "Who keeps this record", then **Upload and preview**.
 3. **1. Match the columns**: MatchDesk has already matched PO, Line, Qty, UOM, Received and Receiver from the headers. The first rows are shown. Choose **Check rows**.
 4. **2. Validation result**: "7 rows valid, 1 rejected." Row 9 is rejected: "Unknown PO number" (4999). You can download the rejected rows.
@@ -51,7 +51,7 @@ You see the **Onboarding checklist**: QuickBooks is connected and 7 purchase ord
 
 ## 3. Upload the invoices
 
-1. Choose **Intake**.
+1. Choose **Intake** in the sidebar.
 2. Drag all 13 files from `play-files/invoices/` onto the box (or **Choose files** and select them all).
 3. You land on the batch. The six counts always add up to 13. Within a few seconds: **10 ready, 2 need review, 0 failed, 1 duplicate file**. Of the two identical FF-1002 files, the one uploaded second is the duplicate. Files are sent in name order, so `FF-1002 copy.pdf` goes first and `FF-1002.pdf` is marked **Duplicate file**: "Same as FF-1002 copy.pdf", linked to the original's match view.
 
@@ -64,11 +64,11 @@ You see the **Onboarding checklist**: QuickBooks is connected and 7 purchase ord
 
 ## 5. Work the exception queue
 
-1. Choose **Exceptions**. At the top: the receipt-coverage strip (live, before any report: "Receipt coverage 75% of invoiced PO lines" at this point, before the conversion is approved), then one counter per exception type (each is a filter), then the table, most valuable first. Filters live in the address bar, so Back and Refresh keep them. Where two exceptions sit on one line, the line's amount is counted once: the second shows CAD 0.00 with "counted under another exception".
+1. Choose **Exceptions** (the sidebar shows how many are open). At the top: four coverage figures (live, before any report: "Receipt coverage 75% of invoiced PO lines" at this point, before the conversion is approved), then one counter per exception type (each is a filter), then the table, most valuable first. Filters live in the address bar, so Back and Refresh keep them. Where two exceptions sit on one line, the line's amount is counted once: the second shows CAD 0.00 with "counted under another exception".
 2. Keyboard: **J** and **K** move between rows, **X** selects, **Enter** opens. Shortcuts can be turned off in the menu under your name.
-3. Open **FF-1003** (Invoiced above received). The match view shows three panes: the invoice and its PDF, purchase order 4471 line 1, and the receipts with file and row (`receiving-warehouse-log.csv row 4`). The amber box gives the arithmetic: "Received to date 60 EA. Invoiced to date 100 EA (net of credit notes). Excess 40 × 4.20 = 168.00."
-4. Back in the queue, choose the **No purchase order** counter and open **FF-1007**. In the bar at the bottom, **Resolve as: Waive**, note `PO 4999 does not exist; trivial amount`, then **Resolve and next**. Small waivers under the clerk's limit (CAD 100.00) take effect at once; larger ones go to the controller. The queue stays filtered: the **No purchase order** counter shows 0 and the table says 'No open exceptions of type "No purchase order".' with **Clear the filters**.
-5. Try a bulk action: select two rows of the same type with **X** or the checkboxes, then **Resolve 2 items as…**. The dialog states the count and total before you confirm and reports each item's result by document number. A receipt-absent exception can never be waived in bulk.
+3. Open **FF-1003** (Invoiced above received). The match view shows three panes: the invoice PDF on the left; in the middle the arithmetic ("Received to date 60 EA. Invoiced to date 100 EA (net of credit notes). Excess 40 × 4.20 = 168.00."), the line comparison with the difference in red (+40 against received), and the receipts with file and row (`receiving-warehouse-log.csv row 4`); on the right the value, the resolution form and purchase order 4471 line 1.
+4. Back in the queue, choose the **No purchase order** counter and open **FF-1007**. In the action panel on the right, **Resolve as: Waive**, note `PO 4999 does not exist; trivial amount`, then **Resolve and next**. Small waivers under the clerk's limit (CAD 100.00) take effect at once; larger ones go to the controller. The queue stays filtered: the **No purchase order** counter shows 0 and the table says 'No open exceptions of type "No purchase order".' with **Clear the filters**.
+5. Try a bulk action: select two rows of the same type with **X** or the checkboxes, then **Resolve 2 items as…** in the dark bar that appears above the table. The dialog states the count and total before you confirm and reports each item's result by document number. A receipt-absent exception can never be waived in bulk.
 6. **Aliases** shows the supplier codes mapped to our items. `CT-25` (Imaginary Packaging, 1 CS = 25 EA) is **Pending approval**: its invoices stay in exceptions until the controller approves the conversion.
 
 Sign out from the menu under **Demo Clerk** (top right).
@@ -91,16 +91,17 @@ Sign in with `controller.demo@example.invalid` as in step 1. Because approvals a
 
 ## 8. Look around
 
-- **Settings → Tolerances**: change a tolerance; before saving, MatchDesk says how many lines would be re-matched. A missing receiving record is always an exception, whatever the tolerance.
-- **Settings → Users and support access**: invite a viewer (the invitation arrives in Mailpit).
-- **Settings → Audit log**: every change with who, when, before and after; export as CSV.
-- **Settings → QuickBooks connection**: the recorded-response mode is labelled; "Read now" reads the invented data again.
+- **Tolerances** (sidebar, Setup): change a tolerance; before saving, MatchDesk says how many lines would be re-matched. A missing receiving record is always an exception, whatever the tolerance.
+- **Users** (sidebar, Setup): invite a viewer (the invitation arrives in Mailpit).
+- **Audit log** (sidebar, Setup): every change with who, when, before and after; export as CSV.
+- **QuickBooks** (sidebar, Setup; or the QuickBooks status in the top bar): the recorded-response mode is labelled; "Read now" reads the invented data again.
 - Sign in as the clerk and open `http://127.0.0.1:5173/approvals`: "Your role does not include this page."
-- Make the window narrow (phone width): checklist, approvals, reports and settings stay usable; work screens say "Open in a wider window to work on this."
+- Make the window narrow (phone width): the sidebar folds behind the menu button; checklist, approvals, reports and settings stay usable and wide tables become cards; work screens say "Open in a wider window to work on this."
+- Choose **Theme** in the menu under your name to switch between light and dark, and the **Period** in the top bar to change the month the screens start from.
 
 ## Not built yet (the screens say so)
 
-- **Live QuickBooks.** The demo reads recorded, invented QuickBooks responses. The live connection is not built: it needs the owner's Intuit developer account and the sandbox check T-1.1.1 (`execution-plan.md`). The step that remains: the owner opens the Intuit developer account and sandbox company, T-1.1.1 records the real responses, then the live reader is written from them (TODO list in `TRD.md` section 11). Until then `MATCHDESK_QBO_MODE=intuit` refuses to start a sync, and the QuickBooks screen (S-04) says so.
+- **Live QuickBooks.** The demo reads recorded, invented QuickBooks responses. The live connection is not built: it needs the owner's Intuit developer account and the sandbox check T-1.1.1 (`execution-plan.md`). The step that remains: the owner opens the Intuit developer account and sandbox company, T-1.1.1 records the real responses, then the live reader is written from them (TODO list in `TRD.md` section 11.1). Until then `MATCHDESK_QBO_MODE=intuit` refuses to start a sync, and the QuickBooks screen (S-04) says so.
 
 Weekly summary (S-14), operator console (S-18), support access grants, pilot terms record, the "we have no receiving records" choice, email intake, deleting an invoice line in review.
 

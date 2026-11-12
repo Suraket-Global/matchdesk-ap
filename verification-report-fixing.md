@@ -792,7 +792,7 @@ Found and fixed while redesigning: a screen-reader-only label inside a scrolling
 | `web/`: `npm test` (Vitest) | 45 passed (23 before) |
 | `web/`: `npx playwright test` (own stack) | 4 passed; `matchdesk_dev` unchanged |
 | `web/`: `SHOTS=after npx playwright test -c playwright.shots.config.ts` | 40 screenshots in `docs/screenshots/after/`; 38 before shots taken with the same harness on 2e99ddb |
-| `docs/PLAY.md` walked in the built-in browser (1440 x 900) as clerk and controller after `make demo-reset` | See 16.4 |
+| `docs/PLAY.md` walked in the built-in browser (1440 x 900) as clerk and controller after `make demo-reset` | Completed: sign-in through Mailpit; receiving import 7 valid, 1 rejected; 13 invoices, "10 ready, 2 need review, 0 failed, 1 duplicate"; FF-1006 corrected to 0.80 and matched (+10 against received shown red); SS-5120 supplier chosen, QuickBooks billed quantity greyed; queue coverage 75%; FF-1007 waived and the filtered empty state shown; CT-25 conversion approved; October draft approved (qualifying CAD 1,037.30 against the CAD 500.00 threshold: no refund); S-04 states the live-connection status; at 375 px the sidebar opens as a drawer with no sideways scroll. Files were not dragged by hand: the walk fed the play files to the same drop zone and file input from the dev server. Export downloads were not clicked in the built-in browser (no download without the owner's go-ahead); Playwright E2E-01 downloads both exports. PLAY.md updated for the sidebar, the action panel and the theme and period controls |
 
 ### 16.4 Gaps left
 

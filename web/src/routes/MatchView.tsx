@@ -313,7 +313,7 @@ export function MatchViewPage() {
             </p>
           </section>
 
-          {m && line?.line_kind === "item" && (
+          {m && line?.line_kind === "item" && m.qty_invoiced_cum_net && (
             <section className="panel" aria-labelledby="cmp-h">
               <div className="panel-head">
                 <h2 id="cmp-h">Line comparison</h2>
