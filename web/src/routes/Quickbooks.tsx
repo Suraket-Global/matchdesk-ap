@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { errorText, get, send } from "../api/client";
@@ -48,6 +48,10 @@ export function QuickbooksPage() {
     refetchInterval: (q) => (q.state.error || (q.state.data && ["succeeded", "failed"].includes(q.state.data.state)) ? false : 2000),
     retry: 2,
   });
+  const finished = status.data && ["succeeded", "failed"].includes(status.data.state) ? status.data.state : null;
+  useEffect(() => {
+    if (finished) qc.invalidateQueries({ queryKey: ["qbo", "connection"] }); // the server's last read
+  }, [finished]); // eslint-disable-line react-hooks/exhaustive-deps
   if (conn.isLoading) return <Loading />;
   if (conn.error) return <ErrorState error={conn.error} retry={() => conn.refetch()} />;
   const c = conn.data!;
@@ -84,14 +88,26 @@ export function QuickbooksPage() {
         <section className="panel" aria-labelledby="conn-h">
           <div className="panel-head">
             <h2 id="conn-h">Connection</h2>
-            <StatusChip status={connected ? "connected" : "disconnected"} />
+            <StatusChip status={connected ? "connected" : "disconnected"} word={connected && recorded ? "Demo data" : undefined} />
           </div>
           <div className="panel-body">
             <dl className="facts">
               <dt>Company</dt>
               <dd>{c.company_name ?? "None"}</dd>
+              <dt>Source</dt>
+              <dd>{recorded ? "Demo data: recorded, invented responses. Nothing is read from Intuit." : "Intuit (live)"}</dd>
               <dt>Last successful read</dt>
               <dd>{when(c.last_success_at) || "Not yet"}</dd>
+              <dt>Last read</dt>
+              <dd>
+                {c.last_sync
+                  ? c.last_sync.state === "failed"
+                    ? `Failed ${when(c.last_sync.finished_at)} (${c.last_sync.error_code ?? "no reason given"}). The last good copy stays in use.`
+                    : c.last_sync.state === "succeeded"
+                      ? `Succeeded ${when(c.last_sync.finished_at)}`
+                      : "Running now"
+                  : "None yet"}
+              </dd>
               <dt>Permission granted</dt>
               <dd>{c.scopes_granted ?? "None"}</dd>
               {c.delete_after && (
@@ -137,7 +153,7 @@ export function QuickbooksPage() {
                 </button>
               </div>
               <div role="status" aria-live="polite" style={{ marginTop: 12 }}>
-                {running && <p>Reading from QuickBooks… {status.data?.pages_read ? `${status.data.pages_read} pages so far.` : ""}</p>}
+                {running && <p>Reading {recorded ? "the demo data" : "from QuickBooks"}… {status.data?.pages_read ? `${status.data.pages_read} pages so far.` : ""}</p>}
                 {status.data?.state === "succeeded" && (
                   <p>
                     Read finished.{" "}

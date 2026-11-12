@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ChevronLeft, ChevronRight, Download, ZoomIn, ZoomOut } from "lucide-react";
+import { ChevronLeft, ChevronRight, Download, Maximize2, Minimize2, MoveHorizontal, ZoomIn, ZoomOut } from "lucide-react";
 import { getDocument, GlobalWorkerOptions, type PDFDocumentProxy } from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { documentBytes, download } from "../api/client";
@@ -8,12 +8,27 @@ import { documentBytes, download } from "../api/client";
 // (TRD 8.7): no eval, no XFA forms, no scripting; the bytes come only through the API.
 GlobalWorkerOptions.workerSrc = workerUrl;
 
-export default function PdfViewer({ documentId, label }: { documentId: string; label: string }) {
+export default function PdfViewer({ documentId, label, initialPage = 1 }: { documentId: string; label: string; initialPage?: number }) {
   const canvas = useRef<HTMLCanvasElement>(null);
-  const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null);
-  const [page, setPage] = useState(1);
-  const [zoom, setZoom] = useState<number | null>(null); // null: fit the pane width
   const wrap = useRef<HTMLDivElement>(null);
+  const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null);
+  const [page, setPage] = useState(initialPage);
+  // B8: an expanded view over the whole window, for reading a dense invoice; Escape returns.
+  const [expanded, setExpanded] = useState(false);
+  const [width, setWidth] = useState(0);
+  useEffect(() => {
+    if (!wrap.current || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver((e) => setWidth(Math.round(e[0].contentRect.width)));
+    ro.observe(wrap.current);
+    return () => ro.disconnect();
+  }, []);
+  useEffect(() => {
+    if (!expanded) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setExpanded(false);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [expanded]);
+  const [zoom, setZoom] = useState<number | null>(null); // null: fit the pane width
   const [shown, setShown] = useState(1);
   const [error, setError] = useState(false);
   const [attempt, setAttempt] = useState(0);
@@ -29,7 +44,7 @@ export default function PdfViewer({ documentId, label }: { documentId: string; l
         doc = d;
         if (!cancelled) {
           setPdf(d);
-          setPage(1);
+          setPage(Math.min(Math.max(1, initialPage), d.numPages));
         }
       })
       .catch(() => !cancelled && setError(true));
@@ -37,7 +52,7 @@ export default function PdfViewer({ documentId, label }: { documentId: string; l
       cancelled = true;
       void doc?.destroy();
     };
-  }, [documentId, attempt]);
+  }, [documentId, attempt]); // eslint-disable-line react-hooks/exhaustive-deps -- the first page is read once per document
   useEffect(() => {
     if (!pdf || !canvas.current) return;
     let task: { cancel: () => void } | null = null;
@@ -64,7 +79,7 @@ export default function PdfViewer({ documentId, label }: { documentId: string; l
       cancelled = true;
       task?.cancel();
     };
-  }, [pdf, page, zoom]);
+  }, [pdf, page, zoom, width, expanded]);
   if (error)
     return (
       <div className="banner warn" role="alert">
@@ -75,7 +90,7 @@ export default function PdfViewer({ documentId, label }: { documentId: string; l
       </div>
     );
   return (
-    <div className="pdf">
+    <div className={`pdf ${expanded ? "expanded" : ""}`} role={expanded ? "dialog" : undefined} aria-modal={expanded || undefined} aria-label={expanded ? `${label}, expanded` : undefined}>
       <div className="pdf-toolbar">
         <button className="btn small icon-btn sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)} aria-label="Previous page">
           <ChevronLeft size={16} aria-hidden="true" />
@@ -90,11 +105,16 @@ export default function PdfViewer({ documentId, label }: { documentId: string; l
         <button className="btn small icon-btn sm" onClick={() => setZoom(Math.max(0.5, shown - 0.25))} aria-label="Zoom out">
           <ZoomOut size={16} aria-hidden="true" />
         </button>
-        <button className="btn small ghost" onClick={() => setZoom(null)} aria-label="Fit to width" title="Fit to width">
-          {Math.round(shown * 100)}%
-        </button>
+        <span className="small num" aria-live="polite">{Math.round(shown * 100)}%</span>
         <button className="btn small icon-btn sm" onClick={() => setZoom(Math.min(3, shown + 0.25))} aria-label="Zoom in">
           <ZoomIn size={16} aria-hidden="true" />
+        </button>
+        <button className="btn small ghost" aria-pressed={zoom === null} onClick={() => setZoom(null)}>
+          <MoveHorizontal size={14} aria-hidden="true" />
+          Fit width
+        </button>
+        <button className="btn small icon-btn sm" onClick={() => setExpanded((x) => !x)} aria-label={expanded ? "Close the expanded view" : "Expand the document"}>
+          {expanded ? <Minimize2 size={16} aria-hidden="true" /> : <Maximize2 size={16} aria-hidden="true" />}
         </button>
         <button className="btn small icon-btn sm" onClick={() => void download(`/api/v1/documents/${documentId}/content`, "document.pdf")} aria-label="Download original">
           <Download size={16} aria-hidden="true" />

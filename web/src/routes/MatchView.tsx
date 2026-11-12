@@ -1,15 +1,17 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from "react";
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, errorText, get, send } from "../api/client";
-import type { ExceptionItem, ExceptionPage, InvoiceDetail, InvoiceLine } from "../api/types";
+import type { ExceptionItem, InvoiceDetail, InvoiceLine, Neighbour, Neighbours, Page, Vendor } from "../api/types";
+import { usePeriod } from "../app/period";
+import { apiQuery, describeScope, readScope } from "../lib/queue";
 import { useSession } from "../app/session";
-import { Banner, ErrorState, Loading, NarrowNote, StatusChip, toast, usePageTitle } from "../components/ui";
-import { cad, compareDecimal, money, price, qty, subtract, toCents } from "../lib/decimal";
+import { Banner, ErrorState, Loading, StatusChip, toast, usePageTitle } from "../components/ui";
+import { cad, money, price, qty, subtract, toCents } from "../lib/decimal";
 import { day, safePath } from "../lib/format";
 import { CONTROLLER_ONLY_CODES, RESOLUTION_CODES, RESOLUTION_HINTS, SUB_REASONS, typeWord, zeroCounted } from "../lib/words";
 import { chipFor } from "./Exceptions";
-import { ChevronLeft, ChevronRight, ClipboardList, Paperclip, PenLine } from "lucide-react";
+import { ArrowLeft, ChevronLeft, ChevronRight, ClipboardList, Paperclip, PenLine } from "lucide-react";
 
 const PdfViewer = lazy(() => import("../components/PdfViewer"));
 
@@ -37,14 +39,99 @@ function chipWord(e: ExceptionItem): string {
   return e.status === "waived" ? "waived" : `resolved: ${(RESOLUTION_CODES[e.resolution_code ?? ""] ?? "resolved").toLowerCase()}`;
 }
 
-/** Order of the queue the user came from, so "Resolve and next" follows it (App-flow S-09). */
-function queueOrder(items: ExceptionItem[], from: URLSearchParams): ExceptionItem[] {
-  const type = from.get("type");
-  const sort = from.get("sort") ?? "value";
-  const v = (e: ExceptionItem) => e.reported_amount ?? e.variance_amount ?? "0";
-  return items
-    .filter((e) => !type || e.type === type)
-    .sort((a, b) => (sort === "age" ? (a.raised_at ?? "").localeCompare(b.raised_at ?? "") : sort === "vendor" ? (a.vendor_name ?? "").localeCompare(b.vendor_name ?? "") : compareDecimal(v(b), v(a))) || a.id.localeCompare(b.id));
+/** What a resolution does to the report and the queue, in words, before it is submitted (B8). */
+function consequence(code: string, amount: string | null, needsApproval: boolean): string {
+  const a = amount && amount !== "0.00" ? cad(amount) : "The amount";
+  switch (code) {
+    case "confirmed_overbilling":
+      return `${a} stays in the back-test report as a finding the supplier owes. The exception closes for the queue.`;
+    case "confirmed_short_shipment":
+      return `${a} stays in the report as a finding: fewer goods came than were invoiced.`;
+    case "source_corrected":
+      return "The exception closes and nothing is reported. Correct the document or the receiving record too, or the next match raises it again.";
+    case "waived":
+      return needsApproval
+        ? `${a} is above your waiver limit, so this goes to your controller. The exception stays in the queue as pending approval until they decide.`
+        : `${a} is accepted and listed under waived items in the report. A waiver never lowers the refund calculation.`;
+    case "confirmed_not_received":
+      return `${a} is reported as not received.`;
+    case "resolved_by_credit":
+      return "Closes against a credit note. Nothing is reported for this line.";
+    case "confirmed_duplicate":
+      return `This invoice is reported as a duplicate; ${a.toLowerCase() === "the amount" ? "its amount" : a} is a finding.`;
+    case "not_a_duplicate":
+      return "Both invoices stay and are matched as separate documents.";
+    default:
+      return RESOLUTION_HINTS[code] ?? "";
+  }
+}
+
+/** The calculation of one exception as a ledger line, each figure from the stored match result, the
+ * received figure linked to the exact receiving row (B8; FF-1003 is the acceptance example). */
+function Ledger({ line, exc, here }: { line: InvoiceLine; exc: ExceptionItem; here: string }) {
+  const m = line.match!;
+  const po = line.purchase_order;
+  const unit = po?.uom ?? line.uom ?? "";
+  const amount = exc.reported_amount ?? exc.variance_amount;
+  const counting = (line.receipts ?? []).filter((r) => r.counts);
+  const rowLink = (r: (typeof counting)[number]) => `/receiving/imports/${r.receiving_import_id}?row=${r.source_row}&from=${encodeURIComponent(here)}`;
+  const received = m.qty_received_cum || "0";
+  const cells: { k: string; v: string; note?: ReactNode; tone?: string; op?: string }[] = [];
+  const u = (v: string | null | undefined) => `${qty(v) || "0"}${unit ? ` ${unit}` : ""}`;
+  if (exc.type === "qty_over_received" && m.qty_invoiced_cum_net) {
+    cells.push({ k: "Billed to date", v: u(m.qty_invoiced_cum_net) });
+    cells.push({
+      k: "Received",
+      v: u(received),
+      op: "−",
+      note:
+        counting.length === 1 ? (
+          <Link to={rowLink(counting[0])}>
+            {counting[0].source_file} row {counting[0].source_row}
+          </Link>
+        ) : counting.length > 1 ? (
+          <a href="#rec-h">{counting.length} receiving rows</a>
+        ) : null,
+    });
+    cells.push({ k: "Excess", v: u(subtract(m.qty_invoiced_cum_net, received)), op: "=", tone: "bad" });
+    cells.push({ k: "Unit price", v: cad(m.po_unit_price), op: "×" });
+  } else if (exc.type === "qty_over_ordered" && m.qty_invoiced_cum_net && m.qty_ordered) {
+    cells.push({ k: "Billed to date", v: u(m.qty_invoiced_cum_net) });
+    cells.push({ k: "Ordered", v: u(m.qty_ordered), op: "−", note: po ? `PO ${po.po_number} line ${po.line_no ?? ""}` : null });
+    cells.push({ k: "Above the order", v: u(subtract(m.qty_invoiced_cum_net, m.qty_ordered)), op: "=", tone: "bad" });
+  } else if (exc.type === "price_variance" && m.invoice_unit_price_po_uom && m.po_unit_price) {
+    cells.push({ k: "Invoice price", v: price(m.invoice_unit_price_po_uom) });
+    cells.push({ k: "PO price", v: price(m.po_unit_price), op: "−", note: po ? `PO ${po.po_number}` : null });
+    cells.push({ k: "Difference", v: price(subtract(m.invoice_unit_price_po_uom, m.po_unit_price)), op: "=", tone: "bad" });
+    cells.push({ k: "Quantity", v: u(line.qty), op: "×" });
+  } else if (exc.type === "receipt_absent") {
+    cells.push({ k: "Billed to date", v: u(m.qty_invoiced_cum_net ?? line.qty) });
+    cells.push({ k: "Received", v: u("0"), op: "−", note: "No counting receiving record", tone: "warn" });
+  } else return null;
+  return (
+    <section className="ledger" aria-label="Calculation in figures">
+      {cells.map((c) => (
+        <div key={c.k} className={`l-cell ${c.tone ?? ""}`}>
+          {c.op && (
+            <span className="op" aria-hidden="true">
+              {c.op}
+            </span>
+          )}
+          <span className="k">{c.k}</span>
+          <span className="v num">{c.v}</span>
+          {c.note && <span className="n">{c.note}</span>}
+        </div>
+      ))}
+      <div className={`l-cell total ${zeroCounted(exc) ? "" : "bad"}`}>
+        <span className="op" aria-hidden="true">
+          =
+        </span>
+        <span className="k">{zeroCounted(exc) ? "Adds nothing" : "Exposure"}</span>
+        <span className="v num">{zeroCounted(exc) ? "CAD 0.00" : cad(amount)}</span>
+        <span className="n">{typeWord(exc.type)}</span>
+      </div>
+    </section>
+  );
 }
 
 function crumbFor(path: string): string {
@@ -70,12 +157,6 @@ export function MatchViewPage() {
     queryFn: () => get<InvoiceDetail>(`/api/v1/invoices/${invoiceId}`),
     refetchInterval: (query) => (query.state.data?.stale ? 3000 : false),
   });
-  const queueQuery = new URLSearchParams({ limit: "200", status: fromParams.get("status") ?? "open" });
-  if (fromParams.get("vendor")) queueQuery.set("vendor_id", fromParams.get("vendor")!);
-  const queue = useQuery({
-    queryKey: ["exceptions", "queue-order", queueQuery.toString()],
-    queryFn: () => get<ExceptionPage>(`/api/v1/exceptions?${queueQuery}`),
-  });
   const tol = useQuery({ queryKey: ["tolerances"], queryFn: () => get<{ waiver_limit: string }>("/api/v1/tolerances") });
   const inv = q.data;
   usePageTitle("Match view", inv?.doc_number);
@@ -91,6 +172,21 @@ export function MatchViewPage() {
     lineExcs[0] ??
     docExcs.find((e) => e.status === "open");
 
+  // B8: previous and next come from the server, over the same scope and order as the queue opened.
+  const { month } = usePeriod();
+  const fromQueue = fromUrl.startsWith("/exceptions");
+  const scope = readScope(fromParams);
+  const scopeQuery = apiQuery(scope, month).toString();
+  const near = useQuery({
+    queryKey: ["exceptions", "neighbours", current?.id, scopeQuery],
+    queryFn: () => get<Neighbours>(`/api/v1/exceptions/${current!.id}/neighbours?${scopeQuery}`),
+    enabled: !!current && fromQueue,
+  });
+  const vendors = useQuery({ queryKey: ["vendors"], queryFn: () => get<Page<Vendor>>("/api/v1/vendors"), enabled: fromQueue && !!scope.vendor });
+  const scopeWords = fromQueue ? describeScope(scope, month, (vendors.data?.items ?? []).find((v) => v.id === scope.vendor)?.name) : "";
+  const location = useLocation();
+  const here = location.pathname + location.search;
+  const submitting = useRef(false);
   const heading = useRef<HTMLHeadingElement>(null);
   const [code, setCode] = useState("");
   const [note, setNote] = useState("");
@@ -107,24 +203,21 @@ export function MatchViewPage() {
     if (loadedId) heading.current?.focus();
   }, [loadedId, lineId]);
 
-  const order = useMemo(() => queueOrder(queue.data?.items ?? [], fromParams), [queue.data, fromUrl]); // eslint-disable-line react-hooks/exhaustive-deps
-  const idx = current ? order.findIndex((e) => e.id === current.id) : -1;
-  const go = (e: ExceptionItem | undefined) => {
+  const go = (e: Neighbour | null | undefined) => {
     if (!e) {
-      navigate(`${fromUrl.split("?")[0]}?${new URLSearchParams([...fromParams.entries()].filter(([k]) => k !== "sel"))}`);
+      navigate(fromUrl);
       window.setTimeout(() => toast("That was the last exception in this queue."), 50);
       return;
     }
     navigate(`/invoices/${e.invoice_id}?line=${e.invoice_line_id ?? ""}&exc=${e.id}&from=${encodeURIComponent(fromUrl)}`);
   };
-  const nextAfter = () => order.filter((e) => e.id !== current?.id)[Math.max(0, idx)] ?? undefined;
-
   async function resolve() {
-    if (!current || !code) return;
+    if (!current || !code || submitting.current) return; // one decision per click (B8)
     if (code === "waived" && !note.trim()) {
       setMsg({ tone: "error", text: "A waiver needs a note saying why." });
       return;
     }
+    submitting.current = true;
     setBusy(true);
     setMsg(null);
     try {
@@ -139,8 +232,13 @@ export function MatchViewPage() {
       qc.invalidateQueries({ queryKey: ["approvals"] });
       toast(r.result === "pending_approval" ? "Sent to your controller for approval." : `Resolved: ${RESOLUTION_CODES[code] ?? code}.`);
       setNote("");
-      const next = nextAfter();
-      go(next && next.id !== current.id ? next : undefined);
+      if (!fromQueue) {
+        await q.refetch();
+        return;
+      }
+      // The next exception after this one's place in the order, even though it has left the set.
+      const after = await get<Neighbours>(`/api/v1/exceptions/${current.id}/neighbours?${scopeQuery}`).catch(() => null);
+      go(after?.next);
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
         const cur = err.current as ExceptionItem | undefined;
@@ -151,6 +249,7 @@ export function MatchViewPage() {
         q.refetch();
       } else setMsg({ tone: "error", text: errorText(err) });
     } finally {
+      submitting.current = false;
       setBusy(false);
     }
   }
@@ -189,51 +288,48 @@ export function MatchViewPage() {
   const uom = po?.uom ?? line?.uom ?? "";
   return (
     <>
-      <div className="page-head">
+      <div className="page-head match-head">
         <div>
           <nav className="crumbs" aria-label="Breadcrumb">
             <ol>
               <li>
-                {/* One crumb: the list the person came from (B6 review minor). */}
-                <Link to={fromUrl}>{crumbFor(fromUrl)}</Link>
+                {/* The list the person came from, named with its scope so they can tell which queue (B8). */}
+                <Link to={fromUrl} className="back-link">
+                  <ArrowLeft size={14} aria-hidden="true" />
+                  {crumbFor(fromUrl)}
+                  {scopeWords && <span className="muted">: {scopeWords}</span>}
+                </Link>
               </li>
             </ol>
           </nav>
           <h1 ref={heading} tabIndex={-1}>
             {inv.doc_type === "credit_note" ? "Credit note" : "Invoice"} {inv.doc_number ?? "without number"}
-            {line ? ` · line ${line.line_no}` : ""}
+            {line ? <span className="h-sub"> line {line.line_no}</span> : null}
           </h1>
           <p className="lede">
-            {inv.vendor_name ?? "Supplier not identified"} · {day(inv.doc_date)} · total <span className="money">{cad(inv.total)}</span> ·{" "}
-            {inv.qbo_bill ? `QuickBooks bill ${inv.qbo_bill.doc_number}: ${inv.qbo_bill.paid_status}` : "no QuickBooks bill found"}
+            {inv.vendor_name ?? "Supplier not identified"}, dated {day(inv.doc_date)}, total <span className="money">{cad(inv.total)}</span>.{" "}
+            {inv.qbo_bill ? `QuickBooks bill ${inv.qbo_bill.doc_number}: ${inv.qbo_bill.paid_status}.` : "No QuickBooks bill found."}
           </p>
         </div>
         <div className="actions">
-          {can("correct_extraction") && (
-            <Link className="btn" to={`/invoices/${inv.id}/review`}>
-              <PenLine size={16} aria-hidden="true" />
-              Edit extraction
-            </Link>
+          {fromQueue && current && (
+            <span className="pager" role="group" aria-label="Move through the queue">
+              <button className="btn" disabled={!near.data?.previous} onClick={() => go(near.data?.previous)}>
+                <ChevronLeft size={16} aria-hidden="true" />
+                Previous exception
+              </button>
+              <span className="pos small muted" aria-live="polite">
+                {near.data?.position ? `${near.data.position} of ${near.data.total}` : near.data ? `${near.data.total} left` : ""}
+              </span>
+              <button className="btn" disabled={!near.data?.next} onClick={() => go(near.data?.next)}>
+                Next exception
+                <ChevronRight size={16} aria-hidden="true" />
+              </button>
+            </span>
           )}
-          {inv.purchase_order_id && (
-            <Link className="btn" to={`/purchase-orders/${inv.purchase_order_id}`}>
-              <ClipboardList size={16} aria-hidden="true" />
-              Open purchase order
-            </Link>
-          )}
-          <span className="pager">
-            <button className="btn" disabled={idx <= 0} onClick={() => go(order[idx - 1])}>
-              <ChevronLeft size={16} aria-hidden="true" />
-              Previous exception
-            </button>
-            <button className="btn" disabled={idx < 0 || idx >= order.length - 1} onClick={() => go(order[idx + 1])}>
-              Next exception
-              <ChevronRight size={16} aria-hidden="true" />
-            </button>
-          </span>
         </div>
       </div>
-      <NarrowNote />
+      {line && m && current && <Ledger line={line} exc={current} here={here} />}
       {inv.stale && (
         <Banner tone="draft" role="status">
           {inv.lines.every((l) => l.result_status === null)
@@ -280,7 +376,7 @@ export function MatchViewPage() {
           </div>
           <div className="panel-body">
             <Suspense fallback={<Loading label="Loading document" />}>
-              <PdfViewer documentId={inv.document_id} label={`Invoice ${inv.doc_number ?? ""}`} />
+              <PdfViewer documentId={inv.document_id} label={`Invoice ${inv.doc_number ?? ""}`} initialPage={line?.page_no ?? 1} />
             </Suspense>
           </div>
         </section>
@@ -403,7 +499,7 @@ export function MatchViewPage() {
                       <td>{day(r.received_date)}</td>
                       <td className="num">{qty(r.qty)}</td>
                       <td>
-                        <Link to={`/receiving/imports/${r.receiving_import_id}`}>
+                        <Link to={`/receiving/imports/${r.receiving_import_id}?row=${r.source_row}&from=${encodeURIComponent(here)}`}>
                           {r.source_file} row {r.source_row}
                         </Link>
                         <span className="cell-sub">
@@ -486,8 +582,14 @@ export function MatchViewPage() {
                       <label htmlFor="res-note">Note{code === "waived" ? " (required)" : " (optional)"}</label>
                       <textarea id="res-note" rows={3} value={note} onChange={(e) => setNote(e.target.value)} />
                     </div>
+                    {code && (
+                      <div className="consequence" role="note" aria-label="What this decision does">
+                        <strong>What happens</strong>
+                        <p>{consequence(code, amount, !!needsApproval)}</p>
+                      </div>
+                    )}
                     <button className="btn primary block" disabled={!code || busy} onClick={resolve} title={!code ? "Choose how to resolve first" : undefined}>
-                      {busy ? "Resolving…" : "Resolve and next"}
+                      {busy ? "Resolving…" : fromQueue ? (near.data && !near.data.next ? "Resolve and return to the queue" : "Resolve and next") : "Resolve"}
                     </button>
                     {!code && <span className="small muted">Choose how to resolve to continue.</span>}
                   </>
@@ -564,7 +666,16 @@ export function MatchViewPage() {
                 </p>
               )}
               <div className="actions" style={{ marginTop: 12 }}>
-                {po && <Link to={`/purchase-orders/${po.id}`}>Open purchase order</Link>}
+                {po && (
+                  <Link to={`/purchase-orders/${po.id}`}>
+                    <ClipboardList size={14} aria-hidden="true" /> Open purchase order
+                  </Link>
+                )}
+                {can("correct_extraction") && (
+                  <Link to={`/invoices/${inv.id}/review`}>
+                    <PenLine size={14} aria-hidden="true" /> Edit extraction
+                  </Link>
+                )}
                 {can("edit_alias") && line?.supplier_item_code && inv.vendor_id && (
                   <Link to={`/aliases?vendor=${inv.vendor_id}&code=${encodeURIComponent(line.supplier_item_code)}&description=${encodeURIComponent(line.description ?? "")}`}>
                     Add or fix alias

@@ -8,6 +8,7 @@ import { useSession } from "../app/session";
 import { Dialog, Empty, ErrorState, Loading, PageHead, toast, usePageTitle } from "../components/ui";
 import { cad, money } from "../lib/decimal";
 import { day, plural, when } from "../lib/format";
+import { queueLink } from "../lib/queue";
 
 function iso(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -80,7 +81,20 @@ export function WeeklyPage() {
       </div>
       {q.isLoading && <Loading />}
       {q.error && <ErrorState error={q.error} retry={() => q.refetch()} />}
-      {w && (
+      {w && w.state && w.state !== "measured" && w.state !== "unavailable" && (
+        <div className="panel">
+          <Empty title={w.state === "awaiting_invoices" ? "Nothing checked for this week" : w.state === "processing" ? "This week is still being read and matched" : "Waiting for receiving evidence"}>
+            <p>
+              {w.state === "awaiting_invoices"
+                ? "No invoice is dated in this week, so there are no figures to read: this is not a clean week. Choose another week, or upload its invoices on Intake."
+                : w.state === "processing"
+                  ? "Figures appear when every document dated in this week is read and matched."
+                  : "Invoices dated in this week are matched, but no receiving file has been imported, so no line can pass. Import the warehouse receiving file on Receiving."}
+            </p>
+          </Empty>
+        </div>
+      )}
+      {w && (!w.state || w.state === "measured" || w.state === "unavailable") && (
         <>
           <div className="cards">
             <div>
@@ -134,7 +148,13 @@ export function WeeklyPage() {
                       <td className="num" data-label="Passed">{s.pass_rate_pct ? `${s.pass_rate_pct.replace(/\.0$/, "")}%` : "–"}</td>
                       <td className="num" data-label="Flagged (CAD)">{money(s.flagged_amount)}</td>
                       <td className="num" data-label="Open exceptions">
-                        {s.open_count > 0 && s.vendor_id ? <Link to={`/exceptions?vendor=${s.vendor_id}`}>{s.open_count}</Link> : s.open_count}
+                        {s.open_count > 0 ? (
+                          <Link to={queueLink({ vendor: s.vendor_id ?? "none", from: w.week_start, to: w.week_end, src: "weekly" })} aria-label={`${s.open_count} open exceptions for ${s.vendor_name ?? "supplier not identified"}, ${day(w.week_start)} to ${day(w.week_end)}`}>
+                            {s.open_count}
+                          </Link>
+                        ) : (
+                          s.open_count
+                        )}
                       </td>
                       <td className="num" data-label="Open value (CAD)">{money(s.open_value)}</td>
                     </tr>
@@ -147,7 +167,9 @@ export function WeeklyPage() {
                     <td className="num">{w.total.lines}</td>
                     <td className="num">{w.total.pass_rate_pct ? `${w.total.pass_rate_pct.replace(/\.0$/, "")}%` : "–"}</td>
                     <td className="num">{money(w.total.flagged_amount)}</td>
-                    <td className="num">{w.total.open_count}</td>
+                    <td className="num">
+                      {w.total.open_count > 0 ? <Link to={queueLink({ from: w.week_start, to: w.week_end, src: "weekly" })}>{w.total.open_count}</Link> : w.total.open_count}
+                    </td>
                     <td className="num">{money(w.total.open_value)}</td>
                   </tr>
                 </tfoot>

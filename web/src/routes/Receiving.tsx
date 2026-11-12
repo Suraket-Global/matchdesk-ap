@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, errorText, get, send, upload } from "../api/client";
 import type { Page, ReceivingImport } from "../api/types";
 import { useSession } from "../app/session";
 import { Banner, Dialog, Empty, ErrorState, Field, Loading, NarrowNote, PageHead, StatusChip, toast, usePageTitle } from "../components/ui";
 import { EVIDENCE_CLASSES } from "../lib/words";
-import { day, plural, when } from "../lib/format";
+import { day, plural, safePath, when } from "../lib/format";
 
 const REJECT_WORDS: Record<string, string> = {
   po_not_found: "Unknown PO number",
@@ -327,43 +327,7 @@ export function ReceivingImportPage() {
   if (!imp) return null;
   const draft = imp.state === "draft";
   const v = validation ?? (imp.column_map ? imp : null);
-  return (
-    <>
-      <PageHead
-        title={imp.file_name || "Receiving import"}
-        crumbs={<Link to="/receiving">Receiving imports</Link>}
-        lede={`${imp.evidence_class} · ${EVIDENCE_CLASSES[imp.evidence_class]?.name}. ${imp.kept_by_name ? `Kept by ${imp.kept_by_name}.` : ""}`}
-        actions={
-          <>
-            <StatusChip status={status(imp)} word={draft ? "Draft, not imported" : undefined} />
-            {imp.state === "succeeded" && can("upload") && (
-              <button className="btn danger" onClick={() => setVoidOpen(true)}>
-                Void import
-              </button>
-            )}
-          </>
-        }
-      />
-      <NarrowNote />
-      {imp.evidence_class === "C" && (
-        <Banner tone="warn">Supplier documents only. Accepted and shown as context, labelled "Supplier's packing slip. Not counted as a receipt."</Banner>
-      )}
-      {result && (
-        <Banner tone="ok" role="status">
-          <p>
-            Imported {plural(result.rows_valid ?? 0, "row")}.{" "}
-            {result.late_lines
-              ? `${plural(result.late_lines, "row")} for lines that already had an open exception are waiting for controller approval and do not count until approved. `
-              : ""}
-            {result.match_run_id ? "The affected purchase-order lines are being re-matched." : "No line needed a re-match."}{" "}
-            <Link to="/exceptions">Go to exceptions</Link>
-          </p>
-        </Banner>
-      )}
-      {imp.state === "voided" && <Banner tone="warn">Voided: {imp.void_reason}. Its receipt lines no longer count.</Banner>}
-
-      {draft && can("upload") && (
-        <div className="stack wide-only">
+  const mappingPanel = (
           <section className="panel" aria-labelledby="map-h">
             <div className="panel-head">
               <h2 id="map-h">1. Match the columns</h2>
@@ -430,7 +394,45 @@ export function ReceivingImportPage() {
               </div>
             </div>
           </section>
+  );
+  return (
+    <>
+      <PageHead
+        title={imp.file_name || "Receiving import"}
+        crumbs={<Link to="/receiving">Receiving imports</Link>}
+        lede={`${imp.evidence_class} · ${EVIDENCE_CLASSES[imp.evidence_class]?.name}. ${imp.kept_by_name ? `Kept by ${imp.kept_by_name}.` : ""}`}
+        actions={
+          <>
+            <StatusChip status={status(imp)} word={draft ? "Draft, not imported" : undefined} />
+            {imp.state === "succeeded" && can("upload") && (
+              <button className="btn danger" onClick={() => setVoidOpen(true)}>
+                Void import
+              </button>
+            )}
+          </>
+        }
+      />
+      <NarrowNote />
+      {imp.evidence_class === "C" && (
+        <Banner tone="warn">Supplier documents only. Accepted and shown as context, labelled "Supplier's packing slip. Not counted as a receipt."</Banner>
+      )}
+      {result && (
+        <Banner tone="ok" role="status">
+          <p>
+            Imported {plural(result.rows_valid ?? 0, "row")}.{" "}
+            {result.late_lines
+              ? `${plural(result.late_lines, "row")} for lines that already had an open exception are waiting for controller approval and do not count until approved. `
+              : ""}
+            {result.match_run_id ? "The affected purchase-order lines are being re-matched." : "No line needed a re-match."}{" "}
+            <Link to="/exceptions">Go to exceptions</Link>
+          </p>
+        </Banner>
+      )}
+      {imp.state === "voided" && <Banner tone="warn">Voided: {imp.void_reason}. Its receipt lines no longer count.</Banner>}
 
+      {draft && can("upload") && (
+        <div className="stack wide-only">
+          {!v && mappingPanel}
           <section className="panel" aria-labelledby="val-h">
             <div className="panel-head">
               <h2 id="val-h">2. Validation result</h2>
@@ -444,10 +446,20 @@ export function ReceivingImportPage() {
                 )}
                 {!mapErr && !v && <p className="muted">Match the columns and choose Check rows.</p>}
                 {!mapErr && v && (
-                  <p>
-                    <strong>
+                  <div className="val-lead" aria-label="Validation result">
+                    <span className="good">
+                      <strong className="num">{(v.rows_valid ?? 0).toLocaleString("en-CA")}</strong> valid {(v.rows_valid ?? 0) === 1 ? "row" : "rows"}
+                    </span>
+                    <span className={(v.rows_rejected ?? 0) > 0 ? "bad" : ""}>
+                      <strong className="num">{(v.rows_rejected ?? 0).toLocaleString("en-CA")}</strong> rejected
+                    </span>
+                  </div>
+                )}
+                {!mapErr && v && (
+                  <p className="muted small">
+                    <span className="sr-only">
                       {plural(v.rows_valid ?? 0, "row")} valid, {(v.rows_rejected ?? 0).toLocaleString("en-CA")} rejected.
-                    </strong>{" "}
+                    </span>{" "}
                     {(v.rows_rejected ?? 0) > 0 &&
                       `Download the ${plural(v.rows_rejected ?? 0, "rejected row")} with reasons, fix them in your spreadsheet and upload them again, or import the valid rows now. A date outside the test month is not an error.`}
                   </p>
@@ -464,6 +476,7 @@ export function ReceivingImportPage() {
                           </th>
                           <th scope="col">Reason</th>
                           <th scope="col">Value</th>
+                          <th scope="col">Original row</th>
                           <th scope="col">Fix</th>
                         </tr>
                       </thead>
@@ -473,6 +486,7 @@ export function ReceivingImportPage() {
                             <td className="num">{r.row}</td>
                             <td>{REJECT_WORDS[r.reason] ?? r.reason}</td>
                             <td>{String(r.value ?? "")}</td>
+                            <td className="orig-row">{originalRow(imp, r.row)}</td>
                             <td>{r.reason === "po_line_not_found" ? <Link to="/aliases">Add an alias</Link> : <span className="muted">Correct the file</span>}</td>
                           </tr>
                         ))}
@@ -516,6 +530,12 @@ export function ReceivingImportPage() {
             </button>
             {(commit.error || declare.error) && <span className="error-text">{errorText(commit.error ?? declare.error)}</span>}
           </div>
+          {v && (
+            <details className="panel fold">
+              <summary>Column matching (checked). Change it and check the rows again</summary>
+              {mappingPanel}
+            </details>
+          )}
         </div>
       )}
 
@@ -544,8 +564,21 @@ export function ReceivingImportPage() {
   );
 }
 
+/** The cells of a file row as the file has them, when the row is in the stored preview (B8). */
+function originalRow(imp: ReceivingImport, row: number): string {
+  const cells = imp.preview?.sample_rows?.[row - 2];
+  return cells ? cells.join(", ") : "Not in the first 20 rows; see the downloaded file";
+}
+
 function ReceiptsTable({ imp }: { imp: ReceivingImport }) {
   const { can } = useSession();
+  // B8: ?row=N from a match view opens on that receipt row, marked, with a way back.
+  const [params] = useSearchParams();
+  const want = Number(params.get("row") ?? 0);
+  const back = safePath(params.get("from"), "");
+  useEffect(() => {
+    if (want) window.setTimeout(() => document.getElementById(`receipt-row-${want}`)?.focus(), 50);
+  }, [want, imp.id]);
   const qc = useQueryClient();
   const [signer, setSigner] = useState<Record<string, string>>({});
   const confirm = useMutation({
@@ -560,6 +593,11 @@ function ReceiptsTable({ imp }: { imp: ReceivingImport }) {
       <h2 id="rec-h" style={{ marginBottom: 8 }}>
         Receipt lines
       </h2>
+      {want > 0 && (
+        <p className="row-target-note">
+          Row {want} of {imp.file_name} is marked below.{back && <> <Link to={back}>Back to the invoice</Link></>}
+        </p>
+      )}
       <div className="table-wrap">
         <table className="stack-sm">
           <thead>
@@ -583,7 +621,13 @@ function ReceiptsTable({ imp }: { imp: ReceivingImport }) {
           <tbody>
             {receipts.flatMap((r) =>
               r.lines.map((ln) => (
-                <tr key={ln.id} className={imp.state === "voided" || imp.evidence_class === "C" ? "greyed" : ""}>
+                <tr
+                  key={ln.id}
+                  id={`receipt-row-${ln.source_row}`}
+                  tabIndex={ln.source_row === want ? -1 : undefined}
+                  aria-current={ln.source_row === want ? "true" : undefined}
+                  className={`${imp.state === "voided" || imp.evidence_class === "C" ? "greyed" : ""} ${ln.source_row === want ? "row-target" : ""}`}
+                >
                   <td data-label="PO">
                     <Link to={`/purchase-orders/${r.purchase_order_id}`}>{r.po_number ?? "PO"}</Link>
                   </td>

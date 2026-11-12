@@ -3,6 +3,7 @@ import { Navigate, NavLink, Route, Routes, useLocation, useNavigate } from "reac
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { SessionProvider, useSession } from "./session";
 import { NAV_GROUPS } from "./routes";
+import { lastQueueUrl } from "../lib/queue";
 import { PeriodProvider, usePeriod } from "./period";
 import { get, lastServerContact, send } from "../api/client";
 import type { Approval, ExceptionPage, Page, QboConnection } from "../api/types";
@@ -186,7 +187,21 @@ function Shell({ children }: { children: ReactNode }) {
     setNavOpen(false);
   }, [location.pathname]);
   const qboOk = qbo.data?.status === "connected";
-  const openCount = Object.values(open.data?.type_counters ?? {}).reduce((a, b) => a + b, 0);
+  // B8: the label follows what the server confirms. Recorded responses are "Demo data", never a live
+  // connection; a failed last read says so; "connected" alone is shown only for a live company.
+  const qboDemo = qbo.data?.source === "demo_data";
+  const qboFailed = qbo.data?.last_sync?.state === "failed";
+  const qboWord = !qbo.data
+    ? "QuickBooks"
+    : !qboOk
+      ? "QuickBooks not connected"
+      : qboDemo
+        ? "QuickBooks: demo data"
+        : qboFailed
+          ? "QuickBooks: last read failed"
+          : "QuickBooks connected";
+  const qboTone = !qbo.data ? "" : !qboOk || qboFailed ? "bad" : qboDemo ? "demo" : "ok";
+  const openCount = open.data?.total_count ?? Object.values(open.data?.type_counters ?? {}).reduce((a, b) => a + b, 0);
   const counts: Record<string, number> = { "/exceptions": openCount, "/approvals": pending.data?.items.length ?? 0 };
   const countWords: Record<string, string> = { "/exceptions": "open", "/approvals": "waiting" };
   const wide = /^\/invoices\/[^/]+(\/review)?$/.test(location.pathname);
@@ -232,7 +247,7 @@ function Shell({ children }: { children: ReactNode }) {
                       const descId = `nav-count-${n.icon}`;
                       return (
                         <li key={n.to}>
-                          <NavLink to={n.to} end={n.to === "/reports"} className="nav-link" aria-describedby={c > 0 ? descId : undefined} title={collapsed ? n.label : undefined}>
+                          <NavLink to={n.to === "/exceptions" ? lastQueueUrl() : n.to} end={n.to === "/reports"} className="nav-link" aria-describedby={c > 0 ? descId : undefined} title={collapsed ? n.label : undefined}>
                             <I size={17} aria-hidden="true" />
                             <span className="label">{n.label}</span>
                             {c > 0 && (
@@ -275,9 +290,9 @@ function Shell({ children }: { children: ReactNode }) {
           <div className="spacer" />
           {me?.active_tenant_id && <PeriodPicker />}
           {me?.active_tenant_id && (
-            <NavLink to="/settings/quickbooks" className="qbo-status" aria-label={qboOk ? "QuickBooks connected" : qbo.data ? "QuickBooks not connected" : "QuickBooks"}>
-              <span className={`dot ${qboOk ? "ok" : qbo.data ? "bad" : ""}`} aria-hidden="true" />
-              <span className="label">{qboOk ? "QuickBooks connected" : qbo.data ? "QuickBooks not connected" : "QuickBooks"}</span>
+            <NavLink to="/settings/quickbooks" className="qbo-status" aria-label={qboWord}>
+              <span className={`dot ${qboTone}`} aria-hidden="true" />
+              <span className="label">{qboWord}</span>
             </NavLink>
           )}
           <UserMenu />

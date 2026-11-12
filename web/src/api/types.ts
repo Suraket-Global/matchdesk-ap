@@ -26,6 +26,9 @@ export interface QboConnection {
   delete_after: string | null;
   version: number;
   mode?: string;
+  /** B8: "demo_data" in recorded-response mode; the header and S-04 say so. */
+  source?: "demo_data" | "intuit";
+  last_sync?: { state: string; finished_at: string | null; error_code: string | null; started_at: string | null } | null;
 }
 
 export interface SyncRun {
@@ -71,7 +74,28 @@ export interface ExceptionItem {
 export interface ExceptionPage extends Page<ExceptionItem> {
   counters: Record<string, number>;
   type_counters: Record<string, number>;
+  /** B8: count and value of the whole filtered set, not of the rows loaded so far. */
+  total_count: number;
+  total_value: string;
 }
+
+export interface Neighbour {
+  id: string;
+  invoice_id: string;
+  invoice_line_id: string | null;
+  doc_number: string | null;
+  type: string;
+}
+
+export interface Neighbours {
+  previous: Neighbour | null;
+  next: Neighbour | null;
+  position: number | null;
+  total: number;
+}
+
+/** B8: why a period's figures can or cannot be read (empty versus zero). */
+export type MeasurementState = "awaiting_invoices" | "awaiting_receiving" | "processing" | "measured" | "unavailable";
 
 export interface InvoiceSummary {
   id: string;
@@ -482,6 +506,9 @@ export interface Coverage {
   period_start: string;
   period_end: string;
   item_lines: number;
+  documents?: number;
+  documents_in_review?: number;
+  state?: MeasurementState;
   receipt_coverage_pct: string | null;
   coverage_class_a_pct: string | null;
   coverage_class_b_pct: string | null;
@@ -528,6 +555,7 @@ export interface WeeklyRow {
 export interface Weekly {
   week_start: string;
   week_end: string;
+  state?: MeasurementState;
   suppliers: WeeklyRow[];
   total: Omit<WeeklyRow, "vendor_id" | "vendor_name">;
   sent: { week_start: string; trigger: string; recipients: number; sent_at: string }[];

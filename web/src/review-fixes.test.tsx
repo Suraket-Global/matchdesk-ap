@@ -227,7 +227,7 @@ describe("W3: coverage strip without a report", () => {
       return { body: { items: [], type_counters: {} } };
     };
     wrap(<ExceptionsPage />);
-    expect(await screen.findByText("83.33%")).toBeInTheDocument();
+    expect((await screen.findAllByText("83.33%")).length).toBeGreaterThan(0); // B8: summary line and the opened detail
     expect(screen.getByText(/warehouse log 75%, signed delivery documents 8.33%/)).toBeInTheDocument();
   });
 });

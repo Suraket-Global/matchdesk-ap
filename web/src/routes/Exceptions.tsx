@@ -1,27 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { errorText, get, send } from "../api/client";
-import type { Batch, Coverage, ExceptionItem, ExceptionPage, Page, Vendor } from "../api/types";
+import type { Coverage, ExceptionItem, ExceptionPage, Page, Vendor } from "../api/types";
 import { useSession } from "../app/session";
 import { usePeriod } from "../app/period";
 import { useKeys } from "../app/shortcuts";
-import { CheckCircle2, FileBarChart, Inbox, X } from "lucide-react";
-import { Dialog, Empty, ErrorState, NarrowNote, PageHead, StatusChip, usePageTitle } from "../components/ui";
+import { CheckCircle2, ChevronRight, FileBarChart, Inbox, Info, SlidersHorizontal, Upload, X } from "lucide-react";
+import { Dialog, Empty, ErrorState, PageHead, StatusChip, usePageTitle } from "../components/ui";
 import { TableSkeleton } from "../components/States";
-import { cad, cadCents, compareDecimal, formatCents, money, qty, sumCents, toCents } from "../lib/decimal";
-import { ageDays, ageText, monthName, monthRange, plural } from "../lib/format";
+import { cad, cadCents, formatCents, money, qty, sumCents, toCents } from "../lib/decimal";
+import { ageText, monthName, plural } from "../lib/format";
+import { apiQuery, dateRangeWords, DEFAULT_STATUS, readScope, rememberQueue, scopeDates, STATUS_WORDS } from "../lib/queue";
 import { EXCEPTION_STATUS, RESOLUTION_CODES, RESOLUTION_HINTS, SUB_REASONS, typeWord, zeroCounted } from "../lib/words";
-
-const STATUS_OPTIONS: [string, string][] = [
-  ["open,pending_approval", "Open and pending approval"],
-  ["open", "Open"],
-  ["pending_approval", "Pending approval"],
-  ["resolved", "Resolved"],
-  ["waived", "Waived"],
-  ["auto_closed", "Closed by a re-match"],
-  ["open,pending_approval,resolved,waived,auto_closed", "All"],
-];
 
 export function chipFor(e: ExceptionItem) {
   if (e.status === "pending_approval") return <StatusChip status="pending_approval" />;
@@ -32,77 +23,74 @@ export function chipFor(e: ExceptionItem) {
   return <StatusChip status="exception" word={EXCEPTION_STATUS[e.status] ?? "Exception"} />;
 }
 
+/** A status word only where it adds a decision fact: an open row is what the queue is (B8). */
+function statusNote(e: ExceptionItem) {
+  return e.status === "open" ? null : chipFor(e);
+}
+
 function value(e: ExceptionItem): string | null {
   return e.reported_amount ?? e.variance_amount;
 }
 
-/** S-08: what needs a person, most valuable first. Filters, sort and selection live in the URL. */
+const PAGE = 100;
+
+/** Why a case needs a person, in one short line. */
+function reason(e: ExceptionItem): string {
+  const sub = e.sub_reason ? SUB_REASONS[e.sub_reason]?.split(":")[0] : "";
+  const diff = e.variance_qty && e.variance_qty !== "0" ? ` by ${qty(e.variance_qty)}` : "";
+  return `${typeWord(e.type)}${diff}${sub ? `. ${sub}` : ""}`;
+}
+
+/** S-08: what needs a person in one scope, most valuable first. The scope lives in the address bar
+ * and the server applies it to the whole set before the page is cut (B8). */
 export function ExceptionsPage() {
   usePageTitle("Exception queue");
   const { can } = useSession();
   const [params, setParams] = useSearchParams();
   const navigate = useNavigate();
-  const status = params.get("status") ?? "open,pending_approval";
-  const type = params.get("type") ?? "";
-  const vendor = params.get("vendor") ?? "";
-  const min = params.get("min") ?? "";
-  const max = params.get("max") ?? "";
-  const sort = params.get("sort") ?? "value";
-  const sel = params.get("sel");
-  const setParam = (k: string, v: string) => {
-    const p = new URLSearchParams(params);
-    if (v) p.set(k, v);
-    else p.delete(k);
-    p.delete("sel");
-    setParams(p);
-  };
+  const location = useLocation();
   const { month } = usePeriod();
-  // The queue shows the selected test month: documents dated in it (B6 review minor).
-  const query = new URLSearchParams({ limit: "200", status, period_start: monthRange(month).start, period_end: monthRange(month).end });
-  if (vendor) query.set("vendor_id", vendor);
+  const scope = readScope(params);
+  const sel = params.get("sel");
+  useEffect(() => rememberQueue(location.pathname + location.search), [location.pathname, location.search]);
+  const dates = scopeDates(scope, month);
+  const query = apiQuery(scope, month);
+  query.set("limit", String(PAGE));
   const list = useInfiniteQuery({
-    queryKey: ["exceptions", "queue", status, vendor, month],
-    queryFn: ({ pageParam }) => get<ExceptionPage>(`/api/v1/exceptions?${query}${pageParam ? `&cursor=${pageParam}` : ""}`),
+    queryKey: ["exceptions", "queue", query.toString()],
+    queryFn: ({ pageParam }) => get<ExceptionPage>(`/api/v1/exceptions?${query}${pageParam ? `&cursor=${encodeURIComponent(pageParam)}` : ""}`),
     initialPageParam: "",
     getNextPageParam: (last) => last.next_cursor ?? undefined,
     refetchInterval: 15_000,
   });
   const vendors = useQuery({ queryKey: ["vendors"], queryFn: () => get<Page<Vendor>>("/api/v1/vendors") });
-  // Live coverage for the test month, from the current results; no report draft needed (review W3).
-  const coverage = useQuery({
-    queryKey: ["coverage", month],
-    queryFn: () => get<Coverage>(`/api/v1/coverage?period_start=${monthRange(month).start}&period_end=${monthRange(month).end}`),
-    refetchInterval: 15_000,
-  });
-  const absentAll = useQuery({
-    queryKey: ["exceptions", "absent", month],
-    queryFn: () =>
-      get<ExceptionPage>(
-        `/api/v1/exceptions?limit=200&type=receipt_absent&status=open,pending_approval,resolved&period_start=${monthRange(month).start}&period_end=${monthRange(month).end}`,
-      ),
-  });
-  const batches = useQuery({ queryKey: ["batches"], queryFn: () => get<Page<Batch>>("/api/v1/intake/batches?limit=200") });
+  const period = `period_start=${dates.start}&period_end=${dates.end}`;
+  // Live coverage for the same dates, from the current results; secondary to the work list.
+  const coverage = useQuery({ queryKey: ["coverage", dates.start, dates.end], queryFn: () => get<Coverage>(`/api/v1/coverage?${period}`), refetchInterval: 15_000 });
+  const absent = (sub: string) => `/api/v1/exceptions?limit=1&type=receipt_absent&status=open,pending_approval,resolved&sub_reason=${sub}&${period}`;
+  const notReceived = useQuery({ queryKey: ["exceptions", "absent", "nr", period], queryFn: () => get<ExceptionPage>(absent("not_received")) });
+  const unverified = useQuery({ queryKey: ["exceptions", "absent", "uv", period], queryFn: () => get<ExceptionPage>(absent("no_evidence,supplier_slip_only")) });
 
-  const all = useMemo(() => (list.data?.pages ?? []).flatMap((p) => p.items), [list.data]);
-  const counters = list.data?.pages[0]?.type_counters ?? {};
-  const rows = useMemo(() => {
-    let r = all.filter((e) => !type || e.type === type);
-    if (min) r = r.filter((e) => compareDecimal(value(e) ?? "0", min) >= 0);
-    if (max) r = r.filter((e) => compareDecimal(value(e) ?? "0", max) <= 0);
-    const by = (a: ExceptionItem, b: ExceptionItem) =>
-      sort === "age"
-        ? (ageDays(b.raised_at) ?? 0) - (ageDays(a.raised_at) ?? 0)
-        : sort === "vendor"
-          ? (a.vendor_name ?? "").localeCompare(b.vendor_name ?? "")
-          : compareDecimal(value(b) ?? "0", value(a) ?? "0");
-    return [...r].sort((a, b) => by(a, b) || a.id.localeCompare(b.id));
-  }, [all, type, min, max, sort]);
+  const rows = useMemo(() => (list.data?.pages ?? []).flatMap((p) => p.items), [list.data]);
+  const first = list.data?.pages[0];
+  const counters = first?.type_counters ?? {};
+  const vendorName = (vendors.data?.items ?? []).find((v) => v.id === scope.vendor)?.name;
+  const set = (patch: Record<string, string>) => {
+    const p = new URLSearchParams(params);
+    for (const [k, v] of Object.entries(patch)) {
+      if (v) p.set(k, v);
+      else p.delete(k);
+    }
+    p.delete("sel");
+    setParams(p);
+  };
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [focus, setFocus] = useState(-1);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const rowRefs = useRef<(HTMLTableRowElement | null)[]>([]);
   useEffect(() => {
-    // Returning from the match view: put focus and the selected row back.
+    // Returning from the match view: the same row is selected and has the keyboard focus again.
     if (!sel || !rows.length) return;
     const i = rows.findIndex((r) => r.id === sel);
     if (i >= 0) {
@@ -149,28 +137,26 @@ export function ExceptionsPage() {
   const chosen = rows.filter((r) => selected.has(r.id));
   const chosenTypes = new Set(chosen.map((c) => c.type));
 
-  // Coverage strip (design.md 3): live figures for the test month and the open receipt-absent lines.
-  // One denominator (invoiced PO item lines) for every percentage on it (review W2).
-  const cov = coverage.data && coverage.data.item_lines > 0 ? coverage.data : null;
-  const pctText = (v: string | null | undefined) => `${money(v).replace(/\.00$/, "")}%`;
-  const viaA = cov ? formatCents((toCents(cov.receipt_coverage_pct) ?? 0n) - (toCents(cov.coverage_class_b_pct) ?? 0n)) : "0";
-  const absent = (absentAll.data?.items ?? []).filter((e) => e.status !== "auto_closed");
-  const notReceived = absent.filter((e) => e.sub_reason === "not_received");
-  const unverified = absent.filter((e) => e.sub_reason !== "not_received");
-  const processed = (batches.data?.items ?? []).reduce((n, b) => n + b.totals.ready + b.totals["needs review"], 0);
+  const cov = coverage.data;
+  const measured = cov?.state === "measured" || (cov && cov.state === undefined && cov.item_lines > 0);
+  const pctText = (v: string | null | undefined) => (v ? `${money(v).replace(/\.00$/, "")}%` : "Not measured");
+  const viaA = measured && cov ? formatCents((toCents(cov.receipt_coverage_pct) ?? 0n) - (toCents(cov.coverage_class_b_pct) ?? 0n)) : "0";
+  const stateWords: Record<string, string> = {
+    awaiting_invoices: "Not measured: no invoices dated in these dates yet.",
+    processing: "Not measured yet: documents are still being read or matched.",
+    awaiting_receiving: "Not measured: no receiving file has been imported, so every line is receipt absent.",
+    unavailable: "Not measured: no invoice line could be compared with a purchase-order line.",
+  };
+  const filtered = !!(scope.type || scope.vendor || scope.min || scope.max || dates.exact || scope.status !== DEFAULT_STATUS);
+  const clearAll = () => setParams(new URLSearchParams());
+  const total = first?.total_count ?? rows.length;
+  const colCount = can("resolve") ? 8 : 7;
+  const datesWords = dateRangeWords(dates.start, dates.end);
 
-  const openTotal = sumCents(rows.map(value));
-  const filtered = !!(type || vendor || min || max);
-  const colCount = can("resolve") ? 10 : 9;
   return (
     <>
       <PageHead
         title="Exception queue"
-        lede={
-          can("resolve")
-            ? `What needs a person for ${monthName(month)}, highest value first. Open one to see the arithmetic and resolve it.`
-            : "Read only for your role."
-        }
         actions={
           <Link className="btn" to="/reports">
             <FileBarChart size={16} aria-hidden="true" />
@@ -178,62 +164,69 @@ export function ExceptionsPage() {
           </Link>
         }
       />
-      <NarrowNote />
-      <div className="coverage" role="note" aria-label="Receipt coverage">
-        <div>
-          <span className="k">Receipt coverage </span>
-          <span className="v">{cov ? pctText(cov.receipt_coverage_pct) : "Not measured"}</span>
-          <span className="s">
-            {" "}
-            of invoiced PO lines
-            {cov && ` (warehouse log ${pctText(viaA)}, signed delivery documents ${pctText(cov.coverage_class_b_pct)})`}
-          </span>
-          {cov && (
-            <span className="meter" aria-hidden="true">
-              <span className="a" style={{ width: `${viaA}%` }} />
-              <span className="b" style={{ width: `${cov.coverage_class_b_pct}%` }} />
-            </span>
+      {/* Scope: what this list covers, each part removable on its own. */}
+      <div className="scope-bar" role="group" aria-label="Queue scope">
+        <span className="scope-chip dates">
+          <span className="k">Dates</span> {datesWords}
+          {dates.exact ? (
+            <>
+              {scope.src === "weekly" && <span className="muted"> (weekly summary)</span>}
+              <button type="button" className="chip-x" aria-label={`Remove the dates ${datesWords}; show ${monthName(month)}`} onClick={() => set({ from: "", to: "", src: "" })}>
+                <X size={14} aria-hidden="true" />
+              </button>
+            </>
+          ) : (
+            <span className="muted"> (test month in the top bar)</span>
           )}
-        </div>
-        <div>
-          <span className="k">Not received </span>
-          <span className={`v ${notReceived.length ? "danger" : ""}`}>{cadCents(sumCents(notReceived.map(value)))}</span>
-          <span className="s"> {plural(notReceived.length, "line")}: the log covers the order and shows nothing</span>
-        </div>
-        <div>
-          <span className="k">Unverified </span>
-          <span className={`v ${unverified.length ? "warn" : ""}`}>{cadCents(sumCents(unverified.map(value)))}</span>
-          <span className="s"> {plural(unverified.length, "line")} with no receiving evidence</span>
-        </div>
-        <div>
-          <span className="k">Complete warehouse log </span>
-          <span className="v">{cov ? pctText(cov.coverage_class_a_pct) : "None"}</span>
-          <span className="s">
-            {" "}
-            of lines are inside a log you declared complete. It counts lines the log shows as not received too, so it can be above receipt coverage.{" "}
-            <Link to="/receiving">Receiving imports</Link>
-          </span>
-        </div>
-      </div>
-      <div className="counters" role="group" aria-label="Exceptions by type">
-        <button className="counter" aria-pressed={!type} onClick={() => setParam("type", "")}>
-          <span className="n">{Object.values(counters).reduce((a, b) => a + b, 0)}</span>
-          <span className="t">All types</span>
-        </button>
-        {Object.entries({ ...(type ? { [type]: 0 } : {}), ...counters })
-          .sort((a, b) => b[1] - a[1])
-          .map(([t, n]) => (
-            <button key={t} className="counter" aria-pressed={type === t} onClick={() => setParam("type", type === t ? "" : t)}>
-              <span className="n">{n}</span>
-              <span className="t">{typeWord(t)}</span>
+        </span>
+        {scope.vendor && (
+          <span className="scope-chip">
+            <span className="k">Supplier</span> {scope.vendor === "none" ? "Not identified" : vendorName ?? "One supplier"}
+            <button type="button" className="chip-x" aria-label="Remove the supplier filter" onClick={() => set({ vendor: "" })}>
+              <X size={14} aria-hidden="true" />
             </button>
-          ))}
+          </span>
+        )}
+        {scope.type && (
+          <span className="scope-chip">
+            <span className="k">Type</span> {typeWord(scope.type)}
+            <button type="button" className="chip-x" aria-label="Remove the type filter" onClick={() => set({ type: "" })}>
+              <X size={14} aria-hidden="true" />
+            </button>
+          </span>
+        )}
+        <span className="scope-chip">
+          <span className="k">Status</span> {STATUS_WORDS[scope.status] ?? scope.status}
+          {scope.status !== DEFAULT_STATUS && (
+            <button type="button" className="chip-x" aria-label="Back to open and pending approval" onClick={() => set({ status: "" })}>
+              <X size={14} aria-hidden="true" />
+            </button>
+          )}
+        </span>
+        {(scope.min || scope.max) && (
+          <span className="scope-chip">
+            <span className="k">Value</span> {scope.min ? cad(scope.min) : "any"} to {scope.max ? cad(scope.max) : "any"}
+            <button type="button" className="chip-x" aria-label="Remove the value filter" onClick={() => set({ min: "", max: "" })}>
+              <X size={14} aria-hidden="true" />
+            </button>
+          </span>
+        )}
+        <button type="button" className="btn ghost small filters-toggle" aria-expanded={filtersOpen} aria-controls="queue-filters" onClick={() => setFiltersOpen((o) => !o)}>
+          <SlidersHorizontal size={14} aria-hidden="true" />
+          Filters
+        </button>
+        {filtered && (
+          <button type="button" className="btn ghost small" onClick={clearAll}>
+            Clear all
+          </button>
+        )}
       </div>
-      <form className="toolbar" onSubmit={(e) => e.preventDefault()} aria-label="Filters">
+
+      <form id="queue-filters" className={`toolbar queue-filters ${filtersOpen ? "open" : ""}`} onSubmit={(e) => e.preventDefault()} aria-label="Filters">
         <div className="field">
           <label htmlFor="f-status">Status</label>
-          <select id="f-status" value={status} onChange={(e) => setParam("status", e.target.value === "open,pending_approval" ? "" : e.target.value)}>
-            {STATUS_OPTIONS.map(([v, l]) => (
+          <select id="f-status" value={scope.status} onChange={(e) => set({ status: e.target.value === DEFAULT_STATUS ? "" : e.target.value })}>
+            {Object.entries(STATUS_WORDS).map(([v, l]) => (
               <option key={v} value={v}>
                 {l}
               </option>
@@ -242,38 +235,32 @@ export function ExceptionsPage() {
         </div>
         <div className="field">
           <label htmlFor="f-vendor">Supplier</label>
-          <select id="f-vendor" value={vendor} onChange={(e) => setParam("vendor", e.target.value)}>
+          <select id="f-vendor" value={scope.vendor} onChange={(e) => set({ vendor: e.target.value })}>
             <option value="">All suppliers</option>
             {(vendors.data?.items ?? []).map((v) => (
               <option key={v.id} value={v.id}>
                 {v.name}
               </option>
             ))}
+            <option value="none">Supplier not identified</option>
           </select>
         </div>
         <div className="field">
           <label htmlFor="f-min">Value from (CAD)</label>
-          <input id="f-min" inputMode="decimal" size={8} placeholder="0.00" defaultValue={min} onBlur={(e) => setParam("min", e.target.value.trim())} />
+          <input id="f-min" key={`min-${scope.min}`} inputMode="decimal" size={8} placeholder="0.00" defaultValue={scope.min} onBlur={(e) => e.target.value.trim() !== scope.min && set({ min: e.target.value.trim() })} />
         </div>
         <div className="field">
           <label htmlFor="f-max">Value to (CAD)</label>
-          <input id="f-max" inputMode="decimal" size={8} placeholder="Any" defaultValue={max} onBlur={(e) => setParam("max", e.target.value.trim())} />
+          <input id="f-max" key={`max-${scope.max}`} inputMode="decimal" size={8} placeholder="Any" defaultValue={scope.max} onBlur={(e) => e.target.value.trim() !== scope.max && set({ max: e.target.value.trim() })} />
         </div>
         <div className="field">
           <label htmlFor="f-sort">Sort</label>
-          <select id="f-sort" value={sort} onChange={(e) => setParam("sort", e.target.value === "value" ? "" : e.target.value)}>
+          <select id="f-sort" value={scope.sort} onChange={(e) => set({ sort: e.target.value === "value" ? "" : e.target.value })}>
             <option value="value">Highest value first</option>
             <option value="age">Oldest first</option>
             <option value="vendor">Supplier</option>
           </select>
         </div>
-        {filtered && (
-          <button type="button" className="btn ghost small" onClick={() => setParams(new URLSearchParams(status === "open,pending_approval" ? {} : { status }))}>
-            <X size={14} aria-hidden="true" />
-            Clear filters
-          </button>
-        )}
-        <span className="grow" />
         {can("resolve") && (
           <span className="keyhints" aria-hidden="true">
             <span>
@@ -289,6 +276,20 @@ export function ExceptionsPage() {
           </span>
         )}
       </form>
+
+      <div className="type-tabs" role="group" aria-label="Exceptions by type">
+        <button className="type-tab" aria-pressed={!scope.type} onClick={() => set({ type: "" })}>
+          All <span className="n">{Object.values(counters).reduce((a, b) => a + b, 0)}</span>
+        </button>
+        {Object.entries({ ...(scope.type ? { [scope.type]: 0 } : {}), ...counters })
+          .sort((a, b) => b[1] - a[1])
+          .map(([t, n]) => (
+            <button key={t} className="type-tab" aria-pressed={scope.type === t} onClick={() => set({ type: scope.type === t ? "" : t })}>
+              {typeWord(t)} <span className="n">{n}</span>
+            </button>
+          ))}
+      </div>
+
       {can("resolve") && chosen.length > 0 && (
         <div className="bulkbar" role="region" aria-label="Bulk actions">
           <span>
@@ -304,29 +305,50 @@ export function ExceptionsPage() {
         </div>
       )}
       <p className="sr-only" role="status" aria-live="polite">
-        {list.isFetching ? "" : `${plural(rows.length, "exception")} shown.`}
+        {list.isFetching || !first ? "" : `${plural(total, "exception")} in this scope, ${cad(first.total_value ?? "0")}.`}
       </p>
       {list.isLoading && <TableSkeleton label="Loading exceptions" />}
       {list.error && <ErrorState error={list.error} retry={() => list.refetch()} />}
       {list.data && rows.length === 0 && (
-        <div className="panel" style={{ borderTopLeftRadius: 0, borderTopRightRadius: 0 }}>
-          {processed === 0 ? (
-            <Empty title="Nothing processed yet" icon={<Inbox size={22} />} action={<Link className="btn primary" to="/intake">Upload invoices</Link>}>
-              <p>Upload the month&apos;s invoices first; exceptions appear here as each one is matched.</p>
+        <div className="panel">
+          {!filtered && cov?.state && cov.state !== "measured" && cov.state !== "unavailable" ? (
+            <Empty
+              title={
+                cov.state === "awaiting_invoices"
+                  ? `No invoices dated in ${datesWords} yet`
+                  : cov.state === "processing"
+                    ? "Matching is still running"
+                    : "Waiting for receiving evidence"
+              }
+              icon={<Inbox size={22} />}
+              action={
+                cov.state === "awaiting_invoices" && can("upload") ? (
+                  <Link className="btn primary" to="/intake">
+                    <Upload size={16} aria-hidden="true" />
+                    Upload invoices
+                  </Link>
+                ) : cov.state === "awaiting_receiving" && can("upload") ? (
+                  <Link className="btn primary" to="/receiving">
+                    Load the receiving file
+                  </Link>
+                ) : undefined
+              }
+            >
+              <p>
+                {cov.state === "awaiting_invoices"
+                  ? "Nothing has been checked for these dates, so there is nothing to clear. Exceptions appear here as each invoice is matched."
+                  : cov.state === "processing"
+                    ? "Exceptions appear here as each invoice is matched. This list refreshes by itself."
+                    : "Invoices are matched, but without a receiving file no line can pass. Import the warehouse receiving file first."}
+              </p>
             </Empty>
           ) : (
             <Empty
               icon={<CheckCircle2 size={22} />}
-              title={
-                type
-                  ? `No ${status.startsWith("open") ? "open " : ""}exceptions of type "${typeWord(type)}".`
-                  : status.startsWith("open") && !vendor && !min && !max
-                    ? `No open exceptions for ${monthName(month)}.`
-                    : "No exceptions match these filters."
-              }
+              title={scope.type ? `No ${scope.status.startsWith("open") ? "open " : ""}exceptions of type "${typeWord(scope.type)}".` : !filtered ? `No open exceptions for ${datesWords}.` : "No exceptions match these filters."}
               action={
                 filtered ? (
-                  <button type="button" className="btn" onClick={() => setParams(new URLSearchParams(status === "open,pending_approval" ? {} : { status }))}>
+                  <button type="button" className="btn" onClick={clearAll}>
                     Clear the filters
                   </button>
                 ) : (
@@ -340,100 +362,206 @@ export function ExceptionsPage() {
         </div>
       )}
       {rows.length > 0 && (
-        <div className="table-wrap sticky" style={{ borderTopLeftRadius: 0, borderTopRightRadius: 0 }}>
-          <table className="stack-sm queue-table">
-            <caption className="sr-only">Exceptions</caption>
-            <thead>
-              <tr>
-                {can("resolve") && (
-                  <th scope="col" className="check">
-                    <input
-                      type="checkbox"
-                      aria-label="Select all shown"
-                      checked={rows.length > 0 && rows.every((r) => selected.has(r.id))}
-                      onChange={(e) => setSelected(e.target.checked ? new Set(rows.map((r) => r.id)) : new Set())}
-                    />
-                  </th>
-                )}
-                <th scope="col">Type</th>
-                <th scope="col">Supplier</th>
-                <th scope="col">Document</th>
-                <th scope="col">PO</th>
-                <th scope="col">Item</th>
-                <th scope="col" className="num">
-                  Variance qty
-                </th>
-                <th scope="col" className="num" aria-sort={sort === "value" ? "descending" : "none"}>
-                  Value (CAD)
-                </th>
-                <th scope="col" aria-sort={sort === "age" ? "descending" : "none"}>
-                  Age
-                </th>
-                <th scope="col">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((e, i) => (
-                <tr
-                  key={e.id}
-                  ref={(el) => (rowRefs.current[i] = el)}
-                  tabIndex={0}
-                  className={`row-link ${selected.has(e.id) ? "selected" : ""} ${focus === i ? "focused" : ""}`}
-                  aria-selected={selected.has(e.id)}
-                  onFocus={() => setFocus(i)}
-                  onClick={(ev) => {
-                    if ((ev.target as HTMLElement).closest("input,a,button")) return;
-                    open(e);
-                  }}
-                  onKeyDown={(ev) => {
-                    if (ev.key === "Enter" && ev.target === ev.currentTarget) open(e);
-                  }}
-                >
-                  {can("resolve") && (
-                    <td className="check" data-label="Select">
-                      <input type="checkbox" aria-label={`Select ${typeWord(e.type)} on ${e.doc_number}`} checked={selected.has(e.id)} onChange={() => toggle(e.id)} />
-                    </td>
-                  )}
-                  <td data-label="Type">
-                    <span className="cell-main">{typeWord(e.type)}</span>
-                    {e.sub_reason && <span className="cell-sub">{SUB_REASONS[e.sub_reason] ?? e.sub_reason}</span>}
-                  </td>
-                  <td data-label="Supplier" className="wrap-name">{e.vendor_name ?? <span className="muted">Not identified</span>}</td>
-                  <td data-label="Document" className="nowrap">
-                    <Link to={hrefFor(e)} onClick={(ev) => { ev.preventDefault(); open(e); }}>
-                      {e.doc_number ?? "No number"}
-                    </Link>
+        <>
+          {/* Phone layout: one case per block, its review control inside it (B8). */}
+          <ul className="case-list" aria-label="Exceptions">
+            {rows.map((e) => (
+              <li key={e.id} className={`case ${sel === e.id ? "selected" : ""}`}>
+                <div className="case-top">
+                  <span className="case-doc">
+                    {e.doc_number ?? "No number"}
                     {e.line_no ? <span className="muted"> line {e.line_no}</span> : null}
-                  </td>
-                  <td data-label="PO" className="nowrap">{e.po_number}</td>
-                  <td data-label="Item" className="nowrap">{e.supplier_item_code}</td>
-                  <td className="num" data-label="Variance qty">
-                    {qty(e.variance_qty)}
-                  </td>
-                  <td className="num" data-label="Value (CAD)">
-                    <span className="cell-main">{money(value(e))}</span>
-                    {zeroCounted(e) && <span className="cell-sub">counted under another exception</span>}
-                  </td>
-                  <td data-label="Age" className="nowrap">{ageText(e.raised_at)}</td>
-                  <td data-label="Status">{chipFor(e)}</td>
+                  </span>
+                  <span className="case-amt money">{zeroCounted(e) ? "CAD 0.00" : cad(value(e))}</span>
+                </div>
+                <div className="case-why">{reason(e)}</div>
+                <div className="case-sup">
+                  {e.vendor_name ?? "Supplier not identified"}
+                  {e.po_number ? ` · PO ${e.po_number}` : ""}
+                </div>
+                <div className="case-foot">
+                  {statusNote(e) ?? <span className="muted small">{ageText(e.raised_at)}</span>}
+                  <Link className="btn small primary" to={hrefFor(e)} onClick={(ev) => { ev.preventDefault(); open(e); }} aria-label={`Review ${e.doc_number ?? "document"} ${typeWord(e.type)}`}>
+                    Review
+                    <ChevronRight size={14} aria-hidden="true" />
+                  </Link>
+                </div>
+              </li>
+            ))}
+          </ul>
+          <div className="table-wrap sticky queue-wrap">
+            <table className="queue-table">
+              <caption className="sr-only">Exceptions</caption>
+              <thead>
+                <tr>
+                  {can("resolve") && (
+                    <th scope="col" className="check">
+                      <input
+                        type="checkbox"
+                        aria-label="Select all shown"
+                        checked={rows.length > 0 && rows.every((r) => selected.has(r.id))}
+                        onChange={(e) => setSelected(e.target.checked ? new Set(rows.map((r) => r.id)) : new Set())}
+                      />
+                    </th>
+                  )}
+                  <th scope="col">Invoice and supplier</th>
+                  <th scope="col">Why it needs you</th>
+                  <th scope="col">PO and item</th>
+                  <th scope="col" className="num">
+                    Qty difference
+                  </th>
+                  <th scope="col" className="num" aria-sort={scope.sort === "value" ? "descending" : "none"}>
+                    Amount (CAD)
+                  </th>
+                  <th scope="col" aria-sort={scope.sort === "age" ? "ascending" : "none"}>
+                    Age
+                  </th>
+                  <th scope="col">
+                    <span className="sr-only">Action</span>
+                  </th>
                 </tr>
-              ))}
-            </tbody>
-            <tfoot>
-              <tr>
-                <td colSpan={colCount - 3}>{plural(rows.length, "exception")}</td>
-                <td className="num">{formatCents(openTotal)}</td>
-                <td colSpan={2} />
-              </tr>
-            </tfoot>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {rows.map((e, i) => (
+                  <tr
+                    key={e.id}
+                    ref={(el) => (rowRefs.current[i] = el)}
+                    tabIndex={0}
+                    className={`row-link ${selected.has(e.id) || sel === e.id ? "selected" : ""} ${focus === i ? "focused" : ""}`}
+                    aria-selected={selected.has(e.id)}
+                    onFocus={() => setFocus(i)}
+                    onClick={(ev) => {
+                      if ((ev.target as HTMLElement).closest("input,a,button")) return;
+                      open(e);
+                    }}
+                    onKeyDown={(ev) => {
+                      if (ev.key === "Enter" && ev.target === ev.currentTarget) open(e);
+                    }}
+                  >
+                    {can("resolve") && (
+                      <td className="check">
+                        <input type="checkbox" aria-label={`Select ${typeWord(e.type)} on ${e.doc_number}`} checked={selected.has(e.id)} onChange={() => toggle(e.id)} />
+                      </td>
+                    )}
+                    <td className="doc-cell">
+                      <span className="cell-main">
+                        {e.doc_number ?? "No number"}
+                        {e.line_no ? <span className="muted"> · line {e.line_no}</span> : null}
+                      </span>
+                      <span className="cell-sub wrap-name">{e.vendor_name ?? "Supplier not identified"}</span>
+                    </td>
+                    <td>
+                      <span className="cell-main">{typeWord(e.type)}</span>
+                      {e.sub_reason && <span className="cell-sub">{SUB_REASONS[e.sub_reason] ?? e.sub_reason}</span>}
+                      {statusNote(e)}
+                    </td>
+                    <td className="nowrap">
+                      <span className="cell-main">{e.po_number ? `PO ${e.po_number}` : <span className="muted">No PO</span>}</span>
+                      <span className="cell-sub">{e.supplier_item_code}</span>
+                    </td>
+                    <td className="num">{e.variance_qty && e.variance_qty !== "0" ? `+${qty(e.variance_qty)}` : ""}</td>
+                    <td className="num">
+                      <span className="cell-main">{money(value(e))}</span>
+                      {zeroCounted(e) && <span className="cell-sub">counted under another exception</span>}
+                    </td>
+                    <td className="nowrap muted">{ageText(e.raised_at)}</td>
+                    <td className="action-cell">
+                      <Link to={hrefFor(e)} onClick={(ev) => { ev.preventDefault(); open(e); }} aria-label={`Review ${e.doc_number ?? "document"} ${typeWord(e.type)}`}>
+                        Review
+                      </Link>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr>
+                  <td colSpan={colCount - 3}>
+                    {rows.length < total ? `Showing ${rows.length} of ${plural(total, "exception")}` : plural(total, "exception")} in this scope
+                  </td>
+                  <td className="num" data-queue-total>
+                    {first ? money(first.total_value) : ""}
+                  </td>
+                  <td colSpan={2} />
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+          <p className="queue-total-line">
+            <strong>{plural(total, "exception")}</strong>, <strong className="money">{cad(first?.total_value)}</strong> in this scope
+            {rows.length < total ? ` (${rows.length} shown)` : ""}.
+          </p>
+        </>
       )}
       {list.hasNextPage && (
         <button className="btn" style={{ marginTop: 12 }} onClick={() => list.fetchNextPage()} disabled={list.isFetchingNextPage}>
-          Load more
+          Show the next {Math.min(PAGE, total - rows.length)}
         </button>
       )}
+
+      <details className="count-notes">
+        <summary>
+          <Info size={14} aria-hidden="true" />
+          Why counts differ between screens
+        </summary>
+        <ul>
+          <li>
+            <strong>This list</strong>: every exception in the scope above ({datesWords}, {STATUS_WORDS[scope.status]?.toLowerCase() ?? scope.status}), by the date of its document.
+          </li>
+          <li>
+            <strong>Sidebar</strong>: open exceptions of every period, waiting for a person now; pending approval is not counted there.
+          </li>
+          <li>
+            <strong>Back-test report</strong>: the month as frozen at the draft&apos;s data cut-off; later resolutions change the live list, not an approved version.
+          </li>
+          <li>
+            <strong>Weekly summary</strong>: documents dated Monday to Sunday, open and pending approval. Its counts open here with the same dates and supplier.
+          </li>
+        </ul>
+      </details>
+
+      <details className="coverage-details">
+        <summary>
+          <span className="k">Receipt coverage, {datesWords}</span>
+          <span className="v">{measured ? pctText(cov?.receipt_coverage_pct) : "Not measured"}</span>
+          {measured && (
+            <span className="s">
+              Not received {cad(notReceived.data?.total_value ?? "0")} · Unverified {cad(unverified.data?.total_value ?? "0")}
+            </span>
+          )}
+        </summary>
+        {!measured ? (
+          <p className="muted">{stateWords[cov?.state ?? ""] ?? "Not measured yet."}</p>
+        ) : (
+          <div className="coverage" role="note" aria-label="Receipt coverage">
+            <div>
+              <span className="k">Receipt coverage </span>
+              <span className="v">{pctText(cov?.receipt_coverage_pct)}</span>
+              <span className="s">
+                {" "}
+                of invoiced PO lines (warehouse log {pctText(viaA)}, signed delivery documents {pctText(cov?.coverage_class_b_pct)})
+              </span>
+            </div>
+            <div>
+              <span className="k">Not received </span>
+              <span className={`v ${notReceived.data?.total_count ? "danger" : ""}`}>{cad(notReceived.data?.total_value ?? "0")}</span>
+              <span className="s"> {plural(notReceived.data?.total_count ?? 0, "line")}: the log covers the order and shows nothing</span>
+            </div>
+            <div>
+              <span className="k">Unverified </span>
+              <span className={`v ${unverified.data?.total_count ? "warn" : ""}`}>{cad(unverified.data?.total_value ?? "0")}</span>
+              <span className="s"> {plural(unverified.data?.total_count ?? 0, "line")} with no receiving evidence</span>
+            </div>
+            <div>
+              <span className="k">Complete warehouse log </span>
+              <span className="v">{pctText(cov?.coverage_class_a_pct)}</span>
+              <span className="s">
+                {" "}
+                of lines are inside a log you declared complete; it counts lines the log shows as not received too. <Link to="/receiving">Receiving imports</Link>
+              </span>
+            </div>
+          </div>
+        )}
+      </details>
       {bulkOpen && <BulkDialog items={chosen} onClose={(done) => { setBulkOpen(false); if (done) setSelected(new Set()); }} />}
     </>
   );
