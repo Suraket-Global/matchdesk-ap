@@ -30,7 +30,7 @@ from matchdesk.exceptions.models import ExceptionRow, LineMatch
 from matchdesk.identity.models import Membership, Tenant, User
 from matchdesk.intake.models import InvoiceLineRow, InvoiceRow
 from matchdesk.qbo.models import Vendor
-from matchdesk.reporting.backtest import section_of
+from matchdesk.reporting.backtest import _current_matches, measurement_state, section_of
 from matchdesk.reporting.models import WeeklySummaryRun
 from matchdesk.tenancy import global_session, session
 
@@ -125,9 +125,13 @@ def summary(s: Session, week_start: date) -> dict[str, Any]:
         if total["lines"]
         else None
     )
+    matches = _current_matches(s, ids) if ids else []
+    item_lines = sum(1 for lm, _ln in matches if lm.line_kind == "item")
     return {
         "week_start": week_start.isoformat(),
         "week_end": week_end.isoformat(),
+        # B8: whether the week's figures were measured, so an empty week never reads as a clean one.
+        "state": measurement_state(s, invoices, matches, item_lines),
         "suppliers": rows,
         "total": total,
     }

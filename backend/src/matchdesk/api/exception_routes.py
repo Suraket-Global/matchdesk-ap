@@ -4,7 +4,6 @@ T-4.2.5 back end; T-4.1.1 (d) suggestions; B3). Wiring only: rules live in ``exc
 from __future__ import annotations
 
 import uuid
-from collections import Counter
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Annotated, Any, Literal
@@ -15,7 +14,7 @@ from sqlalchemy import Engine, func, select
 from sqlalchemy.orm import Session
 
 from matchdesk import receiving
-from matchdesk.api import views
+from matchdesk.api import queue, views
 from matchdesk.api.common import (
     Auth,
     StaleVersion,
@@ -60,7 +59,6 @@ from matchdesk.exceptions.models import (
     ToleranceRule,
 )
 from matchdesk.identity import Membership, Principal, Tenant
-from matchdesk.intake.models import InvoiceRow
 from matchdesk.tenancy import session
 
 
@@ -227,59 +225,136 @@ def _stale_map(s: Session, rows: list[ExceptionRow]) -> dict[uuid.UUID, bool]:
 
 
 def register_exception_routes(app: FastAPI, engine: Engine) -> None:
+    def _filter(
+        status: str | None,
+        type: str | None,
+        value_class: str | None,
+        vendor_id: str | None,
+        invoice_id: uuid.UUID | None,
+        qualifying: bool | None,
+        resolved_since: datetime | None,
+        period_start: date | None,
+        period_end: date | None,
+        min_value: str | None,
+        max_value: str | None,
+        sort: str | None,
+        sub_reason: str | None = None,
+    ) -> queue.QueueFilter:
+        return queue.QueueFilter(
+            status=status,
+            type=type,
+            sub_reason=sub_reason,
+            value_class=value_class,
+            vendor=vendor_id,
+            invoice_id=invoice_id,
+            qualifying=qualifying,
+            resolved_since=resolved_since,
+            period_start=period_start,
+            period_end=period_end,
+            min_value=queue.parse_decimal(min_value, "min_value"),
+            max_value=queue.parse_decimal(max_value, "max_value"),
+            sort=sort or "value",
+        )
+
     @app.get("/api/v1/exceptions")
     def list_exceptions(
         p: Auth,
-        cursor: uuid.UUID | None = None,
+        cursor: str | None = None,
         limit: int | None = None,
         status: str | None = None,
         type: str | None = None,
         value_class: str | None = None,
-        vendor_id: uuid.UUID | None = None,
+        vendor_id: str | None = None,
         invoice_id: uuid.UUID | None = None,
         qualifying: bool | None = None,
         resolved_since: datetime | None = None,
         period_start: date | None = None,
         period_end: date | None = None,
+        min_value: str | None = None,
+        max_value: str | None = None,
+        sort: str | None = None,
+        sub_reason: str | None = None,
     ) -> dict[str, Any]:
+        """S-08 (B8): filters and sort on the whole tenant-scoped set before the page is cut."""
         require(p, "read")
         n = page_limit(limit)
+        f = _filter(
+            status,
+            type,
+            value_class,
+            vendor_id,
+            invoice_id,
+            qualifying,
+            resolved_since,
+            period_start,
+            period_end,
+            min_value,
+            max_value,
+            sort,
+            sub_reason,
+        )
         with session(p.tenant_id, engine) as s:
-            q = select(ExceptionRow)
-            if status:
-                q = q.where(ExceptionRow.status.in_(status.split(",")))
-            if type:
-                q = q.where(ExceptionRow.type.in_(type.split(",")))
-            if value_class:
-                q = q.where(ExceptionRow.value_class == value_class)
-            if invoice_id:
-                q = q.where(ExceptionRow.invoice_id == invoice_id)
-            if qualifying is not None:
-                q = q.where(ExceptionRow.qualifying.is_(qualifying))
-            if resolved_since is not None:
-                q = q.where(ExceptionRow.resolved_at >= resolved_since)
-            if vendor_id or period_start or period_end:
-                q = q.join(InvoiceRow, InvoiceRow.id == ExceptionRow.invoice_id)
-            if vendor_id:
-                q = q.where(InvoiceRow.vendor_id == vendor_id)
-            # The selected test month: documents dated in it (B6 review minor; S-14 uses the same).
-            if period_start:
-                q = q.where(InvoiceRow.doc_date >= period_start)
-            if period_end:
-                q = q.where(InvoiceRow.doc_date <= period_end)
-            counters = Counter(r for r in s.scalars(q.with_only_columns(ExceptionRow.status)).all())
-            type_counters = Counter(r for r in s.scalars(q.with_only_columns(ExceptionRow.type)).all())
-            page_q = q.order_by(ExceptionRow.id).limit(n + 1)
-            if cursor is not None:
-                page_q = page_q.where(ExceptionRow.id > cursor)
-            rows = list(s.scalars(page_q).all())
-            stale = _stale_map(s, rows[:n])
-            context = views.exception_context(s, rows[:n])
+            result = queue.page(s, f, n, cursor)
+            rows = result.pop("items")
+            stale = _stale_map(s, rows)
+            context = views.exception_context(s, rows)
             return {
-                "items": [{**exception_body(e, stale.get(e.id)), **context[e.id]} for e in rows[:n]],
-                "counters": dict(counters),
-                "type_counters": dict(type_counters),
-                "next_cursor": str(rows[n - 1].id) if len(rows) > n else None,
+                "items": [{**exception_body(e, stale.get(e.id)), **context[e.id]} for e in rows],
+                **result,
+            }
+
+    @app.get("/api/v1/exceptions/{exception_id}/neighbours")
+    def exception_neighbours(
+        exception_id: uuid.UUID,
+        p: Auth,
+        status: str | None = None,
+        type: str | None = None,
+        vendor_id: str | None = None,
+        period_start: date | None = None,
+        period_end: date | None = None,
+        min_value: str | None = None,
+        max_value: str | None = None,
+        sort: str | None = None,
+    ) -> dict[str, Any]:
+        """Previous and next exception in the queue the user opened (S-09, B8), same filters."""
+        require(p, "read")
+        f = _filter(
+            status,
+            type,
+            None,
+            vendor_id,
+            None,
+            None,
+            None,
+            period_start,
+            period_end,
+            min_value,
+            max_value,
+            sort,
+        )
+        with session(p.tenant_id, engine) as s:
+            exc = _one(s, exception_id)
+            near = queue.neighbours(s, f, exc)
+            items = [e for e in (near["previous"], near["next"]) if e is not None]
+            context = views.exception_context(s, items)
+
+            def brief(e: ExceptionRow | None) -> dict[str, Any] | None:
+                if e is None:
+                    return None
+                c = context[e.id]
+                return {
+                    "id": str(e.id),
+                    "invoice_id": str(e.invoice_id),
+                    "invoice_line_id": str(e.invoice_line_id) if e.invoice_line_id else None,
+                    "doc_number": c["doc_number"],
+                    "type": e.type,
+                }
+
+            return {
+                "previous": brief(near["previous"]),
+                "next": brief(near["next"]),
+                "position": near["position"],
+                "total": near["total"],
             }
 
     @app.get("/api/v1/exceptions/{exception_id}/events")

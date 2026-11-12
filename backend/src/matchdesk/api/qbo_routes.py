@@ -57,7 +57,14 @@ def register_qbo_routes(app: FastAPI, settings: Settings, engine: Engine, endpoi
         require(p, "read")
         with session(p.tenant_id, engine) as s:
             # B4: the screen labels recorded-response mode and never sends anyone to Intuit in it.
-            return {**describe_connection(get_connection(s)), "mode": settings.qbo_mode}
+            # B8: the header and S-04 show the server's last read (success or failure), not a guess.
+            last = s.scalars(select(SyncRun).order_by(SyncRun.created_at.desc()).limit(1)).first()
+            return {
+                **describe_connection(get_connection(s)),
+                "mode": settings.qbo_mode,
+                "source": "demo_data" if settings.qbo_mode != "intuit" else "intuit",
+                "last_sync": describe_sync(last) if last else None,
+            }
 
     @app.post("/api/v1/qbo/connection/authorize")
     def authorize(p: Auth) -> dict[str, Any]:

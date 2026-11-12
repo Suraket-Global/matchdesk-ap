@@ -299,15 +299,69 @@ def _coverage(s: Session, item: list[tuple[LineMatch, InvoiceLineRow]]) -> dict[
 def live_coverage(s: Session, start: date, end: date) -> dict[str, Any]:
     """The coverage figures of a draft, computed from the current results now (S-08 strip; B3/B4
     review W3: the strip no longer waits for a report draft)."""
-    ids = [i.id for i in _period_invoices(s, start, end)]
-    item = [(lm, ln) for lm, ln in _current_matches(s, ids) if lm.line_kind == "item"]
+    invoices = _period_invoices(s, start, end)
+    ids = [i.id for i in invoices]
+    matches = _current_matches(s, ids)
+    item = [(lm, ln) for lm, ln in matches if lm.line_kind == "item"]
     cov = _coverage(s, item)
+    state = measurement_state(s, invoices, matches, len(item))
     return {
         "period_start": start.isoformat(),
         "period_end": end.isoformat(),
         "item_lines": len(item),
-        **{k: (str(v) if v is not None else None) for k, v in cov.items()},
+        "documents": len(invoices),
+        "documents_in_review": sum(1 for i in invoices if i.verification_status == "failed"),
+        "state": state,
+        # B8: a figure is shown only when it was measured; zero is then a measured zero.
+        **{k: (str(v) if v is not None and state == "measured" else None) for k, v in cov.items()},
     }
+
+
+MEASUREMENT_STATES = ("awaiting_invoices", "awaiting_receiving", "processing", "measured", "unavailable")
+
+
+def measurement_state(
+    s: Session,
+    invoices: list[InvoiceRow],
+    matches: list[tuple[LineMatch, InvoiceLineRow]],
+    item_lines: int,
+) -> str:
+    """Why the period's figures can or cannot be read (B8 empty versus zero). ``awaiting_invoices``:
+    nothing dated in the period and nothing being read; ``processing``: a file is still being read or
+    a match result is out of date; ``awaiting_receiving``: invoices are matched but the account has no
+    imported receiving record, so every line is receipt absent; ``unavailable``: documents exist but
+    no PO item line could be measured (all in review, or no purchase order line); ``measured``."""
+    reading = s.scalar(
+        select(func.count())
+        .select_from(DocumentRow)
+        .where(DocumentRow.purpose == "invoice", DocumentRow.state.in_(("queued", "running", "retry_wait")))
+    )
+    stale = any(stale_runs(s, list({lm.match_run_id for lm, _ln in matches})).values()) if matches else False
+    line_ids = {ln.id for _lm, ln in matches}
+    unmatched = (
+        s.scalar(
+            select(func.count())
+            .select_from(InvoiceLineRow)
+            .join(InvoiceRow, InvoiceRow.id == InvoiceLineRow.invoice_id)
+            .where(
+                InvoiceLineRow.invoice_id.in_([i.id for i in invoices]),
+                InvoiceRow.verification_status != "failed",
+                InvoiceLineRow.id.not_in(line_ids) if line_ids else InvoiceLineRow.id.is_not(None),
+            )
+        )
+        if invoices
+        else 0
+    )
+    if not invoices:
+        return "processing" if reading else "awaiting_invoices"
+    if reading or stale or unmatched:
+        return "processing"
+    receiving = s.scalar(
+        select(func.count()).select_from(ReceivingImportRow).where(ReceivingImportRow.state == "succeeded")
+    )
+    if not receiving:
+        return "awaiting_receiving"
+    return "measured" if item_lines else "unavailable"
 
 
 def _class_b_lines(s: Session, po_line_ids: list[uuid.UUID]) -> set[uuid.UUID]:
