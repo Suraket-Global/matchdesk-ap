@@ -49,7 +49,10 @@ def _lock_tenant_runs(s: Session, tenant_id: uuid.UUID) -> None:
 def is_current_for_scope(s: Session, run: MatchRun, invoice_ids: list[str]) -> bool:
     """True when every invoice line in scope has its current result from ``run``."""
     line_ids = s.scalars(
-        select(InvoiceLineRow.id).where(InvoiceLineRow.invoice_id.in_([uuid.UUID(i) for i in invoice_ids]))
+        select(InvoiceLineRow.id).where(
+            InvoiceLineRow.invoice_id.in_([uuid.UUID(i) for i in invoice_ids]),
+            InvoiceLineRow.removed_at.is_(None),
+        )
     ).all()
     if not line_ids:
         return run.state == "succeeded"

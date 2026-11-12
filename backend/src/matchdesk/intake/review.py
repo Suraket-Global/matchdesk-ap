@@ -77,8 +77,19 @@ def lines_of(s: Session, invoice_id: uuid.UUID) -> list[InvoiceLineRow]:
     return list(
         s.scalars(
             select(InvoiceLineRow)
-            .where(InvoiceLineRow.invoice_id == invoice_id)
+            .where(InvoiceLineRow.invoice_id == invoice_id, InvoiceLineRow.removed_at.is_(None))
             .order_by(InvoiceLineRow.line_no)
+        ).all()
+    )
+
+
+def removed_lines_of(s: Session, invoice_id: uuid.UUID) -> list[InvoiceLineRow]:
+    """Lines removed in review, kept as history (B9)."""
+    return list(
+        s.scalars(
+            select(InvoiceLineRow)
+            .where(InvoiceLineRow.invoice_id == invoice_id, InvoiceLineRow.removed_at.is_not(None))
+            .order_by(InvoiceLineRow.removed_at, InvoiceLineRow.line_no)
         ).all()
     )
 
@@ -112,8 +123,27 @@ def describe_fields(s: Session, inv: InvoiceRow) -> dict[str, Any]:
             }
             for ln in lines_of(s, inv.id)
         ],
+        "removed_lines": [
+            {
+                "line_no": ln.line_no,
+                "id": str(ln.id),
+                **{f: _plain(getattr(ln, f)) for f in EDITABLE_LINE},
+                "removed_by": str(ln.removed_by) if ln.removed_by else None,
+                "removed_at": ln.removed_at.isoformat() if ln.removed_at else None,
+                "removed_reason": ln.removed_reason,
+            }
+            for ln in removed_lines_of(s, inv.id)
+        ],
+        "next_line_no": _next_line_no(s, inv.id),
+        "inconsistent_note": inv.inconsistent_note,
         "version": inv.version,
     }
+
+
+def _next_line_no(s: Session, invoice_id: uuid.UUID) -> int:
+    """A new line never reuses the number of a removed one (the number stays in its history)."""
+    used = s.scalars(select(InvoiceLineRow.line_no).where(InvoiceLineRow.invoice_id == invoice_id)).all()
+    return max(used, default=0) + 1
 
 
 def _check_version(s: Session, inv: InvoiceRow, expected: int) -> None:
@@ -177,12 +207,15 @@ def correct(
         inv.purchase_order_id = link_po(s, inv.vendor_id, inv.po_number_read)
     inv.field_sources = sources
     existing = {ln.line_no: ln for ln in lines_of(s, inv.id)}
+    removed_nos = {ln.line_no for ln in removed_lines_of(s, inv.id)}
     for spec in lines:
         line_no = int(spec["line_no"])
         unknown_l = set(spec) - set(EDITABLE_LINE) - {"line_no"}
         if unknown_l:
             raise ValueError("not editable on a line: " + ", ".join(sorted(unknown_l)))
         ln = existing.get(line_no)
+        if ln is None and line_no in removed_nos:
+            raise ValueError(f"line {line_no} was removed; add a new line with another number")
         if ln is None:
             ln = InvoiceLineRow(
                 tenant_id=inv.tenant_id,
@@ -244,7 +277,12 @@ def current_gates(s: Session, inv: InvoiceRow) -> dict[str, bool]:
 
 
 def confirm(
-    s: Session, inv: InvoiceRow, user_id: uuid.UUID, expected_version: int, accept_inconsistent: bool = False
+    s: Session,
+    inv: InvoiceRow,
+    user_id: uuid.UUID,
+    expected_version: int,
+    accept_inconsistent: bool = False,
+    note: str | None = None,
 ) -> tuple[InvoiceRow, dict[str, bool]]:
     _check_version(s, inv, expected_version)
     if inv.vendor_id is None:
@@ -261,7 +299,13 @@ def confirm(
     )
     if not arithmetic_ok and not accept_inconsistent:
         raise ValueError("the amounts do not add up; correct them or confirm as inconsistent")
+    clean_note = (note or "").strip() or None
+    if not arithmetic_ok and clean_note is None:
+        # S-07 (B9): "The document itself does not add up" needs the clerk's note, kept with the
+        # document, shown in its history and carried into the report.
+        raise ValueError("say in a note why the document itself does not add up")
     inv.verification_status = "human_confirmed" if arithmetic_ok else "human_confirmed_inconsistent"
+    inv.inconsistent_note = None if arithmetic_ok else clean_note
     inv.confirmed_by, inv.confirmed_at = user_id, datetime.now(UTC)
     inv.review_draft = None
     inv.version += 1
@@ -277,6 +321,56 @@ def confirm(
         action="invoice.confirmed",
         entity_type="invoice",
         entity_id=inv.id,
-        after={"status": inv.verification_status, "gates": gates},
+        after={
+            "status": inv.verification_status,
+            "gates": gates,
+            **({"note": inv.inconsistent_note} if inv.inconsistent_note else {}),
+        },
+    )
+    return inv, gates
+
+
+def remove_line(
+    s: Session,
+    inv: InvoiceRow,
+    user_id: uuid.UUID,
+    expected_version: int,
+    line_id: uuid.UUID,
+    reason: str | None,
+) -> tuple[InvoiceRow, dict[str, bool]]:
+    """Remove one line in review (S-07; B9). A soft removal: the row stays with who, when and why,
+    its earlier results stay as superseded history, and the arithmetic gates are run again on the
+    remaining lines. Only before a person confirmed the document; like any edit it then waits for
+    confirmation before it is matched again (MH-05)."""
+    _check_version(s, inv, expected_version)
+    if inv.verification_status in ("human_confirmed", "human_confirmed_inconsistent"):
+        raise ConflictError("a confirmed document keeps its lines; correct a value instead")
+    ln = s.get(InvoiceLineRow, line_id)
+    if ln is None or ln.invoice_id != inv.id or ln.removed_at is not None:
+        raise ValueError("no such line on this document")
+    now = datetime.now(UTC)
+    before = {f: _plain(getattr(ln, f)) for f in EDITABLE_LINE} | {"line_no": ln.line_no}
+    ln.removed_at, ln.removed_by = now, user_id
+    ln.removed_reason = (reason or "").strip() or None
+    # The caller retires the line's current result (``exceptions.retire_line_result``): history only.
+    inv.verification_status = "failed"
+    inv.confirmed_by, inv.confirmed_at = None, None
+    inv.review_draft = None
+    doc = s.get(DocumentRow, inv.document_id)
+    if doc is not None and doc.state == "succeeded":
+        transition(s, "documents", doc.id, doc.state_version, "needs_review")
+    inv.version += 1
+    s.flush()
+    gates = current_gates(s, inv)
+    write_audit(
+        s,
+        inv.tenant_id,
+        actor_type="user",
+        actor_user_id=user_id,
+        action="invoice.line_removed",
+        entity_type="invoice",
+        entity_id=inv.id,
+        before=before,
+        after={"line_no": ln.line_no, "reason": ln.removed_reason, "gates": gates},
     )
     return inv, gates

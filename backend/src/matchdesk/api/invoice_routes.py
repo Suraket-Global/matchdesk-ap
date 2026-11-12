@@ -35,6 +35,8 @@ class Correction(BaseModel):
 
 class ConfirmBody(BaseModel):
     accept_inconsistent: bool = False
+    # Required with accept_inconsistent when the figures do not add up (S-07; B9).
+    note: str | None = Field(default=None, max_length=2000)
 
 
 def _summary(
@@ -129,7 +131,14 @@ def register_invoice_routes(app: FastAPI, engine: Engine) -> None:
             if inv is None:
                 raise NotFoundError("invoice")
             try:
-                inv, gates = confirm(s, inv, p.user_id, version, bool(body and body.accept_inconsistent))
+                inv, gates = confirm(
+                    s,
+                    inv,
+                    p.user_id,
+                    version,
+                    bool(body and body.accept_inconsistent),
+                    body.note if body else None,
+                )
             except VersionConflict as exc:
                 raise StaleVersion(exc.current) from None
             except ValueError as exc:
@@ -141,6 +150,7 @@ def register_invoice_routes(app: FastAPI, engine: Engine) -> None:
             return {
                 "id": str(inv.id),
                 "verification_status": inv.verification_status,
+                "inconsistent_note": inv.inconsistent_note,
                 "gates": gates,
                 "version": inv.version,
                 "match_run_id": str(run.id) if run else None,

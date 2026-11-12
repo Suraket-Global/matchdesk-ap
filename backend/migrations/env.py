@@ -23,6 +23,9 @@ def run_migrations_online() -> None:
         # Lock rules of schema.md section 9 (R-11).
         connection.execute(text("set lock_timeout = '5s'"))
         connection.execute(text("set statement_timeout = '15min'"))
+        # Session settings survive this commit; Alembic then owns the migration transaction, which
+        # lets a migration build an index concurrently in ``autocommit_block()`` (B9, 0019).
+        connection.commit()
         context.configure(
             connection=connection,
             target_metadata=target_metadata,

@@ -130,6 +130,9 @@ def exception_body(e: ExceptionRow, stale: bool | None = None) -> dict[str, Any]
         "variance_amount": str(e.variance_amount) if e.variance_amount is not None else None,
         "reported_amount": str(e.reported_amount) if e.reported_amount is not None else None,
         "possibly_credited": e.possibly_credited_bill_id is not None,
+        "assigned_to": str(e.assigned_to) if e.assigned_to else None,
+        "credit_decision": e.credit_decision,
+        "credit_decided_at": e.credit_decided_at.isoformat() if e.credit_decided_at else None,
         "label": e.label,
         "allowed_codes": sorted(allowed_codes(e)),
         "stale": stale,
@@ -207,7 +210,7 @@ def _alias_affected(s: Session, al: ItemAlias) -> list[dict[str, Any]]:
         ln
         for ln in s.scalars(
             select(InvoiceLineRow)
-            .where(InvoiceLineRow.invoice_id.in_(inv_ids))
+            .where(InvoiceLineRow.invoice_id.in_(inv_ids), InvoiceLineRow.removed_at.is_(None))
             .order_by(InvoiceLineRow.invoice_id, InvoiceLineRow.line_no)
         )
         if ln.supplier_item_code and normalise_code(ln.supplier_item_code) == al.supplier_item_code_norm
@@ -287,6 +290,8 @@ def register_exception_routes(app: FastAPI, engine: Engine) -> None:
         max_value: str | None,
         sort: str | None,
         sub_reason: str | None = None,
+        assignee: str | None = None,
+        me: uuid.UUID | None = None,
     ) -> queue.QueueFilter:
         return queue.QueueFilter(
             status=status,
@@ -302,6 +307,7 @@ def register_exception_routes(app: FastAPI, engine: Engine) -> None:
             min_value=queue.parse_decimal(min_value, "min_value"),
             max_value=queue.parse_decimal(max_value, "max_value"),
             sort=sort or "value",
+            assignee=str(me) if assignee == "me" and me is not None else assignee,
         )
 
     @app.get("/api/v1/exceptions")
@@ -322,8 +328,10 @@ def register_exception_routes(app: FastAPI, engine: Engine) -> None:
         max_value: str | None = None,
         sort: str | None = None,
         sub_reason: str | None = None,
+        assignee: str | None = None,
     ) -> dict[str, Any]:
-        """S-08 (B8): filters and sort on the whole tenant-scoped set before the page is cut."""
+        """S-08 (B8): filters and sort on the whole tenant-scoped set before the page is cut; B9 adds
+        the assignee (a member id, ``me`` or ``none``) to the same scope and cursor."""
         require(p, "read")
         n = page_limit(limit)
         f = _filter(
@@ -340,6 +348,8 @@ def register_exception_routes(app: FastAPI, engine: Engine) -> None:
             max_value,
             sort,
             sub_reason,
+            assignee,
+            p.user_id,
         )
         with session(p.tenant_id, engine) as s:
             result = queue.page(s, f, n, cursor)
@@ -363,6 +373,8 @@ def register_exception_routes(app: FastAPI, engine: Engine) -> None:
         min_value: str | None = None,
         max_value: str | None = None,
         sort: str | None = None,
+        sub_reason: str | None = None,
+        assignee: str | None = None,
     ) -> dict[str, Any]:
         """Previous and next exception in the queue the user opened (S-09, B8), same filters."""
         require(p, "read")
@@ -379,6 +391,9 @@ def register_exception_routes(app: FastAPI, engine: Engine) -> None:
             min_value,
             max_value,
             sort,
+            sub_reason,
+            assignee,
+            p.user_id,
         )
         with session(p.tenant_id, engine) as s:
             exc = _one(s, exception_id)

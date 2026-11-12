@@ -25,6 +25,7 @@ from matchdesk.matching import normalise_number
 from matchdesk.qbo.client import ENTITIES, PageQuery, QboNotConfiguredError, QboReader
 from matchdesk.qbo.models import (
     Item,
+    PoLineChange,
     PoLineRow,
     PurchaseOrderRow,
     QboBillLineRow,
@@ -193,6 +194,7 @@ def _query(run: SyncRun, entity: str) -> PageQuery:
 
 def _one_page(s: Session, tenant_id: uuid.UUID, run: SyncRun, reader: QboReader, size: int) -> bool:
     cursor = dict(run.cursor or {})
+    cursor.setdefault("run_id", str(run.id))
     idx = int(cursor.get("entity_index", 0))
     if idx >= len(ENTITIES):
         return True
@@ -280,6 +282,7 @@ def _pos(
     }
     vendor_qbo = set(cursor.get("vendor_qbo_ids", []))
     po_ids = set(cursor.get("po_ids", []))
+    changes: list[tuple[str, PoLineRow, dict[str, Any], dict[str, Any] | None]] = []
     for r in rows:
         vendor_ref = _ref(r, "VendorRef")
         if vendor_ref not in vendors:
@@ -304,9 +307,9 @@ def _pos(
             if ln.get("Id") is None:
                 continue
             seen.add(str(ln["Id"]))
-            pl = lines.get(str(ln["Id"])) or PoLineRow(
-                tenant_id=tid, purchase_order_id=po.id, qbo_line_id=str(ln["Id"])
-            )
+            known = lines.get(str(ln["Id"]))
+            before = _line_values(known) if known is not None and known.removed_at is None else None
+            pl = known or PoLineRow(tenant_id=tid, purchase_order_id=po.id, qbo_line_id=str(ln["Id"]))
             pl.removed_at = None
             pl.line_no = int(ln.get("LineNum") or 0)
             pl.description = ln.get("Description")
@@ -327,13 +330,51 @@ def _pos(
                 pl.qty_ordered = Decimal("1")
                 pl.unit_price = pl.amount or Decimal("0")
             s.add(pl)
+            if before is not None and before != _line_values(pl):
+                changes.append(("changed", pl, before, _line_values(pl)))
         for qbo_line_id, gone in lines.items():
             if qbo_line_id not in seen and gone.removed_at is None:
                 gone.removed_at = now  # deleted in QuickBooks: no longer matchable (B3/B4 review m6)
+                changes.append(("removed", gone, _line_values(gone), None))
+        s.flush()
+        for kind, line, old, new in changes:
+            # S-10 (B9): what this read changed, kept as history; the po_change re-match follows.
+            s.add(
+                PoLineChange(
+                    tenant_id=tid,
+                    purchase_order_id=po.id,
+                    po_line_id=line.id,
+                    sync_run_id=uuid.UUID(cursor["run_id"]) if cursor.get("run_id") else None,
+                    change=kind,
+                    before=old,
+                    after=new,
+                    detected_at=now,
+                )
+            )
+        changes.clear()
         vendor_qbo.add(vendor_ref)
         po_ids.add(str(po.id))
     cursor["vendor_qbo_ids"] = sorted(vendor_qbo)
     cursor["po_ids"] = sorted(po_ids)
+
+
+def _line_values(pl: PoLineRow) -> dict[str, Any]:
+    """The values of a PO line that matching reads, as plain strings (S-10 before and after)."""
+    return {
+        "line_no": pl.line_no,
+        "item_id": str(pl.item_id) if pl.item_id else None,
+        "description": pl.description,
+        "qty_ordered": _num(pl.qty_ordered),
+        "uom": pl.uom,
+        "unit_price": _num(pl.unit_price),
+    }
+
+
+def _num(value: Decimal | None) -> str | None:
+    """A decimal in its shortest exact form, so 500 read from QuickBooks equals the stored 500.0000."""
+    if value is None:
+        return None
+    return format(dec(value).normalize(), "f")
 
 
 def _paid(total: Decimal | None, balance: Decimal | None) -> str:

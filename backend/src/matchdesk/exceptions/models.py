@@ -83,6 +83,20 @@ MATCH_TRIGGERS = (
     "manual",
 )
 RUN_STATES = ("queued", "running", "succeeded", "retry_wait", "failed")
+CREDIT_DECISIONS = ("credited", "not_credited")
+EVENTS = (
+    "raised",
+    "assigned",
+    "resolved",
+    "sent_for_approval",
+    "approved",
+    "returned",
+    "withdrawn",
+    "reopened",
+    "variance_changed",
+    "auto_closed",
+    "credit_decided",
+)
 
 
 class ItemAlias(TenantMixin, Base):
@@ -294,6 +308,17 @@ class ExceptionRow(TenantMixin, Base):
             "type <> 'receipt_absent' or coalesce(sub_reason, '') in ('not_received', 'supplier_slip_only', 'no_evidence')",
             name="receipt_absent_sub_reason",
         ),
+        tfk("credit_decision_bill_id", "qbo_bills"),
+        Index("ix_exceptions_tenant_id_assigned_to_status", "tenant_id", "assigned_to", "status"),
+        CheckConstraint(
+            "credit_decision is null or " + enum_check("credit_decision", CREDIT_DECISIONS),
+            name="credit_decision",
+        ),
+        CheckConstraint(
+            "(credit_decision is null) = (credit_decided_by is null) "
+            "and (credit_decision is null) = (credit_decision_bill_id is null)",
+            name="credit_decision_complete",
+        ),
     )
     fingerprint: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     invoice_id: Mapped[uuid.UUID] = mapped_column(UUIDT, nullable=False)
@@ -315,6 +340,15 @@ class ExceptionRow(TenantMixin, Base):
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     label: Mapped[str | None] = mapped_column(Text)
     version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+    # S-08 assignee (B9): who is working on it; never changes the status or a figure.
+    assigned_to: Mapped[uuid.UUID | None] = mapped_column(UUIDT, ForeignKey("users.id"))
+    # The controller's decision on a "possibly credited in QuickBooks" flag (MH-09; B9). An input of
+    # the rule engine, never touched by a match run: "credited" lets that one vendor credit net this
+    # exception; "not_credited" keeps it a finding and stops that credit flagging it again.
+    credit_decision: Mapped[str | None] = mapped_column(Text)
+    credit_decision_bill_id: Mapped[uuid.UUID | None] = mapped_column(UUIDT)
+    credit_decided_by: Mapped[uuid.UUID | None] = mapped_column(UUIDT, ForeignKey("users.id"))
+    credit_decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class ExceptionEvent(TenantMixin, Base):
@@ -324,24 +358,7 @@ class ExceptionEvent(TenantMixin, Base):
     __table_args__ = tenant_args(
         tfk("exception_id", "exceptions"),
         tfk("match_run_id", "match_runs"),
-        CheckConstraint(
-            enum_check(
-                "event",
-                (
-                    "raised",
-                    "assigned",
-                    "resolved",
-                    "sent_for_approval",
-                    "approved",
-                    "returned",
-                    "withdrawn",
-                    "reopened",
-                    "variance_changed",
-                    "auto_closed",
-                ),
-            ),
-            name="event",
-        ),
+        CheckConstraint(enum_check("event", EVENTS), name="event"),
     )
     exception_id: Mapped[uuid.UUID] = mapped_column(UUIDT, nullable=False)
     event: Mapped[str] = mapped_column(Text, nullable=False)

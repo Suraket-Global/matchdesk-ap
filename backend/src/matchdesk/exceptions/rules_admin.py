@@ -76,7 +76,7 @@ def invoices_for_alias_code(
     for inv_id, code in s.execute(
         select(InvoiceLineRow.invoice_id, InvoiceLineRow.supplier_item_code)
         .join(InvoiceRow, InvoiceRow.id == InvoiceLineRow.invoice_id)
-        .where(InvoiceRow.vendor_id == vendor_id)
+        .where(InvoiceRow.vendor_id == vendor_id, InvoiceLineRow.removed_at.is_(None))
     ).all():
         if normalise_code(code) == code_norm:
             ids.add(inv_id)

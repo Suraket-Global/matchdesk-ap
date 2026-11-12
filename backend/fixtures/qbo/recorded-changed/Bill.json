@@ -1,0 +1,73 @@
+{
+ "_note": "Synthetic. Shape assumed from Intuit's public Accounting API reference; unverified until T-1.1.1.",
+ "QueryResponse": {
+  "Bill": [
+   {
+    "Id": "201",
+    "DocNumber": "FF-0899",
+    "TxnDate": "2026-09-10",
+    "VendorRef": {
+     "value": "56"
+    },
+    "TotalAmt": 105.0,
+    "Balance": 0,
+    "Line": [
+     {
+      "Id": "1",
+      "LineNum": 1,
+      "Amount": 105.0,
+      "DetailType": "ItemBasedExpenseLineDetail",
+      "ItemBasedExpenseLineDetail": {
+       "ItemRef": {
+        "value": "11"
+       },
+       "Qty": 250,
+       "UnitPrice": 0.42
+      },
+      "LinkedTxn": [
+       {
+        "TxnId": "101",
+        "TxnType": "PurchaseOrder",
+        "TxnLineId": "1"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "Id": "202",
+    "DocNumber": "SS-5102",
+    "TxnDate": "2026-10-20",
+    "VendorRef": {
+     "value": "57"
+    },
+    "TotalAmt": 50.0,
+    "Balance": 50.0,
+    "Line": [
+     {
+      "Id": "1",
+      "LineNum": 1,
+      "Amount": 50.0,
+      "DetailType": "ItemBasedExpenseLineDetail",
+      "ItemBasedExpenseLineDetail": {
+       "ItemRef": {
+        "value": "15"
+       },
+       "Qty": 1000,
+       "UnitPrice": 0.05
+      },
+      "LinkedTxn": [
+       {
+        "TxnId": "104",
+        "TxnType": "PurchaseOrder",
+        "TxnLineId": "1"
+       }
+      ]
+     }
+    ]
+   }
+  ],
+  "startPosition": 1,
+  "maxResults": 2
+ }
+}

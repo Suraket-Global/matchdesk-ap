@@ -16,6 +16,7 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import Engine, func, select
 
+from matchdesk.api import views
 from matchdesk.api.common import (
     SESSION_COOKIE,
     Auth,
@@ -196,6 +197,7 @@ def register_qbo_routes(app: FastAPI, settings: Settings, engine: Engine, endpoi
                 }
                 for ln in lines
             ]
+            body["changed_in_quickbooks"] = views.po_change_banner(s, po.id)
             return body
 
 

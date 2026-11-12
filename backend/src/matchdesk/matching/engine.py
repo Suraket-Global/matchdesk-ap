@@ -34,6 +34,8 @@ from matchdesk.matching.normalise import (
 from matchdesk.matching.types import (
     Alias,
     AliasStatus,
+    CreditDecision,
+    CreditDecisionInput,
     DocLine,
     DocType,
     Document,
@@ -458,7 +460,7 @@ def evaluate(inp: MatchInput) -> MatchResult:
 
     # ---- price-only credits, then possibly-credited flags ---------------------------
     _apply_price_credits(st, price_credits)
-    _flag_possibly_credited(st, vendor_only_credits, {d.id: d for d in invoices})
+    _flag_possibly_credited(st, vendor_only_credits, {d.id: d for d in invoices}, inp.credit_decisions)
 
     # ---- document-stopped lines ------------------------------------------------------
     for doc in docs:
@@ -1045,24 +1047,59 @@ def _apply_price_credits(st: _State, credits: list[_PriceCredit]) -> None:
             )
 
 
-def _flag_possibly_credited(st: _State, credits: list[QboBill], invoices: dict[str, Document]) -> None:
+def _could_be_credited_by(exc: ExceptionResult, credit: QboBill, doc: Document | None) -> bool:
+    """A vendor credit tied only by vendor and a similar amount, dated after the invoice (MH-09)."""
+    return not (
+        doc is None
+        or exc.status != ExceptionStatus.OPEN
+        or exc.value_class != ValueClass.FINDING_CANDIDATE
+        or exc.variance_amount is None
+        or exc.variance_amount <= 0
+        or doc.vendor_id != credit.vendor_id
+        or credit.txn_date is None
+        or doc.doc_date is None
+        or credit.txn_date <= doc.doc_date
+        or abs(abs(dec(credit.total)) - exc.variance_amount) > POSSIBLY_CREDITED_PCT * exc.variance_amount
+    )
+
+
+def _flag_possibly_credited(
+    st: _State,
+    credits: list[QboBill],
+    invoices: dict[str, Document],
+    decisions: tuple[CreditDecisionInput, ...] = (),
+) -> None:
+    """Vendor-only credits never net on their own: a matching exception is flagged and listed as open
+    until the controller decides (MH-09). A "credited" decision nets that exception with that credit,
+    once: the credit is then used up and flags no other exception, so one credit is never netted
+    twice. A "not credited" decision keeps the exception a finding and that credit never flags it
+    again. A decision applies only while the credit still fits the exception's amount."""
+    by_id = {c.id: c for c in credits}
+    decided = {d.key: d for d in sorted(decisions, key=lambda d: d.key)}
+    used: set[str] = set()
+    for idx, exc in enumerate(st.exceptions):
+        d = decided.get(exc.key)
+        if d is None or d.decision != CreditDecision.CREDITED or d.qbo_bill_id in used:
+            continue
+        credit = by_id.get(d.qbo_bill_id)
+        if credit is None or not _could_be_credited_by(exc, credit, invoices.get(exc.document_id)):
+            continue
+        used.add(credit.id)
+        st.exceptions[idx] = replace(
+            exc,
+            status=ExceptionStatus.RESOLVED,
+            resolution_code=ResolutionCode.RESOLVED_BY_CREDIT,
+            related_qbo_bill_ids=(credit.id,),
+            label=f"Credited in QuickBooks ({credit.doc_number or 'vendor credit'}), decided by the controller",
+        )
     for credit in credits:
-        amount = abs(dec(credit.total))
+        if credit.id in used:
+            continue
         for idx, exc in enumerate(st.exceptions):
-            doc = invoices.get(exc.document_id)
-            if (
-                doc is None
-                or exc.status != ExceptionStatus.OPEN
-                or exc.value_class != ValueClass.FINDING_CANDIDATE
-                or exc.variance_amount is None
-                or exc.variance_amount <= 0
-                or doc.vendor_id != credit.vendor_id
-                or credit.txn_date is None
-                or doc.doc_date is None
-                or credit.txn_date <= doc.doc_date
-            ):
+            d = decided.get(exc.key)
+            if d is not None and d.decision == CreditDecision.NOT_CREDITED and d.qbo_bill_id == credit.id:
                 continue
-            if abs(amount - exc.variance_amount) <= POSSIBLY_CREDITED_PCT * exc.variance_amount:
+            if _could_be_credited_by(exc, credit, invoices.get(exc.document_id)):
                 st.exceptions[idx] = replace(
                     exc, value_class=ValueClass.OPEN_UNDECIDED, possibly_credited_bill_id=credit.id
                 )

@@ -1,0 +1,39 @@
+{
+ "_note": "Synthetic. Shape assumed from Intuit's public Accounting API reference; unverified until T-1.1.1.",
+ "QueryResponse": {
+  "Item": [
+   {
+    "Id": "11",
+    "Name": "Hex bolt M8",
+    "Sku": "HB-M8",
+    "Type": "Inventory"
+   },
+   {
+    "Id": "12",
+    "Name": "Washer M8",
+    "Sku": "WS-M8",
+    "Type": "Inventory"
+   },
+   {
+    "Id": "13",
+    "Name": "Pallet wrap 500 mm",
+    "Sku": "PW-500",
+    "Type": "Inventory"
+   },
+   {
+    "Id": "14",
+    "Name": "Carton 12 x 12",
+    "Sku": "CT-1212",
+    "Type": "Inventory"
+   },
+   {
+    "Id": "15",
+    "Name": "Cable tie 200 mm",
+    "Sku": "TIE-200",
+    "Type": "Inventory"
+   }
+  ],
+  "startPosition": 1,
+  "maxResults": 5
+ }
+}

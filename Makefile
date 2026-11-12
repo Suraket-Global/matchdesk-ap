@@ -1,8 +1,8 @@
-# Local commands for build milestones B1 to B7 (AGENTS.md section 12). Run from the repository root.
+# Local commands for build milestones B1 to B9 (AGENTS.md section 12). Run from the repository root.
 BACKEND := backend
 VENV := $(BACKEND)/.venv/bin
 
-.PHONY: up down seed-demo demo-reset demo-email operator-code web web-build web-test web-e2e web-check test test-unit test-integration check reset-test-db
+.PHONY: up down seed-demo demo-reset demo-email demo-po-change operator-code web web-build web-test web-e2e web-check test test-unit test-integration check reset-test-db
 
 up:
 	$(BACKEND)/scripts/dev_up.sh
@@ -22,6 +22,10 @@ demo-reset:
 # B7: two synthetic signed emails to the local intake webhook (one accepted, one held).
 demo-email:
 	cd $(BACKEND) && .venv/bin/python scripts/demo_email.py
+
+# B9: read QuickBooks again from recorded responses taken after a change (S-10 banner; demo only).
+demo-po-change:
+	cd $(BACKEND) && .venv/bin/python scripts/demo_po_change.py
 
 # B7: the current one-time code of the local demo operator (development only).
 operator-code:

@@ -25,8 +25,9 @@ MODEL_IMPORTS: dict[str, set[str]] = {
         "identity",
     },  # extraction runs; idempotency keys; vendor and PO lookup (B3); intake address of a tenant (B7)
     "receiving": {"qbo", "intake"},  # PO lines to map rows to; the shared documents table (B3)
-    # frozen report snapshot (B3); weekly summary recipients and tenant name (B7)
-    "reporting": {"exceptions", "intake", "qbo", "receiving", "identity"},
+    # frozen report snapshot (B3); weekly summary recipients and tenant name (B7); the audit log in
+    # the account archive (B9)
+    "reporting": {"exceptions", "intake", "qbo", "receiving", "identity", "audit"},
     # read endpoints (B3); operator console and support grants (B7)
     "api": {"exceptions", "intake", "tenancy", "qbo", "receiving", "reporting", "identity"},
 }

@@ -23,7 +23,15 @@ from matchdesk.exceptions.models import ExceptionRow, ItemAlias, LineMatch, Tole
 from matchdesk.identity import User
 from matchdesk.intake.models import DocumentRow, InvoiceLineRow, InvoiceRow
 from matchdesk.matching import ReceiptLine, receipt_line_counts
-from matchdesk.qbo.models import Item, PoLineRow, PurchaseOrderRow, QboBillLineRow, QboBillRow, Vendor
+from matchdesk.qbo.models import (
+    Item,
+    PoLineChange,
+    PoLineRow,
+    PurchaseOrderRow,
+    QboBillLineRow,
+    QboBillRow,
+    Vendor,
+)
 from matchdesk.receiving import as_import
 from matchdesk.receiving.models import ReceiptLineRow, ReceiptRow, ReceivingImportRow
 
@@ -66,9 +74,17 @@ def exception_context(s: Session, rows: list[ExceptionRow]) -> dict[uuid.UUID, d
     invoices = {i.id: i for i in s.scalars(select(InvoiceRow).where(InvoiceRow.id.in_(inv_ids)))}
     lines = {ln.id: ln for ln in s.scalars(select(InvoiceLineRow).where(InvoiceLineRow.id.in_(line_ids)))}
     names = vendor_names(s)
+    people = user_names(s, [e.assigned_to for e in rows])
+    bill_ids = {b for e in rows for b in (e.possibly_credited_bill_id, e.credit_decision_bill_id) if b}
+    bills = (
+        {b.id: b for b in s.scalars(select(QboBillRow).where(QboBillRow.id.in_(bill_ids)))}
+        if bill_ids
+        else {}
+    )
     out: dict[uuid.UUID, dict[str, Any]] = {}
     for e in rows:
         inv = invoices.get(e.invoice_id)
+        bill = bills.get(e.possibly_credited_bill_id or e.credit_decision_bill_id)  # type: ignore[arg-type]
         ln = lines.get(e.invoice_line_id) if e.invoice_line_id else None
         out[e.id] = {
             "vendor_id": str(inv.vendor_id) if inv and inv.vendor_id else None,
@@ -83,6 +99,15 @@ def exception_context(s: Session, rows: list[ExceptionRow]) -> dict[uuid.UUID, d
             "line_amount": str(ln.amount) if ln and ln.amount is not None else None,
             "raised_at": e.created_at.isoformat(),
             "resolved_at": e.resolved_at.isoformat() if e.resolved_at else None,
+            "assigned_to_name": people.get(e.assigned_to) if e.assigned_to else None,
+            # B9: the QuickBooks vendor credit a possible-credit flag or decision names.
+            "credit_bill": {
+                "doc_number": bill.doc_number,
+                "txn_date": bill.txn_date.isoformat() if bill.txn_date else None,
+                "total": str(bill.total) if bill.total is not None else None,
+            }
+            if bill is not None
+            else None,
         }
     return out
 
@@ -391,3 +416,47 @@ __all__ = [
     "user_names",
     "vendor_names",
 ]
+
+
+def po_change_banner(s: Session, po_id: uuid.UUID) -> dict[str, Any] | None:
+    """S-10 "changed in QuickBooks" (B9): the latest QuickBooks read that changed or removed lines of
+    this purchase order after they had been matched, with the values before and after, and whether
+    the affected lines were matched again since. None when nothing changed after a match."""
+    latest = s.scalar(
+        select(func.max(PoLineChange.detected_at)).where(PoLineChange.purchase_order_id == po_id)
+    )
+    if latest is None:
+        return None
+    changes = s.scalars(
+        select(PoLineChange)
+        .where(PoLineChange.purchase_order_id == po_id, PoLineChange.detected_at == latest)
+        .order_by(PoLineChange.created_at, PoLineChange.id)
+    ).all()
+    line_ids = [c.po_line_id for c in changes]
+    matched_before = s.scalar(
+        select(func.count())
+        .select_from(LineMatch)
+        .where(LineMatch.po_line_id.in_(line_ids), LineMatch.created_at < latest)
+    )
+    if not matched_before:
+        return None
+    rematched_at = s.scalar(
+        select(func.min(LineMatch.created_at)).where(
+            LineMatch.po_line_id.in_(line_ids), LineMatch.is_current.is_(True), LineMatch.created_at > latest
+        )
+    )
+    numbers = dict(s.execute(select(PoLineRow.id, PoLineRow.line_no).where(PoLineRow.id.in_(line_ids))).all())
+    return {
+        "detected_at": latest.isoformat(),
+        "rematched_at": rematched_at.isoformat() if rematched_at else None,
+        "changes": [
+            {
+                "po_line_id": str(c.po_line_id),
+                "line_no": numbers.get(c.po_line_id),
+                "change": c.change,
+                "before": c.before,
+                "after": c.after,
+            }
+            for c in changes
+        ],
+    }

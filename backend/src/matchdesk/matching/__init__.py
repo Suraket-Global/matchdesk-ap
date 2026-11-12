@@ -17,6 +17,8 @@ from matchdesk.matching.normalise import (
 from matchdesk.matching.types import (
     Alias,
     AliasStatus,
+    CreditDecision,
+    CreditDecisionInput,
     DocLine,
     DocType,
     Document,
@@ -47,6 +49,8 @@ __all__ = [
     "QBO_CREDIT_LABEL",
     "Alias",
     "AliasStatus",
+    "CreditDecision",
+    "CreditDecisionInput",
     "DocLine",
     "DocType",
     "Document",

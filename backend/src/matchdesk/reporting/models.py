@@ -26,7 +26,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from matchdesk.tenancy import MONEY, UUIDT, Base, TenantMixin, enum_check, tenant_args, tfk
+from matchdesk.tenancy import MONEY, UUIDT, Base, GlobalMixin, TenantMixin, enum_check, tenant_args, tfk
 
 REPORT_STATES = ("generating", "draft", "approved", "superseded")
 SECTIONS = ("finding", "not_received", "unverified", "waived", "open")
@@ -153,3 +153,112 @@ class WeeklySummaryRun(TenantMixin, Base):
     recipients: Mapped[int] = mapped_column(Integer, nullable=False)
     sent_by: Mapped[uuid.UUID | None] = mapped_column(UUIDT, ForeignKey("users.id"))
     figures: Mapped[dict] = mapped_column(JSONB, nullable=False)
+
+
+FINDING_OUTCOMES = ("controller_confirmed", "credit_recovered")
+
+
+class FindingOutcomeRow(TenantMixin, Base):
+    """What happened to a flagged discrepancy of the governing report after approval (PRD M-3b, M-3c;
+    C1; built in B9). Insert-only: the controller confirmed it as an overcharge for an amount, then
+    the supplier's credit was recovered for an amount. A trigger refuses an amount above the finding,
+    a recovery without a confirmation or above it, and a finding outside the governing report. The
+    three pilot counts stay separate and are never stored as one figure."""
+
+    __tablename__ = "finding_outcomes"
+    __table_args__ = tenant_args(
+        tfk("report_finding_id", "report_findings"),
+        tfk("credit_document_id", "documents"),
+        UniqueConstraint("tenant_id", "report_finding_id", "outcome"),
+        CheckConstraint(enum_check("outcome", FINDING_OUTCOMES), name="outcome"),
+        CheckConstraint("amount > 0", name="amount_positive"),
+        CheckConstraint(
+            "outcome <> 'credit_recovered' or credit_document_id is not null or credit_reference is not null",
+            name="credit_has_evidence",
+        ),
+    )
+    report_finding_id: Mapped[uuid.UUID] = mapped_column(UUIDT, nullable=False)
+    outcome: Mapped[str] = mapped_column(Text, nullable=False)
+    amount: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
+    recorded_by: Mapped[uuid.UUID] = mapped_column(UUIDT, ForeignKey("users.id"), nullable=False)
+    credit_document_id: Mapped[uuid.UUID | None] = mapped_column(UUIDT)
+    # Where no credit-note file exists: the QuickBooks vendor credit or refund reference (B9).
+    credit_reference: Mapped[str | None] = mapped_column(Text)
+    note: Mapped[str | None] = mapped_column(Text)
+
+
+DELETION_STATES = ("requested", "scheduled", "declined", "cancelled", "executed")
+
+
+class DeletionRequest(TenantMixin, Base):
+    """A controller's request to delete the account (schema.md section 8; B9). The operator schedules
+    or declines it on S-18; the deletion runs on ``delete_after`` so the controller can export the
+    approved reports, the audit log and the archive first. Executing it removes this row with the
+    account; ``deletion_ledger`` keeps the fact."""
+
+    __tablename__ = "deletion_requests"
+    __table_args__ = tenant_args(
+        CheckConstraint(enum_check("status", DELETION_STATES), name="status"),
+        CheckConstraint("scope = 'account'", name="scope"),
+        CheckConstraint(
+            "status <> 'scheduled' or (delete_after is not null and decided_by is not null)",
+            name="scheduled_has_date",
+        ),
+        Index(
+            "uq_deletion_requests_open",
+            "tenant_id",
+            unique=True,
+            postgresql_where="status in ('requested', 'scheduled')",
+        ),
+    )
+    scope: Mapped[str] = mapped_column(Text, nullable=False, server_default="account")
+    reason: Mapped[str | None] = mapped_column(Text)
+    requested_by: Mapped[uuid.UUID] = mapped_column(UUIDT, ForeignKey("users.id"), nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="requested")
+    decided_by: Mapped[uuid.UUID | None] = mapped_column(UUIDT, ForeignKey("users.id"))
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    decision_note: Mapped[str | None] = mapped_column(Text)
+    delete_after: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cancelled_by: Mapped[uuid.UUID | None] = mapped_column(UUIDT, ForeignKey("users.id"))
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+
+
+ARCHIVE_STATES = ("queued", "running", "ready", "failed", "expired")
+
+
+class ArchiveExport(TenantMixin, Base):
+    """An archive of the account's records (CSV) and original documents in one ZIP (schema.md
+    section 8; B9). Built by the worker into ``documents`` (purpose ``export``) and removed 24 hours
+    after it is ready [assumption: schema.md 8 retention of generated exports]."""
+
+    __tablename__ = "archive_exports"
+    __table_args__ = tenant_args(
+        tfk("document_id", "documents"),
+        CheckConstraint(enum_check("status", ARCHIVE_STATES), name="status"),
+        CheckConstraint(
+            "status <> 'ready' or (document_id is not null and expires_at is not null)", name="ready_has_file"
+        ),
+    )
+    requested_by: Mapped[uuid.UUID] = mapped_column(UUIDT, ForeignKey("users.id"), nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="queued")
+    document_id: Mapped[uuid.UUID | None] = mapped_column(UUIDT)
+    file_count: Mapped[int | None] = mapped_column(Integer)
+    byte_size: Mapped[int | None] = mapped_column(Integer)
+    error: Mapped[str | None] = mapped_column(Text)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class DeletionLedger(GlobalMixin, Base):
+    """Insert-only record that an account was deleted (schema.md 3.7, section 8). Global: it outlives
+    the tenant, carries no tenant data beyond the identifier, and is replayed after a restore."""
+
+    __tablename__ = "deletion_ledger"
+    __table_args__ = (CheckConstraint(enum_check("scope", ("tenant", "document")), name="scope"),)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(UUIDT, nullable=False)
+    scope: Mapped[str] = mapped_column(Text, nullable=False)
+    entity_id: Mapped[uuid.UUID | None] = mapped_column(UUIDT)
+    requested_by: Mapped[uuid.UUID | None] = mapped_column(UUIDT)
+    executed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    rows_deleted: Mapped[int] = mapped_column(Integer, nullable=False)

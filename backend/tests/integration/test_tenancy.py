@@ -68,10 +68,12 @@ def test_every_tenant_table_has_forced_rls_and_only_allowed_policies(owner_engin
     expected = {
         "memberships": "membership_self,tenant_isolation",
         "invitations": "invitation_by_token,tenant_isolation",
-        # B7: the operator allow-list of schema.md 4.3, exactly these three tables.
+        # B7, B9: the operator allow-list of schema.md 4.3, exactly these four tables.
         "pilot_engagements": "operator_insert,operator_select,operator_update,tenant_isolation",
         "usage_events": "operator_select,tenant_isolation",
         "support_grants": "operator_insert,operator_select,tenant_isolation",
+        # B9: the operator reads deletion requests and schedules or declines them (S-18).
+        "deletion_requests": "operator_select,operator_update,tenant_isolation",
     }
     for table in TENANT_TABLES:
         assert catalogue[table] == (True, True, expected.get(table, "tenant_isolation")), table
@@ -206,7 +208,12 @@ def test_it03_blobstore_refuses_other_tenant_keys(app_engine, two_tenants):  # t
         )
 
 
-OPERATOR_READABLE = {"pilot_engagements", "usage_events", "support_grants"}  # schema.md 4.3
+OPERATOR_READABLE = {
+    "pilot_engagements",
+    "usage_events",
+    "support_grants",
+    "deletion_requests",
+}  # schema.md 4.3
 
 
 def test_it29_operator_without_grant_sees_no_tenant_row(app_engine, two_tenants):  # type: ignore[no-untyped-def]

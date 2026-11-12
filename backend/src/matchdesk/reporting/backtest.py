@@ -27,9 +27,10 @@ from matchdesk.audit import write_audit
 from matchdesk.core import ZERO, ConflictError, dec, round_cents, text_pdf
 from matchdesk.exceptions import stale_runs
 from matchdesk.exceptions.models import Approval, ExceptionRow, LineMatch
+from matchdesk.identity import User
 from matchdesk.intake.models import DocumentRow, InvoiceLineRow, InvoiceRow
 from matchdesk.qbo.models import PoLineRow, PurchaseOrderRow, QboBillRow, Vendor
-from matchdesk.receiving import counting_receipt_totals
+from matchdesk.receiving import counting_receipt_totals, current_declaration, describe_declaration
 from matchdesk.receiving.models import ReceiptLineRow, ReceivingImportRow
 from matchdesk.reporting.models import BacktestReport, ReportFinding
 from matchdesk.reporting.refund import DEFAULT_THRESHOLD, RefundCalculation
@@ -111,7 +112,9 @@ def blocking_reasons(s: Session, start: date, end: date) -> list[str]:
         reasons.append(f"{pending} approval(s) pending")
     matches = _current_matches(s, ids)
     lines = s.scalar(
-        select(func.count()).select_from(InvoiceLineRow).where(InvoiceLineRow.invoice_id.in_(ids))
+        select(func.count())
+        .select_from(InvoiceLineRow)
+        .where(InvoiceLineRow.invoice_id.in_(ids), InvoiceLineRow.removed_at.is_(None))
     )
     if (lines or 0) > len(matches):
         reasons.append(f"{int(lines or 0) - len(matches)} line(s) not matched yet")
@@ -250,6 +253,19 @@ def create_draft(
         "paid_split": {k: str(round_cents(v)) for k, v in sorted(paid_split.items())},
         "qualifying_amount": str(round_cents(qualifying)),
         "stale_lines": sum(1 for lm, _ln in matches if stale.get(lm.match_run_id)),
+        # B9: the controller's "no receiving records" statement in force at the cut-off, if any.
+        "no_receiving_declaration": _declaration(s),
+        # S-13 section 6 (B9): confirmed with figures that do not add up, with the clerk's note.
+        "inconsistent_documents": [
+            {
+                "invoice_id": str(i.id),
+                "doc_number": i.doc_number,
+                "vendor_name": vendors.get(i.vendor_id) if i.vendor_id else i.vendor_name_read,
+                "note": i.inconsistent_note,
+            }
+            for i in sorted(invoices, key=lambda i: (i.doc_date or start, i.doc_number or ""))
+            if i.verification_status == "human_confirmed_inconsistent"
+        ],
     }
     report.history_read_from = history
     report.receipt_coverage_pct = cov["receipt_coverage_pct"]
@@ -313,11 +329,21 @@ def live_coverage(s: Session, start: date, end: date) -> dict[str, Any]:
         "documents_in_review": sum(1 for i in invoices if i.verification_status == "failed"),
         "state": state,
         # B8: a figure is shown only when it was measured; zero is then a measured zero.
-        **{k: (str(v) if v is not None and state == "measured" else None) for k, v in cov.items()},
+        **{k: (str(v) if v is not None and state in FIGURE_STATES else None) for k, v in cov.items()},
+        "no_receiving_declaration": _declaration(s),
     }
 
 
-MEASUREMENT_STATES = ("awaiting_invoices", "awaiting_receiving", "processing", "measured", "unavailable")
+MEASUREMENT_STATES = (
+    "awaiting_invoices",
+    "awaiting_receiving",
+    "no_receiving_records",
+    "processing",
+    "measured",
+    "unavailable",
+)
+# States whose figures are measured values (B9: with the declaration, 0 % coverage is a measured 0).
+FIGURE_STATES = ("measured", "no_receiving_records")
 
 
 def measurement_state(
@@ -346,6 +372,7 @@ def measurement_state(
             .where(
                 InvoiceLineRow.invoice_id.in_([i.id for i in invoices]),
                 InvoiceRow.verification_status != "failed",
+                InvoiceLineRow.removed_at.is_(None),
                 InvoiceLineRow.id.not_in(line_ids) if line_ids else InvoiceLineRow.id.is_not(None),
             )
         )
@@ -360,8 +387,18 @@ def measurement_state(
         select(func.count()).select_from(ReceivingImportRow).where(ReceivingImportRow.state == "succeeded")
     )
     if not receiving:
-        return "awaiting_receiving"
+        # B9: the controller declared there are no receiving records; the lines are measured, each
+        # a receipt-absent exception, rather than waiting for a file that will not come.
+        return "no_receiving_records" if current_declaration(s) is not None else "awaiting_receiving"
     return "measured" if item_lines else "unavailable"
+
+
+def _declaration(s: Session) -> dict[str, Any] | None:
+    row = current_declaration(s)
+    if row is None:
+        return None
+    found = s.execute(select(User.id, User.display_name, User.email).where(User.id == row.declared_by)).all()
+    return describe_declaration(row, {uid: (name or email) for uid, name, email in found})
 
 
 def _class_b_lines(s: Session, po_line_ids: list[uuid.UUID]) -> set[uuid.UUID]:
@@ -649,6 +686,22 @@ def export_csv(r: BacktestReport, findings: list[ReportFinding]) -> bytes:
     return buf.getvalue().encode()
 
 
+def _declaration_lines(r: BacktestReport) -> list[str]:
+    d = (r.totals or {}).get("no_receiving_declaration")
+    if not d:
+        return []
+    who = d.get("declared_by_name") or "the controller"
+    return [
+        f"No receiving records: declared by {who} on {str(d.get('declared_at', ''))[:10]}.",
+        "Every line is receipt absent; price, ordered-quantity and duplicate checks ran. Two-way match only.",
+    ]
+
+
+def _inconsistent_lines(r: BacktestReport) -> list[str]:
+    docs = (r.totals or {}).get("inconsistent_documents") or []
+    return [f"Does not add up (confirmed): {d.get('doc_number') or ''} - {d.get('note') or ''}" for d in docs]
+
+
 def export_pdf(r: BacktestReport, findings: list[ReportFinding]) -> bytes:
     sec = r.totals.get("sections", {})
     lines = [
@@ -662,6 +715,8 @@ def export_pdf(r: BacktestReport, findings: list[ReportFinding]) -> bytes:
         f"   Undecided: {sec.get('open', {}).get('amount', '0.00')}",
         f"Receipt coverage: {r.receipt_coverage_pct}%  class A complete-log coverage: {r.coverage_class_a_pct}%"
         f"  class B: {r.coverage_class_b_pct}%  supplier-slip-only lines: {r.class_c_only_lines}",
+        *_declaration_lines(r),
+        *_inconsistent_lines(r),
         "",
         "Section       Type                 Document       PO       Line   Amount     Paid",
     ]

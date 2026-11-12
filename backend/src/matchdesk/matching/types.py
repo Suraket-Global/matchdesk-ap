@@ -99,6 +99,28 @@ class DuplicateDecision(StrEnum):
     NOT_A_DUPLICATE = "not_a_duplicate"
 
 
+class CreditDecision(StrEnum):
+    """The controller's decision on a "possibly credited in QuickBooks" flag (MH-09; B9)."""
+
+    CREDITED = "credited"
+    NOT_CREDITED = "not_credited"
+
+
+@dataclass(frozen=True)
+class CreditDecisionInput:
+    """One decision: the exception (document, line or "", type), the vendor credit, the decision."""
+
+    document_id: str
+    line_id: str
+    type: str
+    qbo_bill_id: str
+    decision: CreditDecision
+
+    @property
+    def key(self) -> tuple[str, str, str]:
+        return (self.document_id, self.line_id, self.type)
+
+
 @dataclass(frozen=True)
 class Tolerance:
     """One tolerance rule. ``price_tol_pct`` is in percent: 0.5 means 0.5 %.
@@ -243,6 +265,7 @@ class MatchInput:
     vendor_tolerances: tuple[tuple[str, Tolerance], ...] = ()
     duplicate_decisions: tuple[tuple[str, DuplicateDecision], ...] = ()  # later doc id
     confirmed_not_received: frozenset[str] = frozenset()  # invoice line ids
+    credit_decisions: tuple[CreditDecisionInput, ...] = ()  # B9; sorted by key
     ruleset_code: str = "v1"
 
 

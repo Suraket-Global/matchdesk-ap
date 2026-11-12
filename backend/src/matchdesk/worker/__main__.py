@@ -13,7 +13,14 @@ from matchdesk.exceptions import MATCH_REQUEST_TASK, MATCH_RUN_TASK, execute_run
 from matchdesk.extraction import extractor_from_settings
 from matchdesk.intake import PROCESS_DOCUMENT_TASK, make_handler, purge_raw
 from matchdesk.qbo import SYNC_TASK, make_sync_handler, reader_from_settings
-from matchdesk.reporting import due_weekly
+from matchdesk.receiving import purge_drafts_everywhere
+from matchdesk.reporting import (
+    ARCHIVE_TASK,
+    due_weekly,
+    execute_due_deletions,
+    expire_archives,
+    make_archive_handler,
+)
 from matchdesk.schema_registry import load_all_models
 from matchdesk.tenancy import claim, get_engine, run_claimed
 
@@ -35,6 +42,7 @@ def handlers(engine: Any) -> dict[str, Any]:
         MATCH_REQUEST_TASK: handle_match_request,
         PROCESS_DOCUMENT_TASK: make_handler(engine, extractor_from_settings(settings)),
         SYNC_TASK: make_sync_handler(engine, lambda: reader_from_settings(settings), settings.qbo_page_size),
+        ARCHIVE_TASK: make_archive_handler(),
     }
 
 
@@ -50,15 +58,28 @@ SCHEDULE_EVERY_SECONDS = 60
 
 
 def scheduled(engine: Any, settings: Any, now: datetime | None = None) -> None:
-    """Time-driven work (B7): the Monday weekly summary (T-5.1.4) and the 7-day deletion of raw
-    inbound email (schema.md 8). Both are idempotent, so a restart or a second worker repeats
-    nothing."""
+    """Time-driven work: the Monday weekly summary (T-5.1.4) and the 7-day deletion of raw inbound
+    email (schema.md 8; B7); since B9 the 7-day removal of receiving drafts never committed, the
+    24-hour expiry of archive exports and the account deletions that are due. Each is idempotent, so
+    a restart or a second worker repeats nothing."""
     at = now or datetime.now(UTC)
     try:
         sent = due_weekly(engine, at, mailer_from_settings(settings), settings)
         purged = purge_raw(engine, settings, at)
-        if sent or purged:
-            log.info("scheduled", extra={"weekly_sent": sent, "raw_purged": purged})
+        drafts = purge_drafts_everywhere(engine, at)
+        expired = expire_archives(engine, at)
+        deleted = len(execute_due_deletions(engine))
+        if sent or purged or drafts or expired or deleted:
+            log.info(
+                "scheduled",
+                extra={
+                    "weekly_sent": sent,
+                    "raw_purged": purged,
+                    "drafts_removed": drafts,
+                    "archives_expired": expired,
+                    "accounts_deleted": deleted,
+                },
+            )
     except Exception as exc:  # never stop the job loop; the next minute tries again
         log.error("scheduled_failed", extra={"reason": type(exc).__name__})
 

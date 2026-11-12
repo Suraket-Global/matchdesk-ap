@@ -149,9 +149,16 @@ def test_inconsistent_confirmation_needs_explicit_acceptance(app_engine, client)
         f"/api/v1/invoices/{inv}/confirm-extraction", headers={**w.headers, "If-Match": str(v)}
     )
     assert refused.status_code == 422
-    ok = client.post(
+    # B9: accepting a document that does not add up also needs the clerk's note.
+    no_note = client.post(
         f"/api/v1/invoices/{inv}/confirm-extraction",
         json={"accept_inconsistent": True},
+        headers={**w.headers, "If-Match": str(v)},
+    )
+    assert no_note.status_code == 422 and "note" in no_note.json()["detail"]
+    ok = client.post(
+        f"/api/v1/invoices/{inv}/confirm-extraction",
+        json={"accept_inconsistent": True, "note": "Supplier's total omits the eco fee (synthetic)."},
         headers={**w.headers, "If-Match": str(v)},
     )
     assert ok.status_code == 200 and ok.json()["verification_status"] == "human_confirmed_inconsistent"

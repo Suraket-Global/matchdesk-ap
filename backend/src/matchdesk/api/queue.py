@@ -46,6 +46,7 @@ class QueueFilter:
     min_value: Decimal | None = None
     max_value: Decimal | None = None
     sort: str = "value"
+    assignee: str | None = None  # a member's user id, or "none" for unassigned (B9)
 
 
 def parse_decimal(text: str | None, name: str) -> Decimal | None:
@@ -113,6 +114,13 @@ def base_query(f: QueueFilter, with_type: bool = True) -> Select[Any]:
         q = q.where(InvoiceRow.doc_date >= f.period_start)
     if f.period_end:
         q = q.where(InvoiceRow.doc_date <= f.period_end)
+    if f.assignee == "none":
+        q = q.where(ExceptionRow.assigned_to.is_(None))
+    elif f.assignee:
+        try:
+            q = q.where(ExceptionRow.assigned_to == uuid.UUID(f.assignee))
+        except ValueError:
+            raise HTTPException(422, "assignee must be a member id, me or none") from None
     if f.min_value is not None:
         q = q.where(value_expr() >= f.min_value)
     if f.max_value is not None:

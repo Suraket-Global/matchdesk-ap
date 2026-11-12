@@ -115,6 +115,8 @@ class InvoiceRow(TenantMixin, Base):
     # Provenance of header fields: per field ``read`` or ``edited``, by whom, original value (B3).
     field_sources: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default="{}")
     version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+    # The clerk's note when confirming a document whose own figures do not add up (S-07; B9).
+    inconsistent_note: Mapped[str | None] = mapped_column(Text)
 
 
 class InvoiceLineRow(TenantMixin, Base):
@@ -123,6 +125,7 @@ class InvoiceLineRow(TenantMixin, Base):
         UniqueConstraint("tenant_id", "invoice_id", "line_no"),
         tfk("invoice_id", "invoices"),
         CheckConstraint(enum_check("line_kind", ("item", "freight", "fee", "discount")), name="line_kind"),
+        CheckConstraint("(removed_at is null) = (removed_by is null)", name="removed_pair"),
     )
     invoice_id: Mapped[uuid.UUID] = mapped_column(UUIDT, nullable=False)
     line_no: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -135,6 +138,11 @@ class InvoiceLineRow(TenantMixin, Base):
     amount: Mapped[Decimal | None] = mapped_column(MONEY)
     line_kind: Mapped[str] = mapped_column(Text, nullable=False, server_default="item")
     field_sources: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default="{}")
+    # Soft removal in extraction review (S-07; B9): the row and its earlier results stay as history;
+    # a removed line is never matched, counted or shown as a live line.
+    removed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    removed_by: Mapped[uuid.UUID | None] = mapped_column(UUIDT, ForeignKey("users.id"))
+    removed_reason: Mapped[str | None] = mapped_column(Text)
 
 
 class UsageEvent(TenantMixin, Base):

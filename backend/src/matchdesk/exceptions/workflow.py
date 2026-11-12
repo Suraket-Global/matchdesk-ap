@@ -357,6 +357,12 @@ def reopen(
             "note": exc.resolution_note,
         },
     )
+    if exc.resolution_code == "resolved_by_credit" and exc.credit_decision == "credited":
+        # Reopening a credit the controller decided withdraws that decision: the flag is decided
+        # again (B9). The decision stays in the events and the audit log.
+        previous["credit_decision"] = exc.credit_decision
+        exc.credit_decision, exc.credit_decision_bill_id = None, None
+        exc.credit_decided_by, exc.credit_decided_at = None, None
     exc.status, exc.resolution_code, exc.resolution_note = "open", None, None
     exc.resolved_by, exc.resolved_at = None, None
     exc.version += 1
@@ -468,3 +474,97 @@ def decide(
         after={"subject": approval.subject_type, "self_approved": approval.self_approved},
     )
     return Decision(approval, effect, subject)
+
+
+# --- B9: assignee (S-08) and the controller's credit decision (S-09; MH-09) ---------------------
+
+
+def assign(
+    s: Session,
+    exc: ExceptionRow,
+    user_id: uuid.UUID,
+    assignee: uuid.UUID | None,
+    expected_version: int,
+    assignable: Iterable[uuid.UUID],
+) -> ExceptionRow:
+    """Assign an exception to a member of the account, or unassign it (``assignee`` None). Changes
+    who works on it only: no status, amount or figure moves. Recorded as an ``assigned`` event."""
+    lock_for_update(s, exc)
+    if exc.version != expected_version:
+        raise StaleExceptionVersion(exc)
+    if assignee is not None and assignee not in set(assignable):
+        raise ValueError("assign to an active controller or clerk of this account")
+    previous = exc.assigned_to
+    if previous == assignee:
+        return exc
+    exc.assigned_to = assignee
+    exc.version += 1
+    s.flush()
+    detail = {"from": str(previous) if previous else None, "to": str(assignee) if assignee else None}
+    _event(s, exc, "assigned", user_id, exc.status, detail)
+    write_audit(
+        s,
+        exc.tenant_id,
+        actor_type="user",
+        actor_user_id=user_id,
+        action="exception.assigned" if assignee else "exception.unassigned",
+        entity_type="exception",
+        entity_id=exc.id,
+        before={"assigned_to": detail["from"]},
+        after={"assigned_to": detail["to"]},
+    )
+    return exc
+
+
+CREDIT_DECISIONS = ("credited", "not_credited")
+
+
+def credit_decision(
+    s: Session,
+    exc: ExceptionRow,
+    user_id: uuid.UUID,
+    role: str,
+    decision: str,
+    note: str | None,
+    expected_version: int,
+) -> ExceptionRow:
+    """The controller decides an exception flagged "possibly credited in QuickBooks" (TRD 12
+    ``POST /exceptions/{id}/credit-decision``; MH-09). The decision is an input of the rule engine,
+    applied by the re-match the caller requests: "credited" nets this exception with that one vendor
+    credit (resolved by credit, no longer a finding, and the credit cannot net a second exception);
+    "not_credited" clears the flag, so the exception is a finding again. Until decided, it stays open
+    and undecided, never a finding."""
+    if role != "controller":
+        raise ForbiddenError("only the controller decides a possible credit")
+    if decision not in CREDIT_DECISIONS:
+        raise ValueError("decision must be credited or not_credited")
+    lock_for_update(s, exc)
+    if exc.version != expected_version:
+        raise StaleExceptionVersion(exc)
+    if exc.possibly_credited_bill_id is None or exc.status != "open":
+        raise ConflictError("this exception is not waiting for a credit decision")
+    now = datetime.now(UTC)
+    exc.credit_decision, exc.credit_decision_bill_id = decision, exc.possibly_credited_bill_id
+    exc.credit_decided_by, exc.credit_decided_at = user_id, now
+    exc.version += 1
+    s.flush()
+    detail = {
+        "decision": decision,
+        "credit_bill_id": str(exc.credit_decision_bill_id),
+        "note": (note or "").strip() or None,
+    }
+    _event(s, exc, "credit_decided", user_id, exc.status, detail)
+    write_audit(
+        s,
+        exc.tenant_id,
+        actor_type="user",
+        actor_user_id=user_id,
+        action="exception.credit_decided",
+        entity_type="exception",
+        entity_id=exc.id,
+        after=detail,
+    )
+    return exc
+
+
+DUPLICATE_DECISIONS = {"is_duplicate": "confirmed_duplicate", "not_duplicate": "not_a_duplicate"}

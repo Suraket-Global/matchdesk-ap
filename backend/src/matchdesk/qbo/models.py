@@ -201,3 +201,35 @@ class SyncRun(TenantMixin, Base):
     requested_by: Mapped[uuid.UUID | None] = mapped_column(UUIDT, ForeignKey("users.id"))
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+PO_CHANGE_KINDS = ("changed", "removed")
+
+
+class PoLineChange(TenantMixin, Base):
+    """What a QuickBooks read changed or removed on a purchase-order line (S-10 banner; B9).
+
+    Insert-only history written by the sync: the values before and after (ordered quantity, unit,
+    unit price, item), never a write to QuickBooks. Affected lines are re-matched by the sync's
+    ``po_change`` match request."""
+
+    __tablename__ = "po_line_changes"
+    __table_args__ = tenant_args(
+        tfk("purchase_order_id", "purchase_orders"),
+        tfk("po_line_id", "po_lines"),
+        tfk("sync_run_id", "sync_runs"),
+        CheckConstraint(enum_check("change", PO_CHANGE_KINDS), name="change"),
+        Index(
+            "ix_po_line_changes_tenant_id_purchase_order_id_detected_at",
+            "tenant_id",
+            "purchase_order_id",
+            "detected_at",
+        ),
+    )
+    purchase_order_id: Mapped[uuid.UUID] = mapped_column(UUIDT, nullable=False)
+    po_line_id: Mapped[uuid.UUID] = mapped_column(UUIDT, nullable=False)
+    sync_run_id: Mapped[uuid.UUID | None] = mapped_column(UUIDT)
+    change: Mapped[str] = mapped_column(Text, nullable=False)
+    before: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    after: Mapped[dict | None] = mapped_column(JSONB)
+    detected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

@@ -24,6 +24,7 @@ from matchdesk import blobstore
 from matchdesk.api import views
 from matchdesk.api.auth_routes import PUBLIC_API_PATHS, register_auth_routes
 from matchdesk.api.b7_routes import INBOUND_PATH, register_b7_routes
+from matchdesk.api.b9_routes import register_b9_routes
 from matchdesk.api.common import (
     CSRF_HEADER,
     MUTATING,
@@ -173,6 +174,7 @@ def create_app(mailer: Mailer | None = None, qbo_token_endpoint: TokenEndpoint |
     register_report_routes(app, engine())
     register_read_routes(app, engine())
     register_b7_routes(app, settings, engine(), out_mail)
+    register_b9_routes(app, engine())
     # Outermost of the application's own middleware: refuses oversize bodies before anything reads them.
     app.add_middleware(BodyLimitMiddleware)
 
@@ -307,7 +309,7 @@ def create_app(mailer: Mailer | None = None, qbo_token_endpoint: TokenEndpoint |
                 raise NotFoundError("invoice")
             lines = s.scalars(
                 select(InvoiceLineRow)
-                .where(InvoiceLineRow.invoice_id == inv.id)
+                .where(InvoiceLineRow.invoice_id == inv.id, InvoiceLineRow.removed_at.is_(None))
                 .order_by(InvoiceLineRow.line_no)
             ).all()
             results = {
@@ -537,6 +539,9 @@ def _exc_body(e: ExceptionRow) -> dict[str, Any]:
         "reported_amount": str(e.reported_amount) if e.reported_amount is not None else None,
         "invoice_line_id": str(e.invoice_line_id) if e.invoice_line_id else None,
         "label": e.label,
+        "possibly_credited": e.possibly_credited_bill_id is not None,
+        "assigned_to": str(e.assigned_to) if e.assigned_to else None,
+        "credit_decision": e.credit_decision,
         "version": e.version,
     }
 

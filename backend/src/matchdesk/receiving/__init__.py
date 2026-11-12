@@ -2,6 +2,15 @@
 independence rule, and counting totals for read screens."""
 
 from matchdesk.receiving.counting import as_import, counting_receipt_totals
+from matchdesk.receiving.declaration import (
+    STATEMENT as NO_RECEIVING_STATEMENT,
+)
+from matchdesk.receiving.declaration import (
+    current_declaration,
+    declare_no_receiving,
+    describe_declaration,
+    withdraw_declaration,
+)
 from matchdesk.receiving.parse import ReceivingFileError, read_table, sniff_receiving
 from matchdesk.receiving.qbo_item_receipts import (
     SOURCE_TYPE as QBO_ITEM_RECEIPT_SOURCE,
@@ -20,9 +29,14 @@ from matchdesk.receiving.service import (
     confirm_receipt,
     create_import,
     describe_import,
+    describe_mapping,
     file_preview,
     late_line_count,
+    list_mappings,
+    matching_mapping,
     preview,
+    purge_abandoned_drafts,
+    purge_drafts_everywhere,
     save_mapping,
     set_declaration,
     validate,
@@ -30,6 +44,7 @@ from matchdesk.receiving.service import (
 )
 
 __all__ = [
+    "NO_RECEIVING_STATEMENT",
     "QBO_ITEM_RECEIPT_SOURCE",
     "TARGETS",
     "ItemReceiptRejection",
@@ -43,15 +58,24 @@ __all__ = [
     "confirm_receipt",
     "counting_receipt_totals",
     "create_import",
+    "current_declaration",
+    "declare_no_receiving",
+    "describe_declaration",
     "describe_import",
+    "describe_mapping",
     "file_preview",
     "item_receipt_rejection",
     "late_line_count",
+    "list_mappings",
+    "matching_mapping",
     "preview",
+    "purge_abandoned_drafts",
+    "purge_drafts_everywhere",
     "read_table",
     "save_mapping",
     "set_declaration",
     "sniff_receiving",
     "validate",
     "void",
+    "withdraw_declaration",
 ]

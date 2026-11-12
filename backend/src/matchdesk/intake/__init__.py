@@ -14,7 +14,14 @@ from matchdesk.intake.email import (
     signing_key,
     verify_signature,
 )
-from matchdesk.intake.review import VersionConflict, confirm, correct, current_gates, describe_fields
+from matchdesk.intake.review import (
+    VersionConflict,
+    confirm,
+    correct,
+    current_gates,
+    describe_fields,
+    remove_line,
+)
 from matchdesk.intake.service import (
     DISPLAYED,
     add_file,
@@ -55,6 +62,7 @@ __all__ = [
     "purge_raw",
     "receive",
     "record_usage",
+    "remove_line",
     "remove_sender",
     "retry_failed",
     "sign",

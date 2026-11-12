@@ -18,6 +18,8 @@ from matchdesk.intake.models import DocumentRow, InvoiceLineRow, InvoiceRow
 from matchdesk.matching import (
     Alias,
     AliasStatus,
+    CreditDecision,
+    CreditDecisionInput,
     DocLine,
     DocType,
     Document,
@@ -96,7 +98,9 @@ def build_match_input(
         select(InvoiceRow).where(or_(InvoiceRow.vendor_id.in_(vendor_ids), InvoiceRow.id.in_(test_ids)))
     ).all()
     lines = s.scalars(
-        select(InvoiceLineRow).where(InvoiceLineRow.invoice_id.in_([i.id for i in inv_rows]))
+        select(InvoiceLineRow).where(
+            InvoiceLineRow.invoice_id.in_([i.id for i in inv_rows]), InvoiceLineRow.removed_at.is_(None)
+        )
     ).all()
     doc_states = dict(
         s.execute(
@@ -248,6 +252,30 @@ def build_match_input(
         if e.type == "possible_duplicate" and e.resolution_code
     )
 
+    # B9: the controller's credit decisions, keyed like the stored exception (document, line, type).
+    credit_rows = s.scalars(
+        select(ExceptionRow).where(
+            ExceptionRow.credit_decision.is_not(None),
+            ExceptionRow.invoice_id.in_([i.id for i in inv_rows]),
+        )
+    ).all()
+    credit_decisions = tuple(
+        sorted(
+            (
+                CreditDecisionInput(
+                    document_id=str(e.invoice_id),
+                    line_id=str(e.invoice_line_id) if e.invoice_line_id else "",
+                    type=e.type,
+                    qbo_bill_id=str(e.credit_decision_bill_id),
+                    decision=CreditDecision(e.credit_decision),
+                )
+                for e in credit_rows
+                if e.credit_decision_bill_id is not None and e.credit_decision is not None
+            ),
+            key=lambda d: (d.key, d.qbo_bill_id),
+        )
+    )
+
     return MatchInput(
         tenant_currency=tenant_currency,
         test_document_ids=frozenset(str(t.id) for t in tests),
@@ -261,5 +289,6 @@ def build_match_input(
         vendor_tolerances=tuple(vendor_tols),
         duplicate_decisions=dup_decisions,
         confirmed_not_received=confirmed,
+        credit_decisions=credit_decisions,
         ruleset_code=ruleset_code,
     )

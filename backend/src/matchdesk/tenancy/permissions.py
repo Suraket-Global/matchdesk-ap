@@ -43,6 +43,11 @@ PERMISSIONS: dict[str, frozenset[str]] = {
     "start_match_run": frozenset({_C, _K}),
     # B7, T-5.1.4: "Send now" for the weekly summary email (a row added to schema.md 4.1).
     "send_weekly_summary": frozenset({_C}),
+    # B9 rows added to schema.md 4.1: assign an exception (S-08); decide a possible duplicate or a
+    # possible credit (S-09; MH-08, MH-09); record a finding's outcome on the governing report (S-13).
+    "assign_exception": frozenset({_C, _K}),
+    "decide_duplicate_or_credit": frozenset({_C}),
+    "record_finding_outcome": frozenset({_C}),
 }
 
 

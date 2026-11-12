@@ -22,7 +22,7 @@ from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import Engine, select, text
 from sqlalchemy.orm import Session
 
 from matchdesk import blobstore
@@ -30,6 +30,7 @@ from matchdesk.audit import write_audit
 from matchdesk.core import ConflictError, NotFoundError, get_correlation_id, new_correlation_id
 from matchdesk.matching import normalise_code, normalise_number, normalise_uom
 from matchdesk.qbo.models import Item, PoLineRow, PurchaseOrderRow
+from matchdesk.receiving.declaration import current_declaration, withdraw_declaration
 from matchdesk.receiving.models import (
     ReceiptLineRow,
     ReceiptRow,
@@ -40,7 +41,7 @@ from matchdesk.receiving.models import (
 from matchdesk.receiving.parse import CSV_TYPE, ReceivingFileError, read_table, sniff_receiving
 from matchdesk.receiving.qbo_item_receipts import SOURCE_TYPE as QBO_EXPORT
 from matchdesk.receiving.qbo_item_receipts import QboItemReceiptRow, item_receipt_rejection
-from matchdesk.tenancy import lock_for_update, transition
+from matchdesk.tenancy import global_session, lock_for_update, session, transition
 
 TARGETS = (
     "po_number",
@@ -140,6 +141,12 @@ def create_import(
     )
     s.add(imp)
     s.flush()
+    applied = matching_mapping(s, header)
+    if applied is not None:
+        # S-05 step 3: a saved mapping whose columns are all in this file is pre-applied; the clerk
+        # still checks it, and nothing is validated or imported until they do (B9).
+        imp.column_map, imp.mapping_id = dict(applied.columns), applied.id
+        s.flush()
     write_audit(
         s,
         tenant_id,
@@ -148,9 +155,84 @@ def create_import(
         action="receiving.uploaded",
         entity_type="receiving_import",
         entity_id=imp.id,
-        after={"source_type": source_type, "evidence_class": evidence_class, "rows": len(rows)},
+        after={
+            "source_type": source_type,
+            "evidence_class": evidence_class,
+            "rows": len(rows),
+            **({"mapping_applied": applied.name} if applied is not None else {}),
+        },
     )
-    return imp, {"headers": header, "sample_rows": rows[:PREVIEW_ROWS], "rows_total": len(rows)}
+    return imp, {
+        "headers": header,
+        "sample_rows": rows[:PREVIEW_ROWS],
+        "rows_total": len(rows),
+        "applied_mapping": describe_mapping(applied) if applied is not None else None,
+    }
+
+
+def list_mappings(s: Session) -> list[ReceivingMapping]:
+    return list(s.scalars(select(ReceivingMapping).order_by(ReceivingMapping.name)).all())
+
+
+def describe_mapping(m: ReceivingMapping) -> dict[str, Any]:
+    return {
+        "id": str(m.id),
+        "name": m.name,
+        "columns": dict(m.columns),
+        "created_at": m.created_at.isoformat(),
+    }
+
+
+def matching_mapping(s: Session, headers: list[str]) -> ReceivingMapping | None:
+    """The saved mapping to pre-apply: every source column it names is a header of this file. The
+    most recently saved one wins when several fit (B9; S-05 "a saved mapping is pre-applied")."""
+    present = {h.strip() for h in headers}
+    fits = [m for m in list_mappings(s) if m.columns and set(m.columns.values()) <= present]
+    return max(fits, key=lambda m: (m.created_at, str(m.id)), default=None)
+
+
+def purge_abandoned_drafts(s: Session, now: datetime) -> int:
+    """Remove draft imports never committed, 7 days after upload (schema.md section 8; S-05
+    "Abandoned preview"). The draft row goes; its stored file is deleted through ``blobstore`` and
+    the document row is marked deleted. Each removal is audited. Worker housekeeping."""
+    from matchdesk.intake.models import DocumentRow  # the documents table is shared (schema.md 3.4)
+
+    n = 0
+    for imp in s.scalars(
+        select(ReceivingImportRow)
+        .where(ReceivingImportRow.state == "draft", ReceivingImportRow.expires_at < now)
+        .order_by(ReceivingImportRow.id)
+        .with_for_update(skip_locked=True)
+    ).all():
+        doc = s.get(DocumentRow, imp.document_id)
+        if doc is not None and doc.deleted_at is None:
+            blobstore.delete(imp.tenant_id, doc.blob_key)
+            doc.deleted_at = now
+        write_audit(
+            s,
+            imp.tenant_id,
+            actor_type="job",
+            action="receiving.draft_removed",
+            entity_type="receiving_import",
+            entity_id=imp.id,
+            before={"rows": imp.rows_total, "uploaded_at": imp.created_at.isoformat()},
+        )
+        s.delete(imp)
+        n += 1
+    s.flush()
+    return n
+
+
+def purge_drafts_everywhere(engine: Engine, now: datetime | None = None) -> int:
+    """``purge_abandoned_drafts`` for every account, one tenant transaction each (worker schedule)."""
+    at = now or datetime.now(UTC)
+    with global_session(engine) as g:
+        tenant_ids = [r[0] for r in g.execute(text("select id from tenants order by id")).all()]
+    total = 0
+    for tid in tenant_ids:
+        with session(tid, engine) as s:
+            total += purge_abandoned_drafts(s, at)
+    return total
 
 
 PREVIEW_ROWS = 20  # S-05: "preview first 20 rows"
@@ -492,6 +574,10 @@ def commit(
     if not transition(s, "receiving_imports", imp.id, imp.state_version, "succeeded", committed_at=now):
         raise ConflictError("the import changed while it was being committed")
     s.refresh(imp)
+    declared = current_declaration(s)
+    if declared is not None:
+        # Records exist after all: the "no receiving records" statement is no longer true (B9).
+        withdraw_declaration(s, declared, user_id, "A receiving import was committed")
     write_audit(
         s,
         imp.tenant_id,
@@ -618,6 +704,8 @@ def describe_import(imp: ReceivingImportRow) -> dict[str, Any]:
         "coverage_start": imp.coverage_start.isoformat() if imp.coverage_start else None,
         "coverage_end": imp.coverage_end.isoformat() if imp.coverage_end else None,
         "column_map": imp.column_map,
+        "mapping_id": str(imp.mapping_id) if imp.mapping_id else None,
+        "expires_at": imp.expires_at.isoformat() if imp.expires_at else None,
         "rows_total": imp.rows_total,
         "rows_valid": imp.rows_valid,
         "rows_rejected": imp.rows_rejected,

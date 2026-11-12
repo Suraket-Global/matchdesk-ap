@@ -139,3 +139,27 @@ class ReceiptLineRow(TenantMixin, Base):
     source_row: Mapped[int] = mapped_column(Integer, nullable=False)
     added_after_exception: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     late_approved: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+
+
+class NoReceivingDeclaration(TenantMixin, Base):
+    """The controller's statement that the account keeps no warehouse receiving records (S-03; B9).
+
+    It records a fact and changes no rule: every invoiced line stays a ``receipt_absent`` exception
+    (MH-07; CLAUDE.md false pass 2), the price, ordered-quantity and duplicate checks still run, and
+    the report is two-way only. At most one declaration is in force; withdrawing it keeps the row."""
+
+    __tablename__ = "no_receiving_declarations"
+    __table_args__ = tenant_args(
+        Index(
+            "uq_no_receiving_declarations_in_force",
+            "tenant_id",
+            unique=True,
+            postgresql_where="withdrawn_at is null",
+        ),
+        CheckConstraint("(withdrawn_at is null) = (withdrawn_by is null)", name="withdrawn_pair"),
+    )
+    statement: Mapped[str] = mapped_column(Text, nullable=False)
+    declared_by: Mapped[uuid.UUID] = mapped_column(UUIDT, ForeignKey("users.id"), nullable=False)
+    withdrawn_by: Mapped[uuid.UUID | None] = mapped_column(UUIDT, ForeignKey("users.id"))
+    withdrawn_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    withdraw_reason: Mapped[str | None] = mapped_column(Text)

@@ -16,7 +16,7 @@ from matchdesk.exceptions.rules_admin import (
 )
 from matchdesk.exceptions.runs import TASK as MATCH_RUN_TASK
 from matchdesk.exceptions.runs import execute_run, rematch_alias, request_run, stale_runs
-from matchdesk.exceptions.store import exception_fingerprint, store_result
+from matchdesk.exceptions.store import exception_fingerprint, retire_line_result, store_result
 from matchdesk.exceptions.triggers import TASK as MATCH_REQUEST_TASK
 from matchdesk.exceptions.triggers import (
     handle_match_request,
@@ -26,12 +26,16 @@ from matchdesk.exceptions.triggers import (
     request_runs,
 )
 from matchdesk.exceptions.workflow import (
+    CREDIT_DECISIONS,
+    DUPLICATE_DECISIONS,
     INPUT_DECISIONS,
     Decision,
     Outcome,
     StaleExceptionVersion,
     allowed_codes,
+    assign,
     bulk_resolve,
+    credit_decision,
     decide,
     po_lines_with_open_exceptions,
     reopen,
@@ -42,6 +46,8 @@ from matchdesk.exceptions.workflow import (
 )
 
 __all__ = [
+    "CREDIT_DECISIONS",
+    "DUPLICATE_DECISIONS",
     "INPUT_DECISIONS",
     "MATCH_REQUEST_TASK",
     "MATCH_RUN_TASK",
@@ -49,10 +55,12 @@ __all__ = [
     "Outcome",
     "StaleExceptionVersion",
     "allowed_codes",
+    "assign",
     "build_match_input",
     "bulk_resolve",
     "check_resolution_allowed",
     "create_alias",
+    "credit_decision",
     "current_tolerances",
     "decide",
     "describe_alias",
@@ -74,6 +82,7 @@ __all__ = [
     "request_runs",
     "resolve",
     "retire_alias",
+    "retire_line_result",
     "set_tolerance",
     "stale_runs",
     "store_result",

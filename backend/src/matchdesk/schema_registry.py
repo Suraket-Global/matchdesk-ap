@@ -29,5 +29,6 @@ GLOBAL_TABLES = frozenset(
         "ruleset_versions",
         "job_queue",
         "alembic_version",
+        "deletion_ledger",
     }
 )

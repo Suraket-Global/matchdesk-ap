@@ -214,3 +214,14 @@ def _event(
             match_run_id=run.id,
         )
     )
+
+
+def retire_line_result(s: Session, invoice_line_id: uuid.UUID) -> int:
+    """A line removed in review keeps its earlier results as history and has no current one (B9).
+    Its open exceptions are auto-closed by the next run, which no longer produces them."""
+    res = s.execute(
+        update(LineMatch)
+        .where(LineMatch.invoice_line_id == invoice_line_id, LineMatch.is_current.is_(True))
+        .values(is_current=False)
+    )
+    return int(getattr(res, "rowcount", 0) or 0)
