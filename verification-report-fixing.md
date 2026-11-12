@@ -633,3 +633,55 @@ Not run: HR-01 evaluation set (no provider), E2E and accessibility tests (no web
 - Match-run trigger scope is the vendor, not the purchase order (TRD 6.3 updated).
 - API additions beyond TRD 12: `GET /exceptions/{id}/events`, `GET /aliases/suggestions`, `GET /reports/backtest/{id}/refund-evaluation`; `PUT /tolerances/default` carries the waiver limit and cap. Not built: `POST /exceptions/{id}/credit-decision`, onboarding, pilot engagements, support grants, audit list, usage, inbound mail, archive export, deletion requests.
 - The local extractor is the default in development (`MATCHDESK_EXTRACTOR=local`); tests use the fake.
+
+## 14. B4 web app 2026-11-12
+
+Owner request 2026-11-12: build the screens with the design skills and tools, user-friendly and complete, so the owner can play the whole product as clerk and controller. Branch `feat/b4-web` from the `feat/b3-workflows` head. Synthetic data only. Guide: `_coordination/B4-GUIDE.md` (outside this repository). The design direction followed design.md (tokens of section 5 with a dark counterpart, Inter self-hosted, the calculation sentence as the one emphasised element).
+
+### 14.1 What was built
+
+| Screen group | Built | Partial or not built (reason) |
+|---|---|---|
+| 1. Shell, S-01, S-02, S-19 | React 18, TypeScript, Vite, React Router, TanStack Query under `web/`; sign-in by emailed link with the development-only Mailpit note; invitation from the link fragment; app frame with navigation by role, QuickBooks status, user menu (sign out, theme, shortcuts, help), idle-timeout dialog, connection-lost banner, page error boundary; signed-out, forbidden, not found; page titles "object · screen · MatchDesk"; focus to the main heading on route change | Tenant switcher shown only with two or more memberships (the demo has one) |
+| 2. S-03 to S-07 | Onboarding checklist from live counts; QuickBooks connection with recorded-response mode labelled, read-now with progress, disconnect review; receiving upload, column matching from headers, preview of 20 rows, validation with reasons and download, class A coverage declaration, import, receipt lines with "counts as a receipt", void with reason, class B marks; intake with drag-and-drop and picker, four uploads at a time, totals that add up, per-file states, duplicate file, retry failed; extraction review with PDF.js beside the fields, checks in words recomputed on each keystroke, read and edited tags with history, server-side drafts every 30 seconds, conflict message, confirm and match | App-flow.md section 7 |
+| 3. S-08 to S-12 | Queue with filters, sort and selection in the address, per-type counters, coverage strip, J/K/X/Enter, bulk resolve with count, total and per-item results; invoice list; three-pane match view with the calculation sentence, receipts with file, row and class, the QuickBooks billed quantity greyed as not counted, resolve and next in queue order with focus on the next heading, withdraw, reopen, results updating without reload; purchase-order view with timeline; alias map with suggestions, live worked example, retire; approvals with restating dialogs, review of new 1-to-1 aliases, the week's waivers | App-flow.md section 7 |
+| 4. S-13 to S-18 | Back-test reports: create and refresh drafts, violet DRAFT and dark APPROVED banners, cards, seven sections, blocking list, approval review with the reviewed-waivers tick, refund calculation on the approved version, PDF and CSV download; tolerances with preview and history; users and invitations with the last-controller rule; audit log with filters, paging and CSV | S-14 weekly summary and S-18 operator console show "not built yet" (no API); support grants not built |
+
+### 14.2 API changes made for the screens (TRD 12, "As built in B4")
+
+`GET /me` carries the anti-forgery token; `GET /qbo/connection` carries the mode; `GET /vendors`, `GET /items`, `GET /audit-events` and its export added; read context added to the queue, invoice detail (match evidence and calculation sentence), batches, aliases, approvals and receiving imports; draft receiving imports return their headers and first rows; the receiving file name is stored in the database only. Three defects found by using the screens were fixed with regression tests: identical files uploaded at the same moment (500, now a duplicate file); the standalone worker failing every document job (identity models not registered); a document left `running` after an unexpected failure while the job's retry skipped it.
+
+### 14.3 Commands and results (from `matchdesk-ap/`)
+
+| Command | Result |
+|---|---|
+| `make test` before B4 (branch head `feat/b3-workflows`) | 212 passed, 1 warning |
+| `make test` after B4 | 221 passed, 1 warning (unit 89, integration 132) |
+| `make check` | exit 0: ruff, format, mypy (80 files), 5 import contracts kept, import rule, float lint |
+| `make web-check` (`npm run typecheck`, `lint`, `test`, `build`) | type check and ESLint clean; Vitest 11 passed (2 files); build to `web/dist` with no inline script, Mailpit note absent from the bundle |
+| `make web-e2e` (Playwright 1.53, installed Chrome, headless; dev server and local API) | 3 passed: E2E-01 full flow, role and not-found check, phone-width check |
+| `vite preview` with the TRD 8.7 headers, match view with a PDF | rendered, no Content-Security-Policy violation in the console |
+| `make demo-reset` then the PLAY.md script in the in-app browser, as clerk and controller | completed: receiving 7 rows imported and 1 rejected, 13 files (10 ready, 2 review, 1 duplicate), two extractions corrected, an exception waived, conversion and late evidence approved, October report approved and exported |
+
+### 14.4 Tests that ran (new in B4)
+
+| Test | What it shows | Result |
+|---|---|---|
+| `backend/tests/integration/test_b4_web_reads.py` (7 tests) | `/me` token equals the session's and is accepted, a wrong one refused, `mode` reported; match evidence: received 60, invoiced 100, "Excess 40 × 4.2 = 168.00.", receipt row 218 counts, QuickBooks billed 100 shown as context only; a line with no receipt reads "Received to date 0." with billed quantity set; queue words and counters; another tenant gets 404 and an empty queue; vendors, items, alias context; audit log controller-only, paged, filtered, CSV, no write route, other tenant empty; receiving file name and draft preview; four identical concurrent uploads give 201 and three duplicates | Pass |
+| `backend/tests/integration/test_intake.py::test_unexpected_failure_after_the_lease_releases_the_document` | A failure while storing a result leaves the document `retry_wait`, and the retry succeeds | Pass |
+| `backend/tests/unit/test_worker_boundary.py::test_worker_registers_every_model_before_its_first_flush` | Fails without the fix (unresolved `tenants` key), passes with it | Pass |
+| `web/src/lib/checks.test.ts` (5) | Cents without floats; 0.1 + 0.2 = 0.30; worked-example arithmetic; checks in words for a line and a total | Pass |
+| `web/src/components/components.test.tsx` (6) | Status chips carry a word and never put "Receipt absent" in green; worked example "5 CS × 12 = 60 EA; 50.40 per CS = 4.20 per EA"; batch totals add up; sign-in form validation and the development Mailpit note | Pass |
+| E2E-01 `web/e2e/full-flow.spec.ts` | The PLAY.md script automated on a tagged tenant: sign-in through Mailpit, receiving import (7 valid, 1 rejected), 13 files (10 ready, 2 review, 1 duplicate), two corrections, waiver with note, calculation sentence, sign-out, controller approval of the conversion, report draft and approval, draft and approved PDF and CSV downloads, audit log read only | Pass |
+| axe-core (WCAG 2.0 to 2.2 A and AA tags) inside E2E-01 | No serious or critical violation on sign in, batch, extraction review, exception queue, match view, approvals, report | Pass |
+| Role and phone-width checks | Clerk at `/approvals` sees forbidden; unknown route and another account's invoice are not found; onboarding, approvals, reports, QuickBooks and users at 375 px wide have no sideways scrolling | Pass |
+
+Not run: the manual WCAG checks of design.md section 11 (screen reader, 200% zoom, greyscale), A11Y-06 (tagged PDF), Firefox and Safari, the idle-timeout dialog after a real 58 minutes (the logic ran only by reading), load with 5,000 exceptions.
+
+### 14.5 Deviations
+
+- Screens: App-flow.md section 7.
+- API additions and fixes: TRD section 12, "As built in B4"; browser hardening: TRD 8.7, "As built in B4".
+- `make seed-demo` no longer uploads the invoices and receiving file: it writes them to `play-files/` (gitignored) so the owner does those steps; `ARGS=--preload` keeps the B3 behaviour. `make demo-reset` added (local `matchdesk_dev` only).
+- Playwright runs in the installed Google Chrome (`channel: chrome`) instead of a downloaded browser; each run seeds a tagged tenant that stays in the development database until `make demo-reset`.
+- Order matters in the demo: receiving loaded after invoices becomes late evidence needing the controller (B3 rule); PLAY.md loads receiving first and says so.

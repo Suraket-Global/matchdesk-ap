@@ -298,3 +298,22 @@ Sign-out is in the user menu on every screen and ends the server session. Two mi
 ## 6. Stale-route and label rules
 
 One route table in the web app is the source for navigation, breadcrumbs and links in emails. Removed routes redirect to their replacement or to not found; a link check over this file and the route table runs in CI (R-20). Labels use the words in [design.md section 9](design.md#9-vocabulary); an icon never appears without its word.
+
+## 7. As built in B4 (2026-11-12)
+
+The web app under `web/` implements the route table of section 1 (`web/src/app/App.tsx`, navigation and settings links from `web/src/app/routes.ts`). The demo script is `docs/PLAY.md`. Differences from the screens above, each because the API does not offer the data or the action yet (TRD 12, "As built in B4"):
+
+- **S-01.** A development build shows "Local development: open Mailpit to get your link" with the Mailpit address; a production build drops it (Vite's development flag). The deep link saved before sign-in is restored in the tab that asked for the link, which watches for the session; the emailed link itself opens at the root.
+- **S-03.** Pilot terms, billable units and the attestation name are not shown (no pilot-engagement or attestation read endpoint); the "We have no warehouse receiving records" choice is described but cannot be recorded (endpoint not built). The test month lives in the address (`?month=`). "Earlier invoices needed" is not listed.
+- **S-04.** In recorded-response mode the screen says so and "Connect to QuickBooks" is disabled; the demo connection is made by `make seed-demo`. Scopes are shown as granted.
+- **S-05.** Column mapping is suggested from the file's headers; a mapping saved under a name is stored but not yet pre-applied (no read endpoint). Coverage summary by class is shown on S-08 and S-13, not on S-05. The "Abandoned preview" seven-day removal is not built.
+- **S-06.** Email intake panel not built. Upload sends four files at a time, each with its own idempotency key.
+- **S-07.** Deleting a line is not built (the API has no delete). The note that should accompany "The document itself does not add up" is not asked for, because the API has nowhere to keep it. Region highlighting is not built (the extractor records no regions). Leaving with unsaved changes is guarded on reload and close; a draft is also saved every 30 seconds.
+- **S-08.** Value range and sort are applied in the browser over the loaded pages (up to 200 per page, "Load more" for the rest); filters by period and assignee are not built. Counters come from the server for the status and supplier filters.
+- **S-09.** "Is a duplicate", "Credited / Not credited" controller decisions appear only as resolution codes the server allows for the exception (no credit-decision endpoint). Pane dividers are not draggable. Previous and next follow the queue order the user came from.
+- **S-10.** Line totals are summed from the invoices on the purchase order; the "changed in QuickBooks" banner is not built.
+- **S-12.** The conversion example uses two supplier units, not an invoice line; the late-evidence request does not list the exceptions it would clear.
+- **S-13.** The "confirmed by the controller" column reads "Yes" for exceptions resolved as confirmed overbilling; "credit recovered" is "not recorded yet". Pilot terms and the governing version are not shown (no pilot record). Section 6 lists duplicates only.
+- **S-14 and S-18.** Pages state "Not built yet".
+- **S-16.** Support access shows "none" and that granting it is not built.
+- **Session.** The idle warning appears two minutes before 60 minutes without a request from this browser; single-key shortcuts can be turned off in the user menu (kept for the tab only, nothing in browser storage).

@@ -86,7 +86,7 @@ export function ExceptionsPage() {
   }, [all, type, min, max, sort]);
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [focus, setFocus] = useState(0);
+  const [focus, setFocus] = useState(-1);
   const rowRefs = useRef<(HTMLTableRowElement | null)[]>([]);
   useEffect(() => {
     // Returning from the match view: put focus and the selected row back.
