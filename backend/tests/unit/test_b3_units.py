@@ -111,3 +111,53 @@ def test_missing_fields_and_images_go_to_review_and_encrypted_pdf_fails() -> Non
     w.write(buf)
     with pytest.raises(ExtractionPermanentError, match="password_protected"):
         LocalPdfExtractor().extract(buf.getvalue())
+
+
+# --- B6 outside QA finding 1: the document type comes from the heading and labels, not free text ---
+
+from matchdesk.extraction.local_pdf import document_type, read_text_fields  # noqa: E402
+
+RETURNS_FOOTER = "Please request a credit note for returned items."
+CREDIT_NOTE = [
+    "CREDIT NOTE",
+    "Vendor: Fictional Supplier T",
+    "Credit Note No: CN-5001",
+    "Credit Note Date: 2026-10-20",
+    "Re Invoice: INV-5001",
+    "PO Number: 4471",
+    "Currency: CAD",
+    "",
+    "W-100     Synthetic widget      -10  EA     4.20    -42.00",
+    "",
+    "Tax: -2.10",
+    "Credit Total: -44.10",
+]
+
+
+def test_invoice_with_a_credit_note_footer_stays_an_invoice() -> None:
+    out = LocalPdfExtractor().extract(text_pdf([*INVOICE, "", RETURNS_FOOTER])).output
+    assert out["doc_type"] == "invoice"
+    assert out["unread"] == []
+    assert all(verification_gates(out).values())
+
+
+def test_true_credit_note_is_read_as_a_credit_note() -> None:
+    out = LocalPdfExtractor().extract(text_pdf(CREDIT_NOTE)).output
+    assert out["doc_type"] == "credit_note"
+    assert out["doc_number"] == "CN-5001" and out["references_invoice_number"] == "INV-5001"
+    assert out["unread"] == []
+
+
+def test_the_pair_of_one_invoice_and_its_credit_note_is_told_apart() -> None:
+    kinds = [document_type("\n".join(doc)) for doc in ([*INVOICE, RETURNS_FOOTER], CREDIT_NOTE)]
+    assert kinds == ["invoice", "credit_note"]
+
+
+def test_conflicting_or_absent_type_evidence_leaves_the_type_unread() -> None:
+    conflicting = ["CREDIT NOTE", *INVOICE[1:]]  # credit-note heading, invoice labels
+    absent = ["Vendor: Fictional Supplier T", "Document No: X-1", "Date: 2026-10-10", "Total: 1.00"]
+    for doc in (conflicting, absent):
+        out = read_text_fields("\n".join(doc))
+        assert "doc_type" not in out and "doc_type" in out["unread"]
+        assert verification_gates(out)["required_fields_read"] is False
+    assert document_type("Thank you. We never issue a CREDIT NOTE without a return.") is None

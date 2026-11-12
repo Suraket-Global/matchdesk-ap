@@ -50,6 +50,20 @@ _CHARGE = re.compile(
 )
 _DATE_FORMATS = ("%Y-%m-%d", "%d %b %Y", "%b %d, %Y", "%d %B %Y", "%B %d, %Y")
 
+# Document type evidence (B6, outside QA finding 1). Only a heading line or a labelled field counts;
+# a phrase in free text ("Please request a credit note for returned items") is never evidence.
+_HEADING_LINES = 6  # a title is among the first non-empty lines
+_HEADINGS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("invoice", re.compile(r"^\s*(?:TAX\s+)?INVOICE\s*$", re.I)),
+    ("credit_note", re.compile(r"^\s*(?:TAX\s+)?CREDIT\s+(?:NOTE|MEMO)\s*$", re.I)),
+)
+_TYPE_LABELS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("invoice", re.compile(r"^\s*Invoice\s+(?:No\.?|Number|#|Date|Total)\s*:?", re.I)),
+    ("credit_note", re.compile(r"^\s*Credit\s+(?:Note|Memo)\s+(?:No\.?|Number|#|Date|Total)\s*:?", re.I)),
+    ("credit_note", re.compile(r"^\s*Credit\s+Total\s*:", re.I)),
+    ("credit_note", re.compile(r"^\s*(?:Re|Refers\s+to|References)\s+Invoice\s*:", re.I)),
+)
+
 
 def _money(text: str) -> Decimal | None:
     try:
@@ -67,11 +81,28 @@ def _date(text: str) -> date | None:
     return None
 
 
+def document_type(text: str) -> str | None:
+    """``invoice`` or ``credit_note`` from the heading and labelled fields only; ``None`` (unread, so
+    the document goes to review) when there is no such evidence or the evidence conflicts."""
+    evidence: set[str] = set()
+    lines = text.splitlines()
+    for raw in [ln for ln in lines if ln.strip()][:_HEADING_LINES]:
+        for kind, pat in _HEADINGS:
+            if pat.match(raw):
+                evidence.add(kind)
+    for raw in lines:
+        for kind, pat in _TYPE_LABELS:
+            if pat.match(raw):
+                evidence.add(kind)
+    return evidence.pop() if len(evidence) == 1 else None
+
+
 def read_text_fields(text: str) -> dict[str, Any]:
     """Parse the fixed patterns out of a document's text. Pure; used by the adapter and its tests."""
-    out: dict[str, Any] = {
-        "doc_type": "credit_note" if re.search(r"\bCREDIT\s+NOTE\b", text, re.I) else "invoice"
-    }
+    out: dict[str, Any] = {}
+    doc_type = document_type(text)
+    if doc_type is not None:
+        out["doc_type"] = doc_type
     lines: list[dict[str, Any]] = []
     for raw in text.splitlines():
         for name, pat in _LABELS.items():
@@ -126,6 +157,8 @@ def read_text_fields(text: str) -> dict[str, Any]:
                 )
     out["lines"] = lines
     unread = [f for f in REQUIRED if f not in out]
+    if doc_type is None:
+        unread.append("doc_type")
     if not lines:
         unread.append("lines")
     out["unread"] = unread
