@@ -661,6 +661,12 @@ def _history_gaps(
         )
         if not represented:
             gaps[po.id].append(_doc_key(doc))
+    # B11 (lead review): a PO whose QuickBooks history is unknown (a linked transaction not read, or
+    # a linked bill not stored, for example skipped for its currency) is a gap before every document.
+    for found in po_by_number.values():
+        for po in found:
+            if po.unknown_history:
+                gaps[po.id].append(())
     # B11 (T-1.1.1): a QuickBooks bill that a PO names but whose item line fits no single PO line
     # adds an unknown quantity to that PO, unless an uploaded invoice with its number was counted.
     for bill in bills:

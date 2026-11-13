@@ -81,6 +81,19 @@ export function PurchaseOrderPage() {
       />
       {reread.error && <p className="error-text">{errorText(reread.error)}</p>}
       {po.changed_in_quickbooks && <ChangedInQuickBooks change={po.changed_in_quickbooks} />}
+      {!!po.history_unknown?.length && (
+        <Banner tone="warn" role="status">
+          <p>
+            <strong>History incomplete.</strong> No line on this purchase order can pass until it is resolved, because MatchDesk
+            cannot see everything QuickBooks recorded against it:
+          </p>
+          <ul>
+            {po.history_unknown.map((r) => (
+              <li key={r}>{r}.</li>
+            ))}
+          </ul>
+        </Banner>
+      )}
       <div className="table-wrap">
         <table className="stack-sm">
           <thead>

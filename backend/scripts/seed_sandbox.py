@@ -1,6 +1,8 @@
 """B11: a second synthetic tenant whose controller connects the Intuit sandbox on S-04.
 
-Creates "Sandbox Distributor (Intuit sandbox)" with ``tenants.qbo_mode = 'intuit'``, a controller
+Creates "Sandbox Distributor (Intuit sandbox)" with ``tenants.qbo_mode = 'intuit'`` and currency USD
+(Intuit's sample sandbox company is a US company in USD; documents in another currency than the
+account's are skipped, B11-1), a controller
 and a clerk with ``.invalid`` addresses, and no QuickBooks connection: the controller signs in and
 presses "Connect to QuickBooks", which runs Intuit's real authorization-code flow with the app
 credentials in ``backend/.env``. The demo tenant and its recorded responses are untouched.
@@ -29,6 +31,7 @@ ROOT = Path(__file__).resolve().parents[1]
 TENANT = "Sandbox Distributor (Intuit sandbox)"
 CONTROLLER = "controller.sandbox@example.invalid"
 CLERK = "clerk.sandbox@example.invalid"
+CURRENCY = "USD"  # the sandbox sample company's currency (T-1.1.1, 2026-11-13)
 
 
 def _origin(url: str) -> str:
@@ -65,10 +68,14 @@ def main() -> int:
     with global_session(engine) as s:
         found = s.scalar(select(Tenant).where(Tenant.name == TENANT))
         if found is not None:
-            print(f"seed-sandbox: '{TENANT}' already exists; nothing changed")
+            if found.currency != CURRENCY or found.qbo_mode != "intuit":
+                found.currency, found.qbo_mode = CURRENCY, "intuit"
+                print(f"seed-sandbox: '{TENANT}' set to currency {CURRENCY}, QuickBooks mode intuit")
+            else:
+                print(f"seed-sandbox: '{TENANT}' already exists; nothing changed")
             tid = None
         else:
-            t = Tenant(name=TENANT, qbo_mode="intuit")
+            t = Tenant(name=TENANT, qbo_mode="intuit", currency=CURRENCY)
             s.add(t)
             users = []
             for email, name in ((CONTROLLER, "Sandbox Controller"), (CLERK, "Sandbox Clerk")):
@@ -85,7 +92,9 @@ def main() -> int:
                     Membership(tenant_id=tid, user_id=clerk_id, role="clerk"),
                 ]
             )
-        print(f"seed-sandbox: created '{TENANT}' (QuickBooks mode: intuit, not connected)")
+        print(
+            f"seed-sandbox: created '{TENANT}' (QuickBooks mode: intuit, currency {CURRENCY}, not connected)"
+        )
     print(f"  controller: {CONTROLLER}   clerk: {CLERK}")
     redirect, app = _origin(settings.qbo_redirect_uri), _origin(settings.app_base_url)
     print(f"  sign in at {redirect}/login, then Settings > QuickBooks > Connect to QuickBooks")

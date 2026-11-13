@@ -112,7 +112,7 @@ export function QuickbooksPage() {
                   ? c.last_sync.state === "failed"
                     ? `Failed ${when(c.last_sync.finished_at)} (${c.last_sync.error_code ?? "no reason given"}). The last good copy stays in use.`
                     : c.last_sync.state === "succeeded"
-                      ? `Succeeded ${when(c.last_sync.finished_at)}`
+                      ? `Succeeded ${when(c.last_sync.finished_at)}${skippedText(c.last_sync) ? `. ${skippedText(c.last_sync)}` : ""}`
                       : "Running now"
                   : "None yet"}
               </dd>
@@ -169,6 +169,7 @@ export function QuickbooksPage() {
                       Object.entries(counts)
                         .map(([k, v]) => `${v} ${k.replace(/_/g, " ")}`)
                         .join(", ")}
+                    {skippedText(status.data) && <><br /><strong>{skippedText(status.data)}</strong></>}
                   </p>
                 )}
                 {status.data?.state === "failed" && (
@@ -224,4 +225,15 @@ export function QuickbooksPage() {
       </Dialog>
     </>
   );
+}
+
+/** B11-1: documents left out because their currency is not the account's ("3 documents in USD
+ * skipped: this account is in CAD"); null when nothing was skipped. */
+export function skippedText(run: { skipped_currency?: unknown; home_currency?: unknown } | null | undefined): string | null {
+  const rows = (run?.skipped_currency ?? []) as { currency: string; count: number }[];
+  if (!rows.length) return null;
+  const byCurrency = new Map<string, number>();
+  for (const r of rows) byCurrency.set(r.currency, (byCurrency.get(r.currency) ?? 0) + r.count);
+  const parts = [...byCurrency].map(([cur, n]) => `${n} ${n === 1 ? "document" : "documents"} in ${cur}`);
+  return `${parts.join(", ")} skipped: this account is in ${String(run?.home_currency ?? "another currency")}`;
 }

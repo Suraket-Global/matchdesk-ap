@@ -1,6 +1,6 @@
 """Exceptions, match results and match runs."""
 
-from matchdesk.exceptions.inputs import build_match_input
+from matchdesk.exceptions.inputs import build_match_input, unknown_history
 from matchdesk.exceptions.permissions import check_resolution_allowed
 from matchdesk.exceptions.rules_admin import (
     create_alias,
@@ -88,5 +88,6 @@ __all__ = [
     "store_result",
     "suggestions",
     "unapproved_waivers",
+    "unknown_history",
     "withdraw",
 ]

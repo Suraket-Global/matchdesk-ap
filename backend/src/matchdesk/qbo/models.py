@@ -61,6 +61,11 @@ class PurchaseOrderRow(TenantMixin, Base):
     linked_bill_qbo_ids: Mapped[list[str]] = mapped_column(
         ARRAY(Text), nullable=False, server_default=text("'{}'::text[]"), default=list
     )
+    # "<TxnType>:<TxnId>" of LinkedTxn entries MatchDesk does not read, for example a Purchase
+    # (B11-2, migration 0025): the PO's history is unknown, so its lines are history_incomplete.
+    unread_linked_txns: Mapped[list[str]] = mapped_column(
+        ARRAY(Text), nullable=False, server_default=text("'{}'::text[]"), default=list
+    )
 
 
 class PoLineRow(TenantMixin, Base):

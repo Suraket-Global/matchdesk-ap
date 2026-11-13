@@ -45,9 +45,11 @@ pytestmark = pytest.mark.integration
 BASE = "https://app.matchdesk.test"  # the tests' MATCHDESK_APP_BASE_URL (tests/conftest.py)
 
 
-def tenant(engine, mode: str | None) -> tuple[uuid.UUID, uuid.UUID, str]:  # type: ignore[no-untyped-def]
+def tenant(engine, mode: str | None, currency: str = "CAD") -> tuple[uuid.UUID, uuid.UUID, str]:  # type: ignore[no-untyped-def]
     with global_session(engine) as s:
-        t = Tenant(name=f"Fictional Sandbox Distributor {uuid.uuid4().hex[:6]}", qbo_mode=mode)
+        t = Tenant(
+            name=f"Fictional Sandbox Distributor {uuid.uuid4().hex[:6]}", qbo_mode=mode, currency=currency
+        )
         u = User(email=f"{uuid.uuid4().hex[:8]}@example.invalid", display_name="Synthetic controller")
         s.add_all([t, u])
         s.flush()
@@ -104,7 +106,7 @@ def test_intuit_tenant_connects_beside_a_recorded_tenant(app_engine, configured)
     endpoint = FakeIntuitTokenEndpoint()
     replay = Replay()
     client = TestClient(create_app(qbo_token_endpoint=endpoint, qbo_transport=replay))
-    tid, _uid, token = tenant(app_engine, "intuit")
+    tid, _uid, token = tenant(app_engine, "intuit", "USD")  # the sandbox company is in USD
     _rtid, _ruid, rtoken = tenant(app_engine, None)
 
     r = client.post("/api/v1/qbo/connection/authorize", headers=auth_headers(token))
@@ -159,6 +161,17 @@ def test_intuit_tenant_connects_beside_a_recorded_tenant(app_engine, configured)
         assert s.scalar(select(func.count()).select_from(PurchaseOrderRow)) == 3
         done = s.get(SyncRun, run.id)
         assert done is not None and done.counts["PurchaseOrder"] == 3 and done.counts["VendorCredit"] == 0
+        ids = {p.po_number: p.id for p in s.scalars(select(PurchaseOrderRow))}
+    # B11-2: PO 1003 is closed by a Purchase, which MatchDesk does not read: S-10 says why its
+    # history is incomplete; PO 1004's bill is held, so nothing is said there.
+    po1003 = client.get(f"/api/v1/purchase-orders/{ids['1003']}", headers=auth_headers(token)).json()
+    assert po1003["history_unknown"] == [
+        "QuickBooks links this purchase order to Purchase 115, which MatchDesk does not read"
+    ]
+    po1004 = client.get(f"/api/v1/purchase-orders/{ids['1004']}", headers=auth_headers(token)).json()
+    assert po1004["history_unknown"] == []
+    status = client.get("/api/v1/qbo/connection", headers=auth_headers(token)).json()
+    assert status["last_sync"]["skipped_currency"] == []
 
 
 def test_intuit_connect_refused_off_the_redirect_origin_or_unconfigured(app_engine, monkeypatch):  # type: ignore[no-untyped-def]
@@ -302,3 +315,84 @@ def test_a_linked_bill_line_with_no_single_po_line_is_left_unattributed(app_engi
         bills = s.scalars(select(QboBillRow)).all()
         lines = s.scalars(select(QboBillLineRow)).all()
         assert unattributed_bills(s, [po.vendor_id], bills, lines) == {bills[0].id: (str(po.id),)}
+
+
+def test_documents_in_another_currency_are_skipped_and_named(app_engine, configured):  # type: ignore[no-untyped-def]
+    """B11-1: the USD sandbox read by a CAD account stores no purchase order and says so."""
+    endpoint = FakeIntuitTokenEndpoint()
+    replay = Replay()
+    client = TestClient(create_app(qbo_token_endpoint=endpoint, qbo_transport=replay))
+    tid, uid, token = tenant(app_engine, "intuit", "CAD")
+    assert connect(client, endpoint, token, f"realm-{tid}").endswith("result=connected")
+    settings = load_settings()
+    reader = reader_for_tenant(app_engine, settings, tid, endpoint, replay)
+    with session(tid, app_engine) as s:
+        run, _ = request_sync(s, tid, uid, "date_range", date(2026, 10, 1), date(2026, 10, 31))
+    assert execute_sync(app_engine, tid, run.id, reader, settings.qbo_page_size) == "succeeded"
+    with session(tid, app_engine) as s:
+        assert s.scalar(select(func.count()).select_from(PurchaseOrderRow)) == 0
+        assert s.scalar(select(func.count()).select_from(QboBillRow)) == 0
+    last = client.get("/api/v1/qbo/connection", headers=auth_headers(token)).json()["last_sync"]
+    assert last["skipped_currency"] == [{"entity": "PurchaseOrder", "currency": "USD", "count": 3}]
+    assert last["home_currency"] == "CAD" and last["counts"]["PurchaseOrder"] == 0
+
+
+def test_a_po_naming_a_bill_in_another_currency_has_unknown_history(app_engine):  # type: ignore[no-untyped-def]
+    """B11-1: the PO is in the account's currency, its bill is not: the bill is not stored and the
+    PO's history is unknown (every line history_incomplete, S-10 says why)."""
+    from matchdesk.exceptions import unknown_history
+    from matchdesk.qbo import FakeQboReader
+
+    endpoint = FakeIntuitTokenEndpoint()
+    tid = _connected(app_engine, endpoint)  # a CAD account
+    item = {"value": "11"}
+    cad, usd = {"value": "CAD"}, {"value": "USD"}
+    rows = {
+        "Vendor": [{"Id": "46", "DisplayName": "Invented Supplier"}],
+        "Item": [{"Id": "11", "Name": "Pump"}],
+        "PurchaseOrder": [
+            {
+                "Id": "700",
+                "DocNumber": "P-700",
+                "TxnDate": "2026-09-01",
+                "CurrencyRef": cad,
+                "VendorRef": {"value": "46"},
+                "LinkedTxn": [{"TxnId": "701", "TxnType": "Bill"}],
+                "Line": [
+                    {
+                        "Id": "1",
+                        "LineNum": 1,
+                        "Amount": 10,
+                        "ItemBasedExpenseLineDetail": {"ItemRef": item, "Qty": 1, "UnitPrice": 10},
+                    }
+                ],
+            }
+        ],
+        "Bill": [
+            {
+                "Id": "701",
+                "TxnDate": "2026-09-02",
+                "CurrencyRef": usd,
+                "VendorRef": {"value": "46"},
+                "TotalAmt": 10,
+                "Line": [
+                    {"Id": "1", "Amount": 10, "ItemBasedExpenseLineDetail": {"ItemRef": item, "Qty": 1}}
+                ],
+            }
+        ],
+    }
+    with session(tid, app_engine) as s:
+        run, _ = request_sync(s, tid, None, "po_references", references=["P-700"])
+    execute_sync(app_engine, tid, run.id, FakeQboReader(rows=rows), 100)
+    with session(tid, app_engine) as s:
+        assert s.scalar(select(func.count()).select_from(QboBillRow)) == 0
+        po = s.scalar(select(PurchaseOrderRow))
+        assert po is not None
+        assert unknown_history(s, [po]) == {
+            po.id: (
+                "QuickBooks links this purchase order to bill 701, which MatchDesk does not hold "
+                "(skipped for its currency, or not read)",
+            )
+        }
+        done = s.get(SyncRun, run.id)
+        assert done is not None and done.cursor["skipped_currency"] == {"Bill:USD": 1}

@@ -155,6 +155,10 @@ class PurchaseOrder:
     po_number: str
     txn_date: date
     lines: tuple[PoLine, ...]
+    # B11: why this PO's QuickBooks history is unknown (a linked transaction MatchDesk does not read
+    # or did not store). Any reason makes every line on it history_incomplete. Left out of the input
+    # fingerprint while empty, so results stored before B11 stay current.
+    unknown_history: tuple[str, ...] = field(default=(), metadata={"fingerprint": "omit_if_default"})
 
 
 @dataclass(frozen=True)

@@ -17,7 +17,7 @@ from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import Engine, delete, select
+from sqlalchemy import Engine, delete, select, text
 from sqlalchemy.orm import Session
 
 from matchdesk.audit import write_audit
@@ -211,9 +211,10 @@ def _one_page(s: Session, tenant_id: uuid.UUID, run: SyncRun, reader: QboReader,
         "Bill": _bills,
         "VendorCredit": _bills,
     }[entity]
-    handler(s, tenant_id, rows, now, cursor, entity)
+    kept = _same_currency(s, tenant_id, rows, cursor, entity) if entity in CURRENCY_ENTITIES else rows
+    handler(s, tenant_id, kept, now, cursor, entity)
     counts = dict(run.counts or {})
-    counts[entity] = int(counts.get(entity, 0)) + len(rows)
+    counts[entity] = int(counts.get(entity, 0)) + len(kept)
     if len(rows) < size:
         cursor["entity_index"], cursor["start"] = idx + 1, 1
     else:
@@ -224,6 +225,33 @@ def _one_page(s: Session, tenant_id: uuid.UUID, run: SyncRun, reader: QboReader,
     run.counts = counts
     s.flush()
     return int(cursor["entity_index"]) >= len(ENTITIES)
+
+
+CURRENCY_ENTITIES = ("PurchaseOrder", "Bill", "VendorCredit")
+
+
+def _same_currency(
+    s: Session, tid: uuid.UUID, rows: list[dict[str, Any]], cursor: dict, entity: str
+) -> list[dict[str, Any]]:
+    """B11-1: rows in another currency than the account's are not stored as matchable data. They are
+    counted in ``cursor["skipped_currency"]`` (S-04 says so). A PO naming a skipped bill then has
+    unknown history (``exceptions.unknown_history``), and a skipped PO is not found, so neither can
+    pass. T-1.1.1 saw ``CurrencyRef`` on every purchase order and bill; a row without it (the
+    recorded demo fixtures) is taken to be in the account's currency [assumption]."""
+    home = str(s.scalar(text("select currency from tenants where id = :t"), {"t": tid}) or "").upper()
+    kept: list[dict[str, Any]] = []
+    skipped = dict(cursor.get("skipped_currency") or {})
+    for r in rows:
+        currency = (_ref(r, "CurrencyRef") or home).upper()
+        if currency == home:
+            kept.append(r)
+            continue
+        key = f"{entity}:{currency}"
+        skipped[key] = int(skipped.get(key, 0)) + 1
+    if skipped:
+        cursor["skipped_currency"] = skipped
+        cursor["home_currency"] = home
+    return kept
 
 
 def _ref(row: dict[str, Any], key: str) -> str | None:
@@ -298,6 +326,14 @@ def _pos(
         po.total = _d(r.get("TotalAmt"))
         po.qbo_sync_token = r.get("SyncToken")
         # T-1.1.1 (2026-11-13): the PO-to-bill link was seen only here, on the PO's own LinkedTxn.
+        # B11-2: any other linked transaction (a Purchase, for example) is not read: unknown history.
+        po.unread_linked_txns = sorted(
+            {
+                f"{t.get('TxnType')}:{t.get('TxnId')}"
+                for t in r.get("LinkedTxn", []) or []
+                if t.get("TxnType") != "Bill" and t.get("TxnId")
+            }
+        )
         po.linked_bill_qbo_ids = sorted(
             {
                 str(t["TxnId"])
@@ -504,7 +540,14 @@ def make_sync_handler(engine: Engine, reader_factory: Any, page_size: int) -> An
 
 
 def describe_sync(run: SyncRun) -> dict[str, Any]:
+    cursor = run.cursor or {}
+    skipped = [
+        {"entity": key.split(":")[0], "currency": key.split(":")[1], "count": int(n)}
+        for key, n in sorted((cursor.get("skipped_currency") or {}).items())
+    ]
     return {
+        "skipped_currency": skipped,
+        "home_currency": cursor.get("home_currency"),
         "id": str(run.id),
         "mode": run.mode,
         "range_start": run.range_start.isoformat() if run.range_start else None,

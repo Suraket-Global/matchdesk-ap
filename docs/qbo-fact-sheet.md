@@ -61,7 +61,8 @@ Observed on **2026-11-13** in an Intuit sandbox company, through MatchDesk's own
 | Vendor credits as in the recorded fixtures | **Unverified:** the sandbox has none |
 | Query paging with `STARTPOSITION` / `MAXRESULTS` | **Holds**, with `orderby Id` added |
 | No item-receipt entity in the API | **Holds** |
-| Canadian company: CAD, GST/HST tax codes | **Unverified.** The sandbox is US (USD, tax code `NON`). The sync does not yet read `CurrencyRef`, so a USD company's amounts are stored beside a CAD tenant without a check (open item B11-1 in verification-report-fixing.md) |
+| Canadian company: CAD, GST/HST tax codes | **Unverified.** The sandbox is US (USD, tax code `NON`). CompanyInfo carries no currency field, so no home currency is read. Since the lead review, the sync reads `CurrencyRef` on every purchase order, bill and vendor credit. A document in another currency than the account's is not stored, and S-04 names it ("3 documents in USD skipped: this account is in CAD"). A PO naming a skipped bill has unknown history. A row with no `CurrencyRef` is taken to be in the account's currency [assumption]: every observed PO and bill had one. The sandbox account is seeded in USD |
+| A PO closed by something other than a bill | **Observed:** PO 1003's `LinkedTxn` names a `Purchase` (an expense), which MatchDesk does not read. **Default (founder may revisit):** a PO whose `LinkedTxn` names any transaction type other than a bill, or a bill MatchDesk does not hold, has unknown history. Every line on it is `history_incomplete` and never passes, and S-10 gives the reason ("QuickBooks links this purchase order to Purchase 115, which MatchDesk does not read") |
 
 ## 5. What the owner could add by hand in the sandbox (no MatchDesk writes)
 

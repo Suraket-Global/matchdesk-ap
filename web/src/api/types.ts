@@ -30,12 +30,22 @@ export interface QboConnection {
   source?: "demo_data" | "intuit";
   /** B11: for an account in Intuit mode, which Intuit environment the server reads. */
   intuit_environment?: "sandbox" | "production" | null;
-  last_sync?: { state: string; finished_at: string | null; error_code: string | null; started_at: string | null } | null;
+  last_sync?: {
+    state: string;
+    finished_at: string | null;
+    error_code: string | null;
+    started_at: string | null;
+    skipped_currency?: { entity: string; currency: string; count: number }[];
+    home_currency?: string | null;
+  } | null;
 }
 
 export interface SyncRun {
   id: string;
   state: string;
+  /** B11-1: documents not stored because their currency is not the account's. */
+  skipped_currency?: { entity: string; currency: string; count: number }[];
+  home_currency?: string | null;
   [k: string]: unknown;
 }
 
@@ -533,6 +543,8 @@ export interface PurchaseOrder {
     counting_receipt_lines: number;
     removed_at?: string | null;
   }[];
+  /** B11: why QuickBooks history on this PO is unknown; its lines are history_incomplete. */
+  history_unknown?: string[];
   changed_in_quickbooks?: null | {
     detected_at: string;
     rematched_at: string | null;

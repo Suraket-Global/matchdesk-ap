@@ -1039,10 +1039,24 @@ Source: the B11 brief (`_coordination/B11-GUIDE.md`, outside this repository). B
 
 ### B11.3 Left
 
-- **B11-1 Currency.** The sandbox company is US (USD); the sync does not read `CurrencyRef`, so a company in another currency than the account's would be stored without a check. A Canadian sandbox company (CAD, GST/HST) has not been read; Canadian behaviour is unverified.
-- **B11-2 Purchases against a PO.** PO 1003 is closed by a `Purchase` (an expense), which MatchDesk does not read; whether such a PO's history should count as unknown is a rule decision for the founder.
+- A Canadian sandbox company (CAD, GST/HST) has not been read; Canadian behaviour is unverified. B11-1 and B11-2 are closed (B11.4).
 - Vendor credits (none in the sandbox), bills made with "Add to bill" (line links), bill numbers, units of measure and SKUs are unverified until the owner adds them (fact sheet section 5).
 - Rate limits and CorePlus usage are unmeasured: no limit header and no 429 on 11 reads.
 - One diagnostic query `select count(*) from ItemReceipt` was sent by hand during B11 (answer 400, no such entity); the product never queries it.
 - Production keys and Intuit's app assessment are outside this milestone.
+
+### B11.4 Lead review of the B11 commit: B11-1 and B11-2 closed
+
+| # | Finding | Fix | Test |
+|---|---|---|---|
+| B11-1 | Amounts in another currency could mix silently with the account's: the sync ignored `CurrencyRef` | The sync reads `CurrencyRef` on purchase orders, bills and vendor credits. A row in another currency than `tenants.currency` is not stored; the run counts it (`skipped_currency`), and S-04 shows "3 documents in USD skipped: this account is in CAD". A skipped PO is not found by matching. A PO naming a skipped bill has unknown history, so its lines are `history_incomplete`. A row with no `CurrencyRef` (the recorded demo fixtures) is taken to be in the account's currency [assumption]. CompanyInfo has no currency, so no home currency is read. `make seed-sandbox` sets the sandbox account to USD | `test_documents_in_another_currency_are_skipped_and_named`, `test_a_po_naming_a_bill_in_another_currency_has_unknown_history`, `b11-live-qbo.test.ts` |
+| B11-2 | PO 1003 is closed by a `Purchase` that MatchDesk does not read | **Default the founder may revisit**, following CLAUDE.md ("missing history blocks a pass"): a PO whose `LinkedTxn` names any type other than a bill (migration 0025, `purchase_orders.unread_linked_txns`), or a bill not held, has unknown history. Every line on it is `history_incomplete`, and S-10 lists the reasons. Left out of the input fingerprint while empty | `test_unknown_po_history_blocks_every_line_and_stays_out_of_the_fingerprint`; the PO 1003 assertions in `test_intuit_tenant_connects_beside_a_recorded_tenant` |
+
+Commands after these fixes:
+
+- `make test` (migrations 0001 to 0025): 408 passed.
+- `make check`: passed.
+- `make web-check`: passed; Vitest 152 passed.
+- `make web-e2e` (own stack): 16 passed; `matchdesk_dev` unchanged by the run.
+- The real sync of the USD sandbox account through S-04 succeeded: 3 PurchaseOrder, 4 Bill, nothing skipped. S-10 for PO 1003 shows "History incomplete" with the Purchase 115 reason, in the in-app browser.
 

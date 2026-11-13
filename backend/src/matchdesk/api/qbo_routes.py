@@ -28,6 +28,7 @@ from matchdesk.api.common import (
     session_cookie,
 )
 from matchdesk.core import ConflictError, NotFoundError, Settings
+from matchdesk.exceptions import unknown_history
 from matchdesk.identity import load_session
 from matchdesk.qbo import (
     QboNotConfiguredError,
@@ -219,6 +220,8 @@ def register_qbo_routes(
                 for ln in lines
             ]
             body["changed_in_quickbooks"] = views.po_change_banner(s, po.id)
+            # B11: why QuickBooks history on this PO is unknown (its lines are history_incomplete).
+            body["history_unknown"] = list(unknown_history(s, [po]).get(po.id, ()))
             return body
 
 

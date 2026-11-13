@@ -362,3 +362,20 @@ def test_fingerprint_unchanged_while_no_bill_is_unattributed() -> None:
     assert input_fingerprint(inp) == input_fingerprint(replace(inp))
     moved = replace(inp, qbo_bills=(replace(bill, unattributed_po_ids=("po-4471",)),))
     assert input_fingerprint(moved) != input_fingerprint(inp)
+
+
+def test_unknown_po_history_blocks_every_line_and_stays_out_of_the_fingerprint() -> None:
+    """B11-2 (and a bill skipped for its currency, B11-1): a PO whose QuickBooks history is unknown
+    never passes, whatever the documents' dates."""
+    from matchdesk.matching.fingerprint import _canonical
+
+    base = {"imports": (class_a(),), "receipts": (receipt("r1", "100", date(2026, 10, 1)),)}
+    oct_inv = invoice("oct", "INV-2", date(2026, 10, 5), "40")
+    plain = build(docs=(oct_inv,), po=po_4471(), **base)
+    assert evaluate(plain).line("oct-l1").status.value == "matched"
+    assert "unknown_history" not in _canonical(po_4471())
+    unknown = replace(po_4471(), unknown_history=("QuickBooks links this purchase order to Purchase 115",))
+    res = evaluate(build(docs=(oct_inv,), po=unknown, **base))
+    assert res.line("oct-l1").status.value == "exception"
+    assert "history_incomplete" in {e.type.value for e in res.exceptions}
+    assert input_fingerprint(build(docs=(oct_inv,), po=unknown, **base)) != input_fingerprint(plain)

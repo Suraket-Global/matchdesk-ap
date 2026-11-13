@@ -146,7 +146,8 @@ A second invented account, "Sandbox Distributor (Intuit sandbox)", reads Intuit'
 2. Open http://localhost:5173/login (not 127.0.0.1) and sign in as `controller.sandbox@example.invalid`; the link is in Mailpit (http://127.0.0.1:8025).
 3. **Settings > QuickBooks** says "Intuit sandbox". **Connect to QuickBooks**, **Continue to Intuit**, sign in to Intuit, choose the sandbox company, **Connect**. Back on S-04: Connected, the company's name, permission `com.intuit.quickbooks.accounting`.
 4. **Read now** with From 2026-10-01 and To 2026-10-31 (the sample company's purchase orders are dated October 2026 in this sandbox). It ends with "3 PurchaseOrder, 4 Bill, 18 Item, 26 Vendor, 0 VendorCredit".
-5. Open a purchase order (for example PO 1004) to see its lines on S-10. "Received independently" stays 0: QuickBooks bills are never receiving evidence.
+5. Open a purchase order (for example PO 1004) to see its lines on S-10. "Received independently" stays 0: QuickBooks bills are never receiving evidence. PO 1003 shows **History incomplete**: QuickBooks links it to Purchase 115, an expense MatchDesk does not read, so no line on it can pass.
+   The sandbox account is in USD, like Intuit's sample company. A document in another currency than the account's is not stored, and the read says so, for example "3 documents in USD skipped: this account is in CAD".
 6. `make qbo-capture` reads everything again and writes the answers to `backend/var/qbo-capture/` (raw stays local; `sanitised/` has the realm, request IDs, Intuit user IDs and e-mail addresses removed). What the sandbox showed is in [qbo-fact-sheet.md](qbo-fact-sheet.md).
 
 MatchDesk only reads: every QuickBooks call is a GET, except Intuit's token exchange, refresh and revoke. **Disconnect** on S-04 revokes the token and erases it.

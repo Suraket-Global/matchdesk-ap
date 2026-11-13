@@ -66,6 +66,7 @@ def build_match_input(
         )
     ).all()
     po_line_ids = [pl.id for pl in po_line_rows]
+    unknown = unknown_history(s, po_rows)
     pos = tuple(
         PurchaseOrder(
             id=str(p.id),
@@ -87,6 +88,7 @@ def build_match_input(
                 for pl in po_line_rows
                 if pl.purchase_order_id == p.id
             ),
+            unknown_history=unknown.get(p.id, ()),
         )
         for p in po_rows
     )
@@ -318,4 +320,34 @@ def unattributed_bills(
             continue
         if any(bl.qbo_bill_id == b.id and bl.po_line_id is None and bl.qty is not None for bl in bill_lines):
             out[b.id] = tuple(sorted(named_by[b.qbo_id]))
+    return out
+
+
+def unknown_history(s: Session, po_rows: Sequence[PurchaseOrderRow]) -> dict[uuid.UUID, tuple[str, ...]]:
+    """B11 (lead review): why each PO's QuickBooks history is unknown, in words. A LinkedTxn entry
+    MatchDesk does not read (for example a Purchase), or a bill the PO names that is not stored as a
+    QuickBooks bill (skipped for its currency, or not read), each give one reason (S-10 shows them)."""
+    named = {q for p in po_rows for q in (p.linked_bill_qbo_ids or [])}
+    held = (
+        set(
+            s.scalars(
+                select(QboBillRow.qbo_id).where(QboBillRow.txn_type == "bill", QboBillRow.qbo_id.in_(named))
+            )
+        )
+        if named
+        else set()
+    )
+    out: dict[uuid.UUID, tuple[str, ...]] = {}
+    for p in po_rows:
+        reasons = [
+            f"QuickBooks links this purchase order to {kind} {txn_id}, which MatchDesk does not read"
+            for kind, _, txn_id in (t.partition(":") for t in p.unread_linked_txns or [])
+        ]
+        reasons += [
+            f"QuickBooks links this purchase order to bill {b}, which MatchDesk does not hold "
+            "(skipped for its currency, or not read)"
+            for b in sorted(set(p.linked_bill_qbo_ids or []) - held)
+        ]
+        if reasons:
+            out[p.id] = tuple(reasons)
     return out
