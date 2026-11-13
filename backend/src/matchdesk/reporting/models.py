@@ -255,7 +255,7 @@ class DeletionRequest(TenantMixin, Base):
             "uq_deletion_requests_open",
             "tenant_id",
             unique=True,
-            postgresql_where="status in ('requested', 'scheduled')",
+            postgresql_where="status in ('requested', 'scheduled', 'deleting')",
         ),
     )
     scope: Mapped[str] = mapped_column(Text, nullable=False, server_default="account")

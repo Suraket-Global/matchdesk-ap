@@ -140,7 +140,9 @@ def test_a_byte_identical_upload_is_the_earlier_file_not_a_missing_one(app_engin
     _c, ctrl = add_user(app_engine, w, "controller")
     first = add_invoice(app_engine, w, "a3", "INV-B10A3", date(2026, 10, 6), "10")
     with session(w.tenant_id, app_engine) as s:
-        doc = s.get(DocumentRow, s.scalar(text("select document_id from invoices where id = :i"), {"i": str(first)}))
+        doc = s.get(
+            DocumentRow, s.scalar(text("select document_id from invoices where id = :i"), {"i": str(first)})
+        )
         assert doc is not None
         s.add(
             DocumentRow(
@@ -547,3 +549,38 @@ def test_reports_and_receiving_imports_page_in_display_order_across_201_plus(app
         client.get("/api/v1/invoices", params={"cursor": "not-a-cursor"}, headers=w.headers).status_code
         == 422
     )
+
+
+def test_database_allows_one_open_deletion_request_also_while_deleting(app_engine, owner_engine, client):  # type: ignore[no-untyped-def]
+    """``deleting`` counts as open in the code (OPEN_DELETION) and in the unique index (0022)."""
+    import sqlalchemy as sa
+    from sqlalchemy.orm import Session as OrmSession
+
+    _w, _ctrl, rid = _scheduled_due(app_engine, owner_engine, client, "Fictional Distributor B10-D9")
+    with owner_engine.begin() as c:
+        c.execute(
+            text("update deletion_requests set status = 'deleting', claimed_at = now() where id = :i"),
+            {"i": str(rid)},
+        )
+        cols = [
+            r[0]
+            for r in c.execute(
+                text(
+                    "select column_name from information_schema.columns where table_name = 'deletion_requests' and column_name not in ('id', 'status')"
+                )
+            )
+        ]
+    col_list = ", ".join(cols)
+    with (
+        pytest.raises(sa.exc.IntegrityError, match="uq_deletion_requests_open"),
+        OrmSession(owner_engine) as s,
+    ):
+        s.execute(
+            text(
+                # Column names come from information_schema, not from input.
+                f"insert into deletion_requests (id, status, {col_list}) "  # noqa: S608
+                f"select gen_random_uuid(), 'requested', {col_list} from deletion_requests where id = :i"
+            ),
+            {"i": str(rid)},
+        )
+        s.commit()
