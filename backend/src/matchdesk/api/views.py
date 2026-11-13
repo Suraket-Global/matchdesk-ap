@@ -21,7 +21,7 @@ from matchdesk.core import round_cents
 from matchdesk.exceptions import describe_tolerance
 from matchdesk.exceptions.models import ExceptionRow, ItemAlias, LineMatch, ToleranceRule
 from matchdesk.identity import User
-from matchdesk.intake.models import DocumentRow, InvoiceLineRow, InvoiceRow
+from matchdesk.intake.models import DocumentRow, InvoiceLineRow, InvoiceRow, live_invoice
 from matchdesk.matching import ReceiptLine, receipt_line_counts
 from matchdesk.qbo.models import (
     Item,
@@ -493,7 +493,9 @@ def earlier_invoices_needed(s: Session) -> list[dict[str, Any]]:
     }
     documented = {
         (inv.vendor_id, inv.doc_number_norm)
-        for inv in s.scalars(select(InvoiceRow).where(InvoiceRow.doc_number_norm.is_not(None)))
+        for inv in s.scalars(
+            select(InvoiceRow).where(InvoiceRow.doc_number_norm.is_not(None), live_invoice())
+        )
     }
     out = []
     for pl_id, missing in by_line.items():

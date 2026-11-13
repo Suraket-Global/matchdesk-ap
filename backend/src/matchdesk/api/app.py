@@ -25,6 +25,7 @@ from matchdesk.api import views
 from matchdesk.api.auth_routes import PUBLIC_API_PATHS, register_auth_routes
 from matchdesk.api.b7_routes import INBOUND_PATH, register_b7_routes
 from matchdesk.api.b9_routes import register_b9_routes
+from matchdesk.api.b12_routes import register_b12_routes
 from matchdesk.api.common import (
     CSRF_HEADER,
     MUTATING,
@@ -58,7 +59,7 @@ from matchdesk.exceptions import allowed_codes, request_run, stale_runs
 from matchdesk.exceptions.models import ExceptionRow, LineMatch, MatchRun
 from matchdesk.identity import Principal, csrf_matches, load_session
 from matchdesk.intake import add_file, create_batch, describe_fields
-from matchdesk.intake.models import DocumentRow, InvoiceLineRow, InvoiceRow, UploadBatch
+from matchdesk.intake.models import DocumentRow, InvoiceLineRow, InvoiceRow, UploadBatch, live_invoice
 from matchdesk.qbo import (
     QboNotConfiguredError,
     TokenEndpoint,
@@ -184,6 +185,7 @@ def create_app(
     register_read_routes(app, engine())
     register_b7_routes(app, settings, engine(), out_mail)
     register_b9_routes(app, engine())
+    register_b12_routes(app, engine())
     # Outermost of the application's own middleware: refuses oversize bodies before anything reads them.
     app.add_middleware(BodyLimitMiddleware)
 
@@ -279,7 +281,9 @@ def create_app(
                 replay = _replay(s, p, idempotency_key, req_hash)
                 if replay is not None:
                     return replay
-            found = s.scalars(select(InvoiceRow.id).where(InvoiceRow.id.in_(body.invoice_ids))).all()
+            found = s.scalars(
+                select(InvoiceRow.id).where(InvoiceRow.id.in_(body.invoice_ids), live_invoice())
+            ).all()
             if len(set(found)) != len(set(body.invoice_ids)):
                 raise NotFoundError("invoice")
             run, created = request_run(s, p.tenant_id, list(body.invoice_ids))
@@ -329,12 +333,21 @@ def create_app(
                     )
                 )
             }
-            excs = s.scalars(select(ExceptionRow).where(ExceptionRow.invoice_id == inv.id)).all()
+            # Oldest first, so the case S-09 opens on does not depend on row order in the table (B12:
+            # unordered, a re-match that updated rows could change which exception was shown first).
+            excs = s.scalars(
+                select(ExceptionRow)
+                .where(ExceptionRow.invoice_id == inv.id)
+                .order_by(ExceptionRow.created_at, ExceptionRow.id)
+            ).all()
             stale = stale_runs(s, [lm.match_run_id for lm in results.values()])
             run_of_match = {lm.id: lm.match_run_id for lm in results.values()}
             # Pending, not "not matched yet", while a run covering this invoice is queued or running, or
             # while a matchable invoice still has a line without a current result (B6 review M1).
-            any_stale = any(stale.values()) or _matching_pending(s, inv, lines, results)
+            doc = s.get(DocumentRow, inv.document_id)
+            removed = doc is not None and doc.removed_at is not None
+            # B12: a deleted document has no current result and nothing pending; it is history.
+            any_stale = not removed and (any(stale.values()) or _matching_pending(s, inv, lines, results))
             evidence = views.line_evidence(s, inv, list(lines))
             ctx_by_exc = views.exception_context(s, list(excs))
             po = s.get(PurchaseOrderRow, inv.purchase_order_id) if inv.purchase_order_id else None
@@ -353,6 +366,15 @@ def create_app(
                 "doc_number": inv.doc_number,
                 "doc_date": inv.doc_date.isoformat() if inv.doc_date else None,
                 "version": inv.version,
+                "removed": {
+                    "removed_at": doc.removed_at.isoformat(),
+                    "removed_by_name": views.user_names(s, [doc.removed_by]).get(doc.removed_by)
+                    if doc.removed_by
+                    else None,
+                    "reason": doc.removed_reason,
+                }
+                if doc is not None and doc.removed_at is not None
+                else None,
                 "review": describe_fields(s, inv),
                 "lines": [
                     {

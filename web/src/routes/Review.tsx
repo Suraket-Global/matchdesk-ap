@@ -8,6 +8,8 @@ import { failedChecks, FIELD_RULES, type LineValues } from "../lib/checks";
 import { formatCents, numberError, plainNumber, sumCents, toCents } from "../lib/decimal";
 import { qty } from "../lib/decimal";
 import { time, when } from "../lib/format";
+import { DeleteDocument } from "./DeleteDocument";
+import { RemovedBanner } from "./RemovedBanner";
 
 const PdfViewer = lazy(() => import("../components/PdfViewer"));
 
@@ -360,8 +362,16 @@ export function ReviewPage() {
           </>
         }
         lede={r.vendor_name_read ? `Supplier name read from the document: ${r.vendor_name_read}` : "No supplier name could be read."}
-        actions={<StatusChip status={r.document_state === "needs_review" ? "needs_review" : r.verification_status === "passed" || r.verification_status?.startsWith("human") ? "ready" : "needs_review"} />}
+        actions={
+          <>
+            <StatusChip status={inv.removed ? "deleted" : r.document_state === "needs_review" ? "needs_review" : r.verification_status === "passed" || r.verification_status?.startsWith("human") ? "ready" : "needs_review"} />
+            {!inv.removed && (
+              <DeleteDocument documentId={inv.document_id} name={inv.doc_number ?? "this document"} onDeleted={() => navigate("/invoices")} />
+            )}
+          </>
+        }
       />
+      {inv.removed && <RemovedBanner removed={inv.removed} />}
       {conflict && (
         <Banner tone="warn" role="alert">
           <p>{conflict}</p>

@@ -194,10 +194,12 @@ def register_qbo_routes(
                 select(PoLineRow).where(PoLineRow.purchase_order_id == po.id).order_by(PoLineRow.line_no)
             ).all()
             received = counting_receipt_totals(s, [ln.id for ln in lines])
-            from matchdesk.intake.models import InvoiceRow
+            from matchdesk.intake.models import InvoiceRow, live_invoice
 
             invoice_count = s.scalar(
-                select(func.count()).select_from(InvoiceRow).where(InvoiceRow.purchase_order_id == po.id)
+                select(func.count())
+                .select_from(InvoiceRow)
+                .where(InvoiceRow.purchase_order_id == po.id, live_invoice())
             )
             vendor = s.get(Vendor, po.vendor_id)
             body = _po_summary(po, vendor.name if vendor else None)

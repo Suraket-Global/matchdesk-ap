@@ -11,10 +11,17 @@ Refuses in production, and when ``MATCHDESK_QBO_CLIENT_ID``, ``MATCHDESK_QBO_CLI
 ``MATCHDESK_QBO_REDIRECT_URI`` is empty (it names the setting, never prints a value). Warns when the
 redirect URI is not on ``MATCHDESK_APP_BASE_URL``'s origin: the session cookie belongs to one host,
 so the stack must run with the app on the redirect URI's origin (``make sandbox-up``). Idempotent.
+
+B12: ``ARGS="--name '...' --currency CAD"`` creates another sandbox account, for the Canadian sandbox
+company (docs/qbo-fact-sheet.md, "Canada company: to capture"). With ``--currency CAD`` and no other
+option the account is "Sandbox Distributor CA (Intuit sandbox)" with
+``controller.sandbox-ca@example.invalid`` and ``clerk.sandbox-ca@example.invalid``; ``--controller`` and
+``--clerk`` name other ``.invalid`` addresses. Nothing is connected: the lead gives Intuit's consent.
 """
 
 from __future__ import annotations
 
+import argparse
 import os
 import subprocess
 import sys
@@ -32,6 +39,39 @@ TENANT = "Sandbox Distributor (Intuit sandbox)"
 CONTROLLER = "controller.sandbox@example.invalid"
 CLERK = "clerk.sandbox@example.invalid"
 CURRENCY = "USD"  # the sandbox sample company's currency (T-1.1.1, 2026-11-13)
+# B12: the defaults per currency. USD is Intuit's US sample company; CAD the Canadian one.
+DEFAULTS = {
+    "USD": (TENANT, CONTROLLER, CLERK),
+    "CAD": (
+        "Sandbox Distributor CA (Intuit sandbox)",
+        "controller.sandbox-ca@example.invalid",
+        "clerk.sandbox-ca@example.invalid",
+    ),
+}
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    ap = argparse.ArgumentParser(prog="seed-sandbox", description="A synthetic account in Intuit mode.")
+    ap.add_argument("--currency", default=CURRENCY, help="ISO code of the sandbox company (USD or CAD)")
+    ap.add_argument("--name", help="account name (default per currency)")
+    ap.add_argument("--controller", help="controller address, must end in .invalid")
+    ap.add_argument("--clerk", help="clerk address, must end in .invalid")
+    a = ap.parse_args(argv)
+    a.currency = a.currency.strip().upper()
+    if len(a.currency) != 3 or not a.currency.isalpha():
+        ap.error("--currency takes a three-letter ISO code")
+    name, ctrl, clerk = DEFAULTS.get(a.currency, (None, None, None))
+    a.name = (a.name or name or "").strip()
+    a.controller = (a.controller or ctrl or "").strip().lower()
+    a.clerk = (a.clerk or clerk or "").strip().lower()
+    if not a.name or not a.controller or not a.clerk:
+        ap.error(f"--name, --controller and --clerk are required for currency {a.currency}")
+    for addr in (a.controller, a.clerk):
+        if not addr.endswith(".invalid") or "@" not in addr:
+            ap.error(f"{addr}: synthetic addresses only (an address ending in .invalid)")
+    if a.controller == a.clerk:
+        ap.error("the controller and the clerk need two addresses")
+    return a
 
 
 def _origin(url: str) -> str:
@@ -39,7 +79,9 @@ def _origin(url: str) -> str:
     return f"{p.scheme}://{p.netloc}"
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
+    tenant_name, controller, clerk, currency = args.name, args.controller, args.clerk, args.currency
     settings = load_settings()
     if settings.env.lower() in {"production", "prod"}:
         print("seed-sandbox: refused, MATCHDESK_ENV is production", file=sys.stderr)
@@ -66,19 +108,19 @@ def main() -> int:
     )
     engine = get_engine(settings.database_url)
     with global_session(engine) as s:
-        found = s.scalar(select(Tenant).where(Tenant.name == TENANT))
+        found = s.scalar(select(Tenant).where(Tenant.name == tenant_name))
         if found is not None:
-            if found.currency != CURRENCY or found.qbo_mode != "intuit":
-                found.currency, found.qbo_mode = CURRENCY, "intuit"
-                print(f"seed-sandbox: '{TENANT}' set to currency {CURRENCY}, QuickBooks mode intuit")
+            if found.currency != currency or found.qbo_mode != "intuit":
+                found.currency, found.qbo_mode = currency, "intuit"
+                print(f"seed-sandbox: '{tenant_name}' set to currency {currency}, QuickBooks mode intuit")
             else:
-                print(f"seed-sandbox: '{TENANT}' already exists; nothing changed")
+                print(f"seed-sandbox: '{tenant_name}' already exists; nothing changed")
             tid = None
         else:
-            t = Tenant(name=TENANT, qbo_mode="intuit", currency=CURRENCY)
+            t = Tenant(name=tenant_name, qbo_mode="intuit", currency=currency)
             s.add(t)
             users = []
-            for email, name in ((CONTROLLER, "Sandbox Controller"), (CLERK, "Sandbox Clerk")):
+            for email, name in ((controller, "Sandbox Controller"), (clerk, "Sandbox Clerk")):
                 u = s.scalar(select(User).where(User.email == email)) or User(email=email, display_name=name)
                 s.add(u)
                 users.append(u)
@@ -93,9 +135,9 @@ def main() -> int:
                 ]
             )
         print(
-            f"seed-sandbox: created '{TENANT}' (QuickBooks mode: intuit, currency {CURRENCY}, not connected)"
+            f"seed-sandbox: created '{tenant_name}' (QuickBooks mode: intuit, currency {currency}, not connected)"
         )
-    print(f"  controller: {CONTROLLER}   clerk: {CLERK}")
+    print(f"  controller: {controller}   clerk: {clerk}")
     redirect, app = _origin(settings.qbo_redirect_uri), _origin(settings.app_base_url)
     print(f"  sign in at {redirect}/login, then Settings > QuickBooks > Connect to QuickBooks")
     if redirect != app:

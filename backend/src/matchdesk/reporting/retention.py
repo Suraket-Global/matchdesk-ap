@@ -283,6 +283,8 @@ def build_archive(
                         "byte_size": doc.byte_size,
                         "uploaded_at": doc.created_at,
                         "state": doc.state,
+                        "removed_at": doc.removed_at,
+                        "removed_reason": doc.removed_reason,
                         "file_in_archive": f"same file as documents/{doc.duplicate_of_document_id}.{ext}",
                     }
                 )
@@ -304,6 +306,8 @@ def build_archive(
                     "byte_size": doc.byte_size,
                     "uploaded_at": doc.created_at,
                     "state": doc.state,
+                    "removed_at": doc.removed_at,
+                    "removed_reason": doc.removed_reason,
                     "file_in_archive": path or "missing",
                 }
             )
@@ -319,6 +323,8 @@ def build_archive(
                     "byte_size",
                     "uploaded_at",
                     "state",
+                    "removed_at",
+                    "removed_reason",
                     "file_in_archive",
                 ],
             ),

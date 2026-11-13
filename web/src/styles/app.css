@@ -1960,6 +1960,54 @@ dialog.drawer .modal-foot {
 .match-grid .panel {
   margin-bottom: 0;
 }
+/* B12: drag handles between the three S-09 panes, from 1280 px where the panes sit side by side.
+   Narrower layouts keep their stacked grids and never show a handle. */
+.pane-splitter {
+  display: none;
+}
+@media (min-width: 1280px) {
+  .match-grid.resizable {
+    --splitter-w: var(--s-4);
+    grid-template-columns: var(--match-cols, minmax(0, 36fr) var(--splitter-w) minmax(0, 40fr) var(--splitter-w) minmax(240px, 24fr));
+    grid-template-areas: "doc s1 mid s2 act";
+    column-gap: 0;
+  }
+  .pane-splitter {
+    display: flex;
+    justify-content: center;
+    align-self: stretch;
+    min-height: 120px;
+    cursor: col-resize;
+    touch-action: none;
+    border-radius: var(--r-sm, 4px);
+  }
+  .pane-splitter-grip {
+    width: 2px;
+    height: 100%;
+    border-radius: 1px;
+    background: var(--border);
+    transition: background-color 120ms ease;
+  }
+  .pane-splitter:hover .pane-splitter-grip,
+  .pane-splitter.active .pane-splitter-grip,
+  .pane-splitter:focus-visible .pane-splitter-grip {
+    background: var(--brand-500);
+    width: 3px;
+  }
+  .pane-splitter:focus-visible {
+    outline: 2px solid var(--focus, var(--brand-500));
+    outline-offset: -2px;
+  }
+}
+body.is-resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .pane-splitter-grip {
+    transition: none;
+  }
+}
 .compare th,
 .compare td {
   padding-left: var(--s-3);

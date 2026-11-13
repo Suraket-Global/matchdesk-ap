@@ -18,8 +18,9 @@ sandbox-up:
 	MATCHDESK_APP_BASE_URL=http://localhost:5173 $(BACKEND)/scripts/dev_up.sh
 
 # B11: a second synthetic tenant in Intuit mode (no connection; its controller connects on S-04).
+# B12: ARGS="--name '...' --currency CAD" creates the Canadian sandbox account beside it.
 seed-sandbox:
-	cd $(BACKEND) && MATCHDESK_APP_BASE_URL=http://localhost:5173 .venv/bin/python scripts/seed_sandbox.py
+	cd $(BACKEND) && MATCHDESK_APP_BASE_URL=http://localhost:5173 .venv/bin/python scripts/seed_sandbox.py $(ARGS)
 
 # B11, T-1.1.1: read-only capture of the connected sandbox company to backend/var/qbo-capture/.
 qbo-capture:

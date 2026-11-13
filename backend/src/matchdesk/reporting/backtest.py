@@ -28,7 +28,7 @@ from matchdesk.core import ZERO, ConflictError, dec, round_cents, round_half_up,
 from matchdesk.exceptions import stale_runs
 from matchdesk.exceptions.models import Approval, ExceptionRow, LineMatch
 from matchdesk.identity import User
-from matchdesk.intake.models import DocumentRow, InvoiceLineRow, InvoiceRow
+from matchdesk.intake.models import DocumentRow, InvoiceLineRow, InvoiceRow, live_invoice
 from matchdesk.qbo.models import PoLineRow, PurchaseOrderRow, QboBillRow, Vendor
 from matchdesk.receiving import counting_receipt_totals, current_declaration, describe_declaration
 from matchdesk.receiving.models import ReceiptLineRow, ReceivingImportRow
@@ -79,10 +79,59 @@ def _period_invoices(s: Session, start: date, end: date) -> list[InvoiceRow]:
     return list(
         s.scalars(
             select(InvoiceRow)
-            .where(InvoiceRow.doc_date >= start, InvoiceRow.doc_date <= end)
+            .where(InvoiceRow.doc_date >= start, InvoiceRow.doc_date <= end, live_invoice())
             .order_by(InvoiceRow.doc_date, InvoiceRow.doc_number_norm, InvoiceRow.id)
         ).all()
     )
+
+
+def deleted_after_approval(
+    s: Session, start: date, end: date, vendors: dict[uuid.UUID, str] | None = None
+) -> list[dict[str, Any]]:
+    """Documents of the period that an approved version included and a person deleted afterwards
+    (B12). The approved version keeps them (immutable); a later draft lists them under this label."""
+    approved = s.scalars(
+        select(BacktestReport).where(
+            BacktestReport.period_start == start,
+            BacktestReport.period_end == end,
+            BacktestReport.approved_at.is_not(None),
+        )
+    ).all()
+    if not approved:
+        return []
+    names = vendors if vendors is not None else {v.id: v.name for v in s.scalars(select(Vendor))}
+    rows = s.execute(
+        select(InvoiceRow, DocumentRow)
+        .join(DocumentRow, DocumentRow.id == InvoiceRow.document_id)
+        .where(
+            InvoiceRow.doc_date >= start,
+            InvoiceRow.doc_date <= end,
+            DocumentRow.removed_at.is_not(None),
+        )
+        .order_by(InvoiceRow.doc_date, InvoiceRow.doc_number_norm, InvoiceRow.id)
+    ).all()
+    out: list[dict[str, Any]] = []
+    for inv, doc in rows:
+        assert doc.removed_at is not None
+        versions = sorted(
+            r.version_no
+            for r in approved
+            if doc.created_at <= r.data_cutoff_at and doc.removed_at > r.data_cutoff_at
+        )
+        if versions:
+            out.append(
+                {
+                    "invoice_id": str(inv.id),
+                    "document_id": str(doc.id),
+                    "doc_type": inv.doc_type,
+                    "doc_number": inv.doc_number,
+                    "vendor_name": names.get(inv.vendor_id) if inv.vendor_id else inv.vendor_name_read,
+                    "removed_at": doc.removed_at.isoformat(),
+                    "reason": doc.removed_reason,
+                    "approved_versions": versions,
+                }
+            )
+    return out
 
 
 def _current_matches(s: Session, invoice_ids: list[uuid.UUID]) -> list[tuple[LineMatch, InvoiceLineRow]]:
@@ -257,6 +306,8 @@ def create_draft(
         "stale_lines": sum(1 for lm, _ln in matches if stale.get(lm.match_run_id)),
         # B9: the controller's "no receiving records" statement in force at the cut-off, if any.
         "no_receiving_declaration": _declaration(s),
+        # B12: documents an approved version of this period included and a person deleted since.
+        "deleted_after_approval": deleted_after_approval(s, start, end, vendors),
         # S-13 section 6 (B9): confirmed with figures that do not add up, with the clerk's note.
         "inconsistent_documents": [
             {
@@ -748,6 +799,15 @@ def _inconsistent_lines(r: BacktestReport) -> list[str]:
     return [f"Does not add up (confirmed): {d.get('doc_number') or ''} - {d.get('note') or ''}" for d in docs]
 
 
+def _deleted_lines(r: BacktestReport) -> list[str]:
+    docs = (r.totals or {}).get("deleted_after_approval") or []
+    return [
+        f"Deleted after approval of version {', '.join(str(v) for v in d.get('approved_versions', []))}: "
+        f"{d.get('doc_number') or ''} - {d.get('reason') or 'no reason given'}"
+        for d in docs
+    ]
+
+
 def export_pdf(r: BacktestReport, findings: list[ReportFinding]) -> bytes:
     sec = r.totals.get("sections", {})
     unmeasured = _unmeasured_line(r)
@@ -765,6 +825,7 @@ def export_pdf(r: BacktestReport, findings: list[ReportFinding]) -> bytes:
         f"  class B: {r.coverage_class_b_pct}%  supplier-slip-only lines: {r.class_c_only_lines}",
         *_declaration_lines(r),
         *_inconsistent_lines(r),
+        *_deleted_lines(r),
         "",
         "Section       Type                 Document       PO       Line   Amount     Paid",
     ]

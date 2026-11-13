@@ -14,7 +14,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from matchdesk.exceptions.models import ExceptionRow, ItemAlias, ToleranceRule
-from matchdesk.intake.models import DocumentRow, InvoiceLineRow, InvoiceRow
+from matchdesk.intake.models import DocumentRow, InvoiceLineRow, InvoiceRow, live_invoice
 from matchdesk.matching import (
     Alias,
     AliasStatus,
@@ -49,7 +49,7 @@ def build_match_input(
     s: Session, test_invoice_ids: Iterable[uuid.UUID], tenant_currency: str = "CAD", ruleset_code: str = "v1"
 ) -> MatchInput:
     test_ids = sorted({uuid.UUID(str(i)) for i in test_invoice_ids})
-    tests = s.scalars(select(InvoiceRow).where(InvoiceRow.id.in_(test_ids))).all()
+    tests = s.scalars(select(InvoiceRow).where(InvoiceRow.id.in_(test_ids), live_invoice())).all()
     vendor_ids = sorted({t.vendor_id for t in tests if t.vendor_id is not None})
 
     # In-scope purchase orders: every PO a test document names, whatever its date.
@@ -97,7 +97,9 @@ def build_match_input(
     # Test invoices are always loaded, even with no identified vendor, so none can drop out of
     # the result silently (B1-006); the engine turns a vendor-less document into an exception.
     inv_rows = s.scalars(
-        select(InvoiceRow).where(or_(InvoiceRow.vendor_id.in_(vendor_ids), InvoiceRow.id.in_(test_ids)))
+        select(InvoiceRow).where(
+            or_(InvoiceRow.vendor_id.in_(vendor_ids), InvoiceRow.id.in_(test_ids)), live_invoice()
+        )
     ).all()
     lines = s.scalars(
         select(InvoiceLineRow).where(

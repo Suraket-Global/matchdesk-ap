@@ -10,6 +10,7 @@ import { AMOUNT_INPUT, cad, numberError, plainNumber } from "../lib/decimal";
 import { day, plural, when } from "../lib/format";
 import { OUTCOME_WORDS, PAYMENT_WORDS } from "./Pilot";
 import { archiveSnapshotText, DeletionStateChip } from "./AccountData";
+import { UsageTable } from "./Usage";
 
 /** S-18: the operator's console. Accounts, pilot records, billable units and support access; never an
  * account's documents, which open only inside a support grant the account's controller gave. */
@@ -334,33 +335,7 @@ function TenantDetail() {
               <span className="muted small">{plural(t.usage_units, "unit")} in all</span>
             </div>
             <div className="panel-body">
-              {(t.usage ?? []).length === 0 ? (
-                <p className="muted" style={{ margin: 0 }}>
-                  None yet. One unit per invoice or credit note, in the month it is first read.
-                </p>
-              ) : (
-                <table className="compact">
-                  <caption className="sr-only">Billable units by month</caption>
-                  <thead>
-                    <tr>
-                      <th scope="col">Month</th>
-                      <th scope="col" className="num">Invoices</th>
-                      <th scope="col" className="num">Credit notes</th>
-                      <th scope="col" className="num">Units</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(t.usage ?? []).map((u) => (
-                      <tr key={u.month}>
-                        <td>{new Intl.DateTimeFormat("en-GB", { month: "long", year: "numeric" }).format(new Date(`${u.month}T12:00:00`))}</td>
-                        <td className="num">{u.invoice}</td>
-                        <td className="num">{u.credit_note}</td>
-                        <td className="num">{u.units}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
+              <UsageTable items={t.usage ?? []} />
             </div>
           </section>
           <section className="panel" aria-labelledby="access-h">

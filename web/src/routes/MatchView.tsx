@@ -14,6 +14,9 @@ import { chipFor } from "./Exceptions";
 import { Assignee, ControllerDecision, decidedByController, useExceptionDetail } from "./MatchDecisions";
 import { ArrowLeft, ChevronLeft, ChevronRight, ClipboardList, Paperclip, PenLine } from "lucide-react";
 
+import { PaneSeparator, usePaneWidths } from "../components/PaneSplitter";
+import { RemovedBanner } from "./RemovedBanner";
+
 const PdfViewer = lazy(() => import("../components/PdfViewer"));
 
 const ABSENT_TEXT: Record<string, (amount: string) => string> = {
@@ -190,6 +193,8 @@ export function MatchViewPage() {
   const here = location.pathname + location.search;
   const submitting = useRef(false);
   const heading = useRef<HTMLHeadingElement>(null);
+  const grid = useRef<HTMLDivElement>(null);
+  const panes = usePaneWidths();
   const [code, setCode] = useState("");
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
@@ -341,7 +346,8 @@ export function MatchViewPage() {
             : "Matching… Inputs changed since the last result; the new result appears here without a reload."}
         </Banner>
       )}
-      {inv.verification_status === "failed" && (
+      {inv.removed && <RemovedBanner removed={inv.removed} />}
+      {inv.verification_status === "failed" && !inv.removed && (
         <Banner tone="draft">
           This document is waiting for extraction review. <Link to={`/invoices/${inv.id}/review`}>Review the extraction</Link>
         </Banner>
@@ -372,7 +378,7 @@ export function MatchViewPage() {
           </button>
         ))}
       </div>
-      <div className="match-grid">
+      <div className="match-grid resizable" ref={grid} style={panes.style}>
         <section className="pane-doc panel" aria-labelledby="doc-h">
           <div className="panel-head">
             <h2 id="doc-h">Invoice document</h2>
@@ -384,6 +390,7 @@ export function MatchViewPage() {
             </Suspense>
           </div>
         </section>
+        <PaneSeparator index={0} widths={panes.widths} onChange={panes.update} onReset={panes.reset} gridRef={grid} />
 
         <div className="pane-mid">
           <section className={`workings ${passed ? "ok" : ""}`} aria-labelledby="calc-h">
@@ -550,6 +557,7 @@ export function MatchViewPage() {
             )}
           </section>
         </div>
+        <PaneSeparator index={1} widths={panes.widths} onChange={panes.update} onReset={panes.reset} gridRef={grid} />
 
         <aside className="pane-act" aria-label="Actions">
           {current && (

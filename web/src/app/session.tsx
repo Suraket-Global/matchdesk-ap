@@ -29,6 +29,9 @@ const PERMISSIONS: Record<string, string[]> = {
   decide_duplicate_or_credit: ["controller"],
   record_finding_outcome: ["controller"],
   request_deletion_or_archive: ["controller"],
+  // B12: delete one document (an accepted one: controller, with a reason); the account's usage.
+  delete_document: ["controller", "clerk"],
+  read_usage: ["controller"],
 };
 
 interface SessionValue {

@@ -54,6 +54,7 @@ export const STATUS: Record<string, { tone: Tone; icon: string; word: string }> 
   "duplicate file": { tone: "absent", icon: "stack", word: "Duplicate file" },
   succeeded: { tone: "matched", icon: "tick", word: "Imported" },
   voided: { tone: "waived", icon: "dash", word: "Voided" },
+  deleted: { tone: "waived", icon: "dash", word: "Deleted" },
   active: { tone: "matched", icon: "tick", word: "Active" },
   retired: { tone: "waived", icon: "dash", word: "Retired" },
   deactivated: { tone: "waived", icon: "dash", word: "Deactivated" },

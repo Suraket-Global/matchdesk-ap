@@ -1060,3 +1060,35 @@ Commands after these fixes:
 - `make web-e2e` (own stack): 16 passed; `matchdesk_dev` unchanged by the run.
 - The real sync of the USD sandbox account through S-04 succeeded: 3 PurchaseOrder, 4 Bill, nothing skipped. S-10 for PO 1003 shows "History incomplete" with the Purchase 115 reason, in the in-app browser.
 
+
+## B12 2026-11-13
+
+Source: the B12 brief (`_coordination/B12-GUIDE.md`, outside this repository). Branch `feat/b12-finish` from `main` 889a626. Migration 0026 (`documents.removed_at`, `removed_by`, `removed_reason`; the unique-file index skips deleted documents; `exception_events.event` and `match_runs.trigger` admit `document_removed`). Synthetic data only; QuickBooks read-only; nothing connected to Intuit.
+
+### B12.1 What was built, and its tests
+
+| # | Item | Built | Test |
+|---|---|---|---|
+| 1 | Delete one document | `GET /documents/{id}/deletion`, `POST /documents/{id}/deletion-requests`: soft deletion with audit entry `document.removed`. Not yet accepted: clerk or controller, reason optional. Accepted into matching (gates passed or confirmed): controller only (403 otherwise), reason required (422). Refused while being read, when already deleted, or for a non-invoice file (409). Line results retired (history kept), exceptions closed with event `document_removed`, pending waivers on them withdrawn, the supplier's other documents re-matched (trigger `document_removed`). Every match input, list, count, weekly summary, coverage and report reads live documents only. The row and the file stay until account deletion; the archive index lists `removed_at` and `removed_reason`. An approved report is untouched; a later draft lists the document in `deleted_after_approval` (also in the PDF). The batch counts it once as Deleted. UI: **Delete document** on S-06 and S-07 with a dialog that states the effects; S-07 and S-09 show a "Deleted" banner | `test_clerk_deletes_a_document_not_yet_accepted_soft_and_audited`, `test_accepted_document_needs_the_controller_and_a_reason_and_rematches_the_rest`, `test_approved_report_keeps_the_document_and_a_later_draft_lists_it`, `test_refusals_while_reading_and_for_other_files`, `tests/unit/test_b12_units.py`, `web/src/b12-finish.test.tsx`, `e2e/tidy-b12.spec.ts` |
+| 2 | Controller usage | `GET /usage` (controller): billable units by month from the same function as S-18, `total_units`, no price; a deleted document stays counted. S-16 **Usage** panel; S-18 uses the same table component | `test_usage_is_the_operator_figure_for_the_controller_only`, `b12-finish.test.tsx`, `e2e/tidy-b12.spec.ts` |
+| 3 | Resizable S-09 panes | Two `role="separator"` handles from 1280 px with `aria-valuenow`/`min`/`max`, arrow keys (Shift for 10), Home, End, Enter or double click to reset; widths in sessionStorage per tab inside try/catch (validated on read); under 1280 px the two-column layout and under 1024 px the stacked layout, without handles | `b12-finish.test.tsx` (keyboard, storage, blocked storage), `e2e/tidy-b12.spec.ts` (keyboard, reload, drag, double click, 1000 and 375 px) |
+| 4 | Canada sandbox readiness | `make seed-sandbox ARGS="--name '...' --currency CAD"` (defaults per currency; `.invalid` addresses only); fact sheet section 6 "Canada company: to capture". Not connected: the Intuit consent is the lead's | `test_seed_sandbox_takes_a_name_and_a_currency`; ran on `matchdesk_dev` |
+| 5 | Tidy-up | AGENTS.md, docs/PLAY.md (section 13 and "Not built yet") and App-flow.md section 7 list as not built only: production Intuit keys and app assessment, the hosted extractor, a hosted email provider, deployment to the owner's VPS. TRD.md and schema.md (permission row, migration row, section 8) updated | review of the documents |
+| 6 | Found while running E2E | `GET /invoices/{id}` returned its exceptions in table order; after a re-match S-09 could open on a different exception (the B9 credit-decision walk failed twice). Now oldest first | `make web-e2e` |
+
+### B12.2 Commands and results (from `matchdesk-ap/`)
+
+| Command | Result |
+|---|---|
+| `make test` (clean `matchdesk_test`, migrations 0001 to 0026) | 423 passed |
+| `make check` | passed |
+| `make web-check` (typecheck, lint, Vitest, build) | passed; Vitest 165 passed |
+| `make web-e2e` (own stack `matchdesk_e2e`, dev stack stopped) | 18 passed (B12 file included); `matchdesk_dev` unchanged by the run. With the dev worker running, an earlier run reported `sessions: 4 -> 3`: the dev worker removing an expired session, not Playwright |
+| Walk in the in-app browser at 1440 and 375 px (a tagged synthetic tenant, removed by `make demo-reset` afterwards) | S-09 handles move by keyboard and are remembered (46/30/24 after Shift+Right), none at 375 px, no sideways scroll; S-07 delete dialog, deletion with a reason, toast, invoice list 11 documents; S-06 batch shows "1 deleted file" and counts that add up; S-09 of the deleted document shows the banner; S-16 Usage at 1440 and 375 px |
+| `make demo-reset`, `make sandbox-up`, `make seed-sandbox`, `make seed-sandbox ARGS="--name 'Sandbox Distributor CA (Intuit sandbox)' --currency CAD"` | demo reloaded; the US and Canadian sandbox accounts created, not connected |
+
+### B12.3 Left
+
+- Only account-bound items remain: production Intuit keys and Intuit's app assessment, the hosted extractor, a hosted email provider, deployment to the owner's VPS.
+- The Canadian sandbox company is not connected or read: fact sheet section 6 lists the lead's steps. `make demo-reset` empties `matchdesk_dev`, so the US sandbox account was created again and must be connected again on S-04.
+- Deletion of a receiving file is not part of this item (a receiving import is voided, as before).

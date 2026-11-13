@@ -23,7 +23,7 @@ from matchdesk.core import ConflictError, dec, round_half_up
 from matchdesk.exceptions.inputs import build_match_input
 from matchdesk.exceptions.models import Approval, ItemAlias, LineMatch, MatchRun, ToleranceRule
 from matchdesk.exceptions.triggers import request_runs
-from matchdesk.intake.models import InvoiceLineRow, InvoiceRow
+from matchdesk.intake.models import InvoiceLineRow, InvoiceRow, live_invoice
 from matchdesk.matching import (
     Alias,
     AliasStatus,
@@ -76,7 +76,7 @@ def invoices_for_alias_code(
     for inv_id, code in s.execute(
         select(InvoiceLineRow.invoice_id, InvoiceLineRow.supplier_item_code)
         .join(InvoiceRow, InvoiceRow.id == InvoiceLineRow.invoice_id)
-        .where(InvoiceRow.vendor_id == vendor_id, InvoiceLineRow.removed_at.is_(None))
+        .where(InvoiceRow.vendor_id == vendor_id, InvoiceLineRow.removed_at.is_(None), live_invoice())
     ).all():
         if normalise_code(code) == code_norm:
             ids.add(inv_id)
@@ -273,7 +273,7 @@ def describe_tolerance(t: ToleranceRule | None, vendor_id: uuid.UUID | None = No
 
 
 def _affected_invoices(s: Session, vendor_id: uuid.UUID | None) -> list[uuid.UUID]:
-    q = select(InvoiceRow.id)
+    q = select(InvoiceRow.id).where(live_invoice())
     if vendor_id is not None:
         q = q.where(InvoiceRow.vendor_id == vendor_id)
     return sorted(s.scalars(q).all())

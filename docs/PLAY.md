@@ -152,11 +152,20 @@ A second invented account, "Sandbox Distributor (Intuit sandbox)", reads Intuit'
 
 MatchDesk only reads: every QuickBooks call is a GET, except Intuit's token exchange, refresh and revoke. **Disconnect** on S-04 revokes the token and erases it.
 
-## Not built yet (the screens say so)
+## 13. The B12 pieces
 
-- **Live QuickBooks in production.** The demo reads recorded, invented responses; the sandbox account of section 12 reads Intuit's sandbox. A real company needs production keys and Intuit's app assessment (`execution-plan.md` section 3); a Canadian company (CAD, GST/HST) has not been read yet ([qbo-fact-sheet.md](qbo-fact-sheet.md)).
-- **Hosted extractor and region highlighting.** Documents are read by the local text-PDF reader. Selecting a field does not highlight its place on the page, because only a hosted extraction provider records regions, and that needs a provider account and no-training terms.
+1. **Delete a document (S-06, S-07).** As the clerk, open the batch in **Intake** and pick a document still waiting for review (on a fresh demo, **FF-1006** before you confirm it in section 3): **Delete document**. The dialog says what happens before you press it: the lines lose their current result (earlier results stay as history), the exceptions close, the supplier's other documents are matched again, an approved report does not change and a later draft lists the document as deleted after approval, and the original file is kept until the account is deleted. The reason is optional here; choose **Delete document**. The batch now shows the file as **Deleted** with the time; it is gone from **Invoices**, the queue and new reports, and the audit log has "document.removed". A document already accepted into matching, for example **FF-1004**, asks the clerk to leave it to the controller; as the controller it needs a reason (for example `Belongs to another company (practice)`).
+2. **After approval (S-13).** If a report for October was approved before a deletion, it does not change. **Refresh draft** (now offered, because the period changed) gives a new version whose section 6 lists the document under "Deleted after approval of version N", with the reason; the PDF says so too.
+3. **Usage (S-16).** As the controller, **Users and access**, panel **Usage**: billable units by month (one per invoice or credit note, in the month it was first read), the figures the operator sees on S-18, without a price. A deleted document stays counted: it was read.
+4. **Resize the match view (S-09).** In a window at least 1280 px wide, open any match view. Drag the thin handles between the document, the comparison and the actions, or Tab to a handle and use the arrow keys (Shift for a larger step, Home and End for the limits). Reload the tab: the widths stay. A double click on a handle (or Enter) puts all three back. Narrower windows keep the stacked layout without handles.
+5. **Canada sandbox.** `make seed-sandbox ARGS="--name 'Sandbox Distributor CA (Intuit sandbox)' --currency CAD"` creates a second sandbox account in CAD beside the US one; the steps to connect and capture the Canadian company are in [qbo-fact-sheet.md section 6](qbo-fact-sheet.md#6-canada-company-to-capture). The Intuit consent is the lead's.
+
+## Not built yet (each needs an outside account; the screens say so)
+
+- **Production Intuit keys and Intuit's app assessment.** The demo reads recorded, invented responses; the sandbox accounts of section 12 read Intuit's sandbox. A real company needs production keys and Intuit's app assessment (`execution-plan.md` section 3). A Canadian company (CAD, GST/HST) is ready to connect but has not been read yet ([qbo-fact-sheet.md section 6](qbo-fact-sheet.md#6-canada-company-to-capture)).
+- **Hosted extractor.** Documents are read by the local text-PDF reader. Selecting a field does not highlight its place on the page, because only a hosted extraction provider records regions, and that needs a provider account and no-training terms.
 - **Hosted email provider.** Email intake works with the local signed webhook (`make demo-email`). A real inbound address needs an email provider account; `MATCHDESK_INBOUND_PROVIDER` set to a provider refuses until then.
+- **Deployment to the owner's VPS.** Everything runs on this machine only; nothing is deployed.
 
 ## Start again
 

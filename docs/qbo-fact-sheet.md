@@ -74,3 +74,20 @@ Observed on **2026-11-13** in an Intuit sandbox company, through MatchDesk's own
 6. An **inactive vendor** with an open purchase order.
 
 After any of these, run `make qbo-capture ARGS="--fixtures fixtures/qbo/sandbox"` and update this sheet.
+
+## 6. Canada company: to capture
+
+Not read yet. MatchDesk is ready for it (B12, 2026-11-13); the Intuit consent is the lead's step. Nothing in this section has run against a Canadian company, so every Canadian statement above stays **unverified** until these steps are done and this sheet is updated.
+
+1. **Add the company (lead, at developer.intuit.com).** Dashboard, the MatchDesk app, **Sandbox**, **Add a sandbox company**, country **Canada**, edition Plus or Advanced. MatchDesk writes nothing to it.
+2. **Start the stack:** `make sandbox-up` (the app on http://localhost:5173, the redirect URI's origin), then `make web`.
+3. **Create the Canadian account:** `make seed-sandbox ARGS="--name 'Sandbox Distributor CA (Intuit sandbox)' --currency CAD"`. It creates the account in Intuit mode, currency CAD, not connected, with `controller.sandbox-ca@example.invalid` and `clerk.sandbox-ca@example.invalid`. The US account "Sandbox Distributor (Intuit sandbox)" and the demo account are untouched. Running it again changes nothing.
+4. **Connect (lead):** open http://localhost:5173/login (not 127.0.0.1), sign in as `controller.sandbox-ca@example.invalid` (the link is in Mailpit, http://127.0.0.1:8025), **Settings > QuickBooks > Connect to QuickBooks**, **Continue to Intuit**, and choose the **Canada** sandbox company, not the US one. One QuickBooks company belongs to one MatchDesk account: choosing the US company here is refused, because it is already connected to the US account.
+5. **Read:** **Read now** for a range that holds the company's purchase orders. Note the counts on S-04, in particular any "documents in USD skipped" (expected: none, the account is in CAD).
+6. **Capture:** `make qbo-capture ARGS="--tenant 'Sandbox Distributor CA (Intuit sandbox)'"`. The raw answers stay in `backend/var/qbo-capture/<time>/` (gitignored); `sanitised/` has the realm, request IDs, Intuit user IDs and e-mail addresses removed, and the leak gate refuses to write a file that still holds one. Only add `--fixtures fixtures/qbo/sandbox-ca` after reading the sanitised files.
+7. **Record here,** each with what was observed:
+   - `CurrencyRef` on purchase orders, bills and vendor credits (expected `CAD`);
+   - the tax codes on bill and PO lines (GST, HST, PST, QST, exempt, zero-rated) and whether `TxnTaxDetail` and `GlobalTaxCalculation` appear;
+   - whether line `Amount` and `UnitPrice` exclude tax (MatchDesk compares unit prices before tax);
+   - whether a Canadian company offers the same entities and query paging as the US one.
+8. **Then:** replace the "Canadian company" row of section 4 with what was observed, and add a regression test for any shape that differs from the US one.

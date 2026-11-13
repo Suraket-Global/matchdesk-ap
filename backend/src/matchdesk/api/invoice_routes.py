@@ -83,9 +83,14 @@ def register_invoice_routes(app: FastAPI, engine: Engine) -> None:
         require(p, "read")
         n = page_limit(limit)
         with session(p.tenant_id, engine) as s:
-            q = select(InvoiceRow, DocumentRow.state).join(
-                DocumentRow,
-                (DocumentRow.id == InvoiceRow.document_id) & (DocumentRow.tenant_id == InvoiceRow.tenant_id),
+            q = (
+                select(InvoiceRow, DocumentRow.state)
+                .join(
+                    DocumentRow,
+                    (DocumentRow.id == InvoiceRow.document_id)
+                    & (DocumentRow.tenant_id == InvoiceRow.tenant_id),
+                )
+                .where(DocumentRow.removed_at.is_(None))
             )
             if verification_status:
                 q = q.where(InvoiceRow.verification_status == verification_status)
@@ -222,7 +227,7 @@ def register_invoice_routes(app: FastAPI, engine: Engine) -> None:
                     {
                         "id": str(d.id),
                         "state": d.state,
-                        "displayed_state": DISPLAYED[d.state],
+                        "displayed_state": "deleted" if d.removed_at else DISPLAYED[d.state],
                         "failure_code": d.failure_code,
                         "byte_size": d.byte_size,
                         "mime_type": d.mime_type,
@@ -233,6 +238,8 @@ def register_invoice_routes(app: FastAPI, engine: Engine) -> None:
                         if d.duplicate_of_document_id in original_invoice
                         else None,
                         "original_name": d.original_name,
+                        "removed_at": d.removed_at.isoformat() if d.removed_at else None,
+                        "removed_reason": d.removed_reason,
                         "invoices": [
                             {
                                 "id": str(i.id),

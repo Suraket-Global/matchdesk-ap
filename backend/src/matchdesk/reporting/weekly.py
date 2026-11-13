@@ -28,7 +28,7 @@ from matchdesk.audit import write_audit
 from matchdesk.core import ZERO, Mailer, OutgoingMail, Settings, dec, round_cents, round_half_up
 from matchdesk.exceptions.models import ExceptionRow, LineMatch
 from matchdesk.identity.models import Membership, Tenant, User
-from matchdesk.intake.models import InvoiceLineRow, InvoiceRow
+from matchdesk.intake.models import InvoiceLineRow, InvoiceRow, live_invoice
 from matchdesk.qbo.models import Vendor
 from matchdesk.reporting.backtest import _current_matches, measurement_state, measurement_words, section_of
 from matchdesk.reporting.models import WeeklySummaryDelivery, WeeklySummaryRun
@@ -58,7 +58,9 @@ def summary(s: Session, week_start: date) -> dict[str, Any]:
     week_end = week_start + timedelta(days=6)
     invoices = list(
         s.scalars(
-            select(InvoiceRow).where(InvoiceRow.doc_date >= week_start, InvoiceRow.doc_date <= week_end)
+            select(InvoiceRow).where(
+                InvoiceRow.doc_date >= week_start, InvoiceRow.doc_date <= week_end, live_invoice()
+            )
         ).all()
     )
     names = {v.id: v.name for v in s.scalars(select(Vendor))}

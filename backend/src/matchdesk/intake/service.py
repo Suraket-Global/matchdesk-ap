@@ -92,6 +92,7 @@ def add_file(
             DocumentRow.purpose == "invoice",
             DocumentRow.state != "duplicate_file",
             DocumentRow.deleted_at.is_(None),
+            DocumentRow.removed_at.is_(None),
         )
     )
     doc_id = uuid.uuid4()
@@ -143,9 +144,12 @@ def add_file(
 
 def batch_summary(s: Session, batch_id: uuid.UUID) -> dict[str, int]:
     batch = s.get(UploadBatch, batch_id)
-    states = s.scalars(select(DocumentRow.state).where(DocumentRow.batch_id == batch_id)).all()
-    counts = Counter(DISPLAYED[st] for st in states)
-    summary = {name: counts.get(name, 0) for name in sorted(set(DISPLAYED.values()))}
+    rows = s.execute(
+        select(DocumentRow.state, DocumentRow.removed_at).where(DocumentRow.batch_id == batch_id)
+    ).all()
+    # B12: a deleted document counts once, as deleted, so the counts still add up to the file count.
+    counts = Counter("deleted" if removed is not None else DISPLAYED[st] for st, removed in rows)
+    summary = {name: counts.get(name, 0) for name in sorted({*DISPLAYED.values(), "deleted"})}
     summary["file_count"] = batch.file_count if batch else 0
     return summary
 

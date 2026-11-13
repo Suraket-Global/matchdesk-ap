@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 
 from matchdesk.exceptions.models import MatchRun
 from matchdesk.exceptions.runs import request_run
-from matchdesk.intake.models import InvoiceRow
+from matchdesk.intake.models import InvoiceRow, live_invoice
 from matchdesk.qbo import processing_allowed
 from matchdesk.qbo.models import PoLineRow, PurchaseOrderRow
 
@@ -30,7 +30,9 @@ TASK = "match_request"
 def _vendor_invoices(s: Session, vendor_ids: set[uuid.UUID]) -> list[uuid.UUID]:
     if not vendor_ids:
         return []
-    return sorted(s.scalars(select(InvoiceRow.id).where(InvoiceRow.vendor_id.in_(vendor_ids))).all())
+    return sorted(
+        s.scalars(select(InvoiceRow.id).where(InvoiceRow.vendor_id.in_(vendor_ids), live_invoice())).all()
+    )
 
 
 def invoices_on_pos(s: Session, po_ids: Iterable[uuid.UUID]) -> list[uuid.UUID]:
@@ -54,10 +56,12 @@ def invoices_on_po_lines(s: Session, po_line_ids: Iterable[uuid.UUID]) -> list[u
 
 
 def related_invoices(s: Session, invoice_ids: Iterable[uuid.UUID]) -> list[uuid.UUID]:
-    """The given invoices plus every invoice of their vendors (same reason as ``invoices_on_pos``)."""
+    """The given invoices plus every invoice of their vendors (same reason as ``invoices_on_pos``);
+    a deleted document is never in scope (B12)."""
     ids = sorted({uuid.UUID(str(i)) for i in invoice_ids})
     vendors = set(s.scalars(select(InvoiceRow.vendor_id).where(InvoiceRow.id.in_(ids))).all()) - {None}
-    return sorted(set(ids) | set(_vendor_invoices(s, vendors)))  # type: ignore[arg-type]
+    live = set(s.scalars(select(InvoiceRow.id).where(InvoiceRow.id.in_(ids), live_invoice())).all())
+    return sorted(live | set(_vendor_invoices(s, vendors)))  # type: ignore[arg-type]
 
 
 def request_runs(

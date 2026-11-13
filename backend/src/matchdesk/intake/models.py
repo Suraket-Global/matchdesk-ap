@@ -17,9 +17,11 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    select,
 )
 from sqlalchemy.dialects.postgresql import CITEXT, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.sql.elements import ColumnElement
 
 from matchdesk.tenancy import MONEY, PRICE, QTY, UUIDT, Base, TenantMixin, enum_check, tenant_args, tfk
 
@@ -44,12 +46,15 @@ class DocumentRow(TenantMixin, Base):
         CheckConstraint(enum_check("source", ("upload", "email", "system")), name="source"),
         CheckConstraint(enum_check("state", DOCUMENT_STATES), name="state"),
         CheckConstraint("blob_key like 't/' || tenant_id::text || '/%'", name="blob_key_tenant"),
+        CheckConstraint("(removed_at is null) = (removed_by is null)", name="removed_pair"),
         Index(
             "uq_documents_tenant_invoice_sha",
             "tenant_id",
             "sha256",
             unique=True,
-            postgresql_where="purpose = 'invoice' and state <> 'duplicate_file' and deleted_at is null",
+            postgresql_where=(
+                "purpose = 'invoice' and state <> 'duplicate_file' and deleted_at is null and removed_at is null"
+            ),
         ),
     )
     purpose: Mapped[str] = mapped_column(Text, nullable=False)
@@ -70,6 +75,18 @@ class DocumentRow(TenantMixin, Base):
     page_count: Mapped[int | None] = mapped_column(Integer)
     uploaded_by: Mapped[uuid.UUID | None] = mapped_column(UUIDT, ForeignKey("users.id"))
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # B12: deleted by a person (soft). The row and file stay until retention removes them; nothing
+    # reads a removed document as a live input. ``deleted_at`` means the file itself is gone.
+    removed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    removed_by: Mapped[uuid.UUID | None] = mapped_column(UUIDT, ForeignKey("users.id"))
+    removed_reason: Mapped[str | None] = mapped_column(Text)
+
+
+def live_invoice() -> ColumnElement[bool]:
+    """True for an invoice whose document was not deleted by a person (B12). Every read of invoices
+    as inputs, history, lists or reports filters with this."""
+    removed = select(DocumentRow.id).where(DocumentRow.removed_at.is_not(None))
+    return InvoiceRow.document_id.not_in(removed)
 
 
 class InvoiceRow(TenantMixin, Base):

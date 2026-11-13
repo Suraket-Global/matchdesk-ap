@@ -48,6 +48,10 @@ PERMISSIONS: dict[str, frozenset[str]] = {
     "assign_exception": frozenset({_C, _K}),
     "decide_duplicate_or_credit": frozenset({_C}),
     "record_finding_outcome": frozenset({_C}),
+    # B12 row added to schema.md 4.1: delete one invoice or credit-note document (S-06, S-07). A
+    # document already accepted into matching needs the controller and a reason (checked in
+    # ``exceptions.document_removal``).
+    "delete_document": frozenset({_C, _K}),
 }
 
 

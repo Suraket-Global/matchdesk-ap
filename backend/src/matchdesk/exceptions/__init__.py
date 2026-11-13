@@ -1,5 +1,6 @@
 """Exceptions, match results and match runs."""
 
+from matchdesk.exceptions.document_removal import removal_rule, remove_document
 from matchdesk.exceptions.inputs import build_match_input, unknown_history
 from matchdesk.exceptions.permissions import check_resolution_allowed
 from matchdesk.exceptions.rules_admin import (
@@ -76,6 +77,8 @@ __all__ = [
     "related_invoices",
     "rematch_alias",
     "rematch_for_alias",
+    "removal_rule",
+    "remove_document",
     "reopen",
     "request_late_receipt_approval",
     "request_run",

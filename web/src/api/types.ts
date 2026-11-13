@@ -287,6 +287,43 @@ export interface InvoiceDetail {
   review: Review;
   lines: InvoiceLine[];
   exceptions: ExceptionItem[];
+  /** B12: set when a person deleted the document; it is then history only. */
+  removed?: { removed_at: string; removed_by_name: string | null; reason: string | null } | null;
+}
+
+/** B12: what deleting one document needs (GET /documents/{id}/deletion). */
+export interface DocumentDeletionRule {
+  accepted: boolean;
+  needs_controller: boolean;
+  reason_required: boolean;
+  blocked: string | null;
+  removed_at: string | null;
+  removed_reason: string | null;
+}
+
+export interface DocumentDeletionResult {
+  document_id: string;
+  removed_at: string;
+  reason: string | null;
+  invoice_ids: string[];
+  results_retired: number;
+  exceptions_closed: number;
+  approvals_withdrawn: number;
+  match_run_id: string | null;
+}
+
+/** B12: the account's billable units by month (GET /usage), the operator's figures without a price. */
+export interface UsageMonth {
+  month: string;
+  invoice: number;
+  credit_note: number;
+  units: number;
+}
+
+export interface Usage {
+  items: UsageMonth[];
+  total_units: number;
+  unit: string;
 }
 
 export interface BatchTotals {
@@ -296,6 +333,8 @@ export interface BatchTotals {
   "needs review": number;
   failed: number;
   "duplicate file": number;
+  /** B12: files a person deleted; counted here only, so the counts still add up. */
+  deleted?: number;
   file_count: number;
 }
 
@@ -318,6 +357,8 @@ export interface BatchFile {
   duplicate_of_document_id: string | null;
   duplicate_of_invoice_id?: string | null;
   original_name: string | null;
+  removed_at?: string | null;
+  removed_reason?: string | null;
   invoices: { id: string; doc_type: string; doc_number: string | null; vendor_name: string | null; verification_status: string }[];
 }
 

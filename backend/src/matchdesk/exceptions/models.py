@@ -81,6 +81,7 @@ MATCH_TRIGGERS = (
     "duplicate_decision",
     "late_receipt_approval",
     "manual",
+    "document_removed",
 )
 RUN_STATES = ("queued", "running", "succeeded", "retry_wait", "failed")
 CREDIT_DECISIONS = ("credited", "not_credited")
@@ -96,6 +97,7 @@ EVENTS = (
     "variance_changed",
     "auto_closed",
     "credit_decided",
+    "document_removed",
 )
 
 

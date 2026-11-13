@@ -10,6 +10,7 @@ import { useSession } from "../app/session";
 import { Banner, Dialog, Empty, ErrorState, Loading, PageHead, StatusChip, ThrottledStatus, toast, usePageTitle } from "../components/ui";
 import { FAILURE_CODES } from "../lib/words";
 import { plural, when } from "../lib/format";
+import { DeleteDocument } from "./DeleteDocument";
 
 const MAX_BYTES = 20 * 1024 * 1024;
 const ACCEPT = ["application/pdf", "image/png", "image/jpeg"];
@@ -39,6 +40,12 @@ export function TotalsBar({ totals }: { totals: BatchTotals }) {
           <span className="muted small">{s.label}</span>
         </div>
       ))}
+      {(totals.deleted ?? 0) > 0 && (
+        <div className="seg-dup">
+          <span className="n">{totals.deleted}</span>
+          <span className="muted small">Deleted</span>
+        </div>
+      )}
     </div>
   );
 }
@@ -47,6 +54,7 @@ function sentence(t: BatchTotals): string {
   const inProgress = t.queued + t.processing;
   const parts = [`${t.ready} ready`, `${t["needs review"]} need review`, `${t.failed} failed`];
   if (t["duplicate file"]) parts.push(`${t["duplicate file"]} duplicate`);
+  if (t.deleted) parts.push(`${t.deleted} deleted`);
   // "Reading" only while files are in progress; afterwards the totals alone (B6 review minor).
   if (!inProgress) return `${plural(t.file_count, "file")} read: ${parts.join(", ")}.`;
   return `Reading ${plural(t.file_count, "file")}. ${parts.join(", ")}, ${inProgress} still in progress. You can leave this page; nothing will be lost.`;
@@ -331,6 +339,13 @@ export function BatchPage() {
               <FileTable files={byState("duplicate file")} names={names} caption="Duplicate files" />
             </section>
           )}
+          {byState("deleted").length > 0 && (
+            <section className="batch-group" aria-labelledby="deleted-h">
+              <h2 id="deleted-h">{plural(byState("deleted").length, "deleted file")}</h2>
+              <p className="muted small">Out of matching, the queue and new reports; kept as history with who deleted them and why.</p>
+              <FileTable files={byState("deleted")} names={names} caption="Deleted files" />
+            </section>
+          )}
           <details className="panel fold">
             <summary>
               {plural(byState("ready").length, "file")} ready and matched
@@ -378,6 +393,12 @@ function FileTable({ files, names, caption, primary = false }: { files: BatchFil
                 </td>
                 <td data-label="State">
                   <StatusChip status={f.displayed_state} />
+                  {f.removed_at && (
+                    <div className="muted small">
+                      Deleted {when(f.removed_at)}
+                      {f.removed_reason ? `: ${f.removed_reason}` : ""}
+                    </div>
+                  )}
                   {f.failure_code && <div className="error-text">{FAILURE_CODES[f.failure_code] ?? "Could not be read. Try again."}</div>}
                   {f.duplicate_of_document_id && (
                     <div className="muted small">
@@ -406,7 +427,18 @@ function FileTable({ files, names, caption, primary = false }: { files: BatchFil
                   ))}
                   {f.invoices.length > 1 && <div className="muted small">{f.invoices.length} documents in this file</div>}
                 </td>
-                <td data-label="Next">{fileAction(f, primary)}</td>
+                <td data-label="Next">
+                  {f.removed_at ? (
+                    <span className="muted">Out of matching and reports</span>
+                  ) : (
+                    <div className="row-actions">
+                      {fileAction(f, primary)}
+                      {f.state !== "duplicate_file" && !["queued", "processing"].includes(f.displayed_state) && (
+                        <DeleteDocument documentId={f.id} name={f.original_name ?? "this file"} small />
+                      )}
+                    </div>
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>

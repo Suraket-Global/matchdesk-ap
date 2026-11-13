@@ -10,6 +10,7 @@ import { AMOUNT_INPUT, compareDecimal, money, multiply, numberError, plainNumber
 import { plural, when } from "../lib/format";
 import { ROLES } from "../lib/words";
 import { AccountDataPanel } from "./AccountData";
+import { UsagePanel } from "./Usage";
 
 export function SettingsPage() {
   usePageTitle("Settings");
@@ -430,6 +431,7 @@ export function UsersPage() {
           </table>
         </div>
         <SupportAccessPanel />
+        <UsagePanel />
         <AccountDataPanel />
       </div>
       <Dialog
