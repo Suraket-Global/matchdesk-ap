@@ -18,6 +18,7 @@ from sqlalchemy import Engine, func, select
 from sqlalchemy.orm import Session
 
 from matchdesk import receiving
+from matchdesk.api import paging
 from matchdesk.api.common import Auth, body_hash, idempotent_replay, if_match, page_limit, remember, require
 from matchdesk.api.limits import MAX_UPLOAD_FILE_BYTES
 from matchdesk.core import NotFoundError
@@ -182,14 +183,23 @@ def register_receiving_routes(app: FastAPI, engine: Engine) -> None:
             return {**receiving.describe_import(imp), "match_run_id": run_id}
 
     @app.get("/api/v1/receiving/imports")
-    def list_imports(p: Auth, cursor: uuid.UUID | None = None, limit: int | None = None) -> dict[str, Any]:
+    def list_imports(p: Auth, cursor: str | None = None, limit: int | None = None) -> dict[str, Any]:
         require(p, "read")
         n = page_limit(limit)
         with session(p.tenant_id, engine) as s:
-            q = select(ReceivingImportRow).order_by(ReceivingImportRow.id).limit(n + 1)
-            if cursor is not None:
-                q = q.where(ReceivingImportRow.id > cursor)
-            rows = s.scalars(q).all()
+            # B10: newest first, as S-05 shows, paged by (created_at, id).
+            keys = (ReceivingImportRow.created_at, ReceivingImportRow.id)
+            q = paging.keyset(
+                select(ReceivingImportRow),
+                keys,
+                (paging.AS_DATETIME, paging.AS_UUID),
+                cursor,
+                n,
+                descending=True,
+            )
+            fetched = s.execute(q).all()
+            shown, next_cursor = paging.page(fetched, len(keys), n)
+            rows = [r[0] for r in shown]
             names = _file_names(s, rows[:n])
             # Rows loaded for lines that already had an open exception, still waiting for the
             # controller (App-flow S-05 column).
@@ -214,7 +224,7 @@ def register_receiving_routes(app: FastAPI, engine: Engine) -> None:
                     }
                     for i in rows[:n]
                 ],
-                "next_cursor": str(rows[n - 1].id) if len(rows) > n else None,
+                "next_cursor": next_cursor,
             }
 
     @app.get("/api/v1/receiving/imports/{import_id}")

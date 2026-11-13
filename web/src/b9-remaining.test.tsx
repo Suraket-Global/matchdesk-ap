@@ -218,9 +218,10 @@ describe("S-09 controller decisions and the assignee (B9)", () => {
   it("sends a credit decision with If-Match and says what each choice does", async () => {
     handler = (url) => (url.includes("/credit-decision") ? { body: exc() } : { body: {} });
     wrap(<ControllerDecision exc={exc()} detail={{ ...exc(), credit_bill: { doc_number: "VC-9", txn_date: "2026-10-20", total: "15.00" } }} onDone={() => undefined} />);
-    expect(screen.getByText(/vendor credit VC-9 of CAD 15.00/)).toBeInTheDocument();
-    expect(screen.getByText(/listed as undecided, not as a finding/)).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Not credited" }));
+    expect(screen.getByTestId("decision-facts")).toHaveTextContent("VC-9, CAD 15.00"); // B10: grouped facts
+    expect(screen.getByText(/listed as undecided, not as a finding/i)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("radio", { name: /Not credited/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Confirm: Not credited" }));
     await waitFor(() => expect(sent).toHaveLength(1));
     expect(sent[0]).toMatchObject({ url: "/api/v1/exceptions/e1/credit-decision", ifMatch: "3", body: { decision: "not_credited", note: null } });
   });

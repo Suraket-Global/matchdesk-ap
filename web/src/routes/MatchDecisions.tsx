@@ -36,65 +36,128 @@ function useDecision(e: ExceptionItem, onDone: () => void) {
         is_duplicate: "Recorded: is a duplicate. Matching again; the document is counted once.",
         not_duplicate: "Recorded: not a duplicate. Matching again.",
       };
-      toast(words[v.decision] ?? "Recorded.");
+      toast(words[v.decision] ?? "Recorded.", "success");
       onDone();
     },
   });
 }
 
+/** The money a decision is about: the amount counted for the line, else its variance. */
+function decisionAmount(e: ExceptionItem): string | null {
+  return e.reported_amount ?? e.variance_amount ?? null;
+}
+
+/** What the chosen decision does to the money, in one sentence (B10, outside QA item 11). */
+export function decisionEffect(decision: string, e: ExceptionItem, creditRef: string | null): string {
+  const amount = decisionAmount(e);
+  const a = amount ? cad(amount) : "The amount";
+  const ref = creditRef ?? "that QuickBooks credit";
+  switch (decision) {
+    case "credited":
+      return `Credited: ${a} nets against ${ref} and leaves the findings. ${ref} cannot net a second exception.`;
+    case "not_credited":
+      return `Not credited: ${a} is a finding again, and ${ref} never flags this exception again.`;
+    case "is_duplicate":
+      return `Is a duplicate: the document's total${amount ? ` (${a})` : ""} is a finding once and its line exceptions close.`;
+    case "not_duplicate":
+      return `Not a duplicate: the document is matched as its own invoice; ${a} is not counted as a duplicate.`;
+    default:
+      return "";
+  }
+}
+
 export function ControllerDecision({ exc, detail, onDone }: { exc: ExceptionItem; detail?: Detail; onDone: () => void }) {
   const { can } = useSession();
   const [note, setNote] = useState("");
+  const [choice, setChoice] = useState<string | null>(null);
   const decide = useDecision(exc, onDone);
   const credit = exc.possibly_credited;
   const bill = detail?.credit_bill;
   const may = can("decide_duplicate_or_credit");
+  const d = detail ?? exc;
+  const amount = decisionAmount(d);
+  const creditRef = bill?.doc_number ?? null;
   const options = credit
     ? [
-        { decision: "credited", label: "Credited", what: "This exception nets with that one QuickBooks credit and leaves the findings. The credit cannot net a second exception." },
-        { decision: "not_credited", label: "Not credited", what: "The flag is cleared: this exception is a finding again and that credit never flags it again." },
+        { decision: "credited", label: "Credited" },
+        { decision: "not_credited", label: "Not credited" },
       ]
     : [
-        { decision: "is_duplicate", label: "Is a duplicate", what: "The document is treated as a duplicate: its total is a finding once and its line exceptions close." },
-        { decision: "not_duplicate", label: "Not a duplicate", what: "The document is matched as its own invoice; the possible-duplicate flag is closed." },
+        { decision: "is_duplicate", label: "Is a duplicate" },
+        { decision: "not_duplicate", label: "Not a duplicate" },
       ];
+  const chosen = options.find((o) => o.decision === choice);
   return (
     <div className="ctl-decision" role="group" aria-label={credit ? "Credit decision" : "Duplicate decision"}>
       <div className="consequence" role="note">
         <strong>{credit ? "Possibly credited in QuickBooks" : "Possible duplicate"}</strong>
-        <p>
-          {credit
-            ? `A QuickBooks vendor credit${bill?.doc_number ? ` ${bill.doc_number}` : ""}${bill?.total ? ` of ${cad(bill.total)}` : ""}${bill?.txn_date ? ` dated ${day(bill.txn_date)}` : ""} matches this supplier and a similar amount but names no invoice or line. `
-            : "Another document from this supplier has the same total within 7 days but a different number. "}
-          It is listed as undecided, not as a finding, until the controller decides.
-        </p>
+        {/* B10: the facts the decision rests on, together, next to it. */}
+        <dl className="decision-facts" data-testid="decision-facts">
+          <div>
+            <dt>Invoice</dt>
+            <dd>{d.doc_number ?? "No number"}{d.line_no ? `, line ${d.line_no}` : ""}</dd>
+          </div>
+          {credit && (
+            <div>
+              <dt>Candidate credit</dt>
+              <dd>
+                {creditRef ?? "QuickBooks vendor credit (no number)"}
+                {bill?.total ? `, ${cad(bill.total)}` : ""}
+                {bill?.txn_date ? `, ${day(bill.txn_date)}` : ""}
+              </dd>
+            </div>
+          )}
+          <div>
+            <dt>Supplier</dt>
+            <dd>{d.vendor_name ?? "Not identified"}</dd>
+          </div>
+          <div>
+            <dt>Amount</dt>
+            <dd className="num">{amount ? cad(amount) : "Not stated"}</dd>
+          </div>
+          <div className="wide">
+            <dt>Why only possible</dt>
+            <dd>
+              {credit
+                ? "The credit matches this supplier and a similar amount, but it names no invoice or line, so nothing links it to this exception."
+                : "Another document from this supplier has the same total within 7 days but a different number."}
+            </dd>
+          </div>
+        </dl>
+        <p className="small">Listed as undecided, not as a finding, until the controller decides.</p>
       </div>
       {may ? (
         <>
+          <fieldset className="decision-choice">
+            <legend>Decision</legend>
+            {options.map((o) => (
+              <label key={o.decision} className="choice">
+                <input type="radio" name={`decision-${exc.id}`} value={o.decision} checked={choice === o.decision} onChange={() => setChoice(o.decision)} />
+                <span>
+                  <strong>{o.label}</strong>
+                  <span className="small muted"> {decisionEffect(o.decision, d, creditRef)}</span>
+                </span>
+              </label>
+            ))}
+          </fieldset>
           <div className="field">
             <label htmlFor="decision-note">Note (optional)</label>
             <textarea id="decision-note" rows={2} value={note} maxLength={2000} onChange={(e) => setNote(e.target.value)} />
           </div>
+          {chosen && (
+            <p className="decision-effect" role="status" data-testid="decision-effect">
+              {decisionEffect(chosen.decision, d, creditRef)}
+            </p>
+          )}
           <div className="decision-buttons">
-            {options.map((o) => (
-              <button
-                key={o.decision}
-                className="btn"
-                disabled={decide.isPending}
-                title={o.what}
-                onClick={() => decide.mutate({ path: credit ? "credit-decision" : "duplicate-decision", decision: o.decision, note })}
-              >
-                {o.label}
-              </button>
-            ))}
+            <button
+              className="btn primary"
+              disabled={decide.isPending || !chosen}
+              onClick={() => chosen && decide.mutate({ path: credit ? "credit-decision" : "duplicate-decision", decision: chosen.decision, note })}
+            >
+              {chosen ? `Confirm: ${chosen.label}` : "Choose a decision"}
+            </button>
           </div>
-          <ul className="plain-list small muted">
-            {options.map((o) => (
-              <li key={o.decision}>
-                <strong>{o.label}:</strong> {o.what}
-              </li>
-            ))}
-          </ul>
           {decide.error && <p className="error-text">{errorText(decide.error)}</p>}
         </>
       ) : (
@@ -114,7 +177,7 @@ export function Assignee({ exc, detail }: { exc: ExceptionItem; detail?: Detail 
       qc.invalidateQueries({ queryKey: ["exceptions"] });
       qc.invalidateQueries({ queryKey: ["exception", exc.id] });
       qc.invalidateQueries({ queryKey: ["invoice"] });
-      toast(r.assigned_to ? `Assigned to ${r.assigned_to === members.data?.me ? "you" : r.assigned_to_name ?? "a member"}.` : "Unassigned.");
+      toast(r.assigned_to ? `Assigned to ${r.assigned_to === members.data?.me ? "you" : r.assigned_to_name ?? "a member"}.` : "Unassigned.", "success");
     },
   });
   const current = detail?.assigned_to ?? exc.assigned_to ?? "";

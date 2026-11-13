@@ -163,6 +163,21 @@ export async function download(path: string, fallbackName: string): Promise<void
   window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }
 
+/** Every page of a keyset-paged list (B10, item 10), for a screen that needs the whole set (the
+ * invoices on one purchase order, the credit notes to choose from). Stops after `maxPages`. */
+export async function getAll<T>(path: string, maxPages = 50): Promise<{ items: T[]; next_cursor: string | null }> {
+  const items: T[] = [];
+  let cursor: string | null = null;
+  for (let i = 0; i < maxPages; i++) {
+    const sep = path.includes("?") ? "&" : "?";
+    const page: { items: T[]; next_cursor: string | null } = await get(`${path}${cursor ? `${sep}cursor=${encodeURIComponent(cursor)}` : ""}`);
+    items.push(...page.items);
+    cursor = page.next_cursor;
+    if (!cursor) break;
+  }
+  return { items, next_cursor: cursor };
+}
+
 /** Bytes of a stored document, for PDF.js (never a storage link: TRD 8.7). */
 export async function documentBytes(documentId: string): Promise<ArrayBuffer> {
   const res = await request("GET", `/api/v1/documents/${documentId}/content`, null, {}, 60_000);

@@ -33,7 +33,7 @@ export function QuickbooksPage() {
     onSuccess: () => {
       setConfirmDisconnect(false);
       qc.invalidateQueries({ queryKey: ["qbo"] });
-      toast("QuickBooks disconnected.");
+      toast("QuickBooks disconnected.", "success");
     },
   });
   const sync = useMutation({

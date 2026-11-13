@@ -26,7 +26,7 @@ export function InvoicesPage() {
   if (vendor) qs.set("vendor_id", vendor);
   const list = useInfiniteQuery({
     queryKey: ["invoices", "list", state, vendor],
-    queryFn: ({ pageParam }) => get<Page<InvoiceSummary>>(`/api/v1/invoices?${qs}${pageParam ? `&cursor=${pageParam}` : ""}`),
+    queryFn: ({ pageParam }) => get<Page<InvoiceSummary>>(`/api/v1/invoices?${qs}${pageParam ? `&cursor=${encodeURIComponent(pageParam)}` : ""}`),
     initialPageParam: "",
     getNextPageParam: (l) => l.next_cursor ?? undefined,
   });
@@ -37,9 +37,8 @@ export function InvoicesPage() {
     else p.delete(k);
     setParams(p);
   };
-  const rows = (list.data?.pages ?? [])
-    .flatMap((p) => p.items)
-    .sort((a, b) => (a.doc_date ?? "").localeCompare(b.doc_date ?? "") || (a.doc_number ?? "").localeCompare(b.doc_number ?? ""));
+  // B10: the server sorts by document date, number and id and pages in that order; no re-sort here.
+  const rows = (list.data?.pages ?? []).flatMap((p) => p.items);
   return (
     <>
       <PageHead title="Invoices" lede="Invoices and credit notes in document-date order." />

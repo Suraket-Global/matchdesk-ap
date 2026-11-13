@@ -191,6 +191,7 @@ export function ApprovalsPage() {
             : r.match_run_id
               ? "Approved. The affected lines are being re-matched."
               : "Approved.",
+        "success",
       );
     },
   });
@@ -198,7 +199,7 @@ export function ApprovalsPage() {
     mutationFn: () => send<{ acknowledged: number }>("POST", "/api/v1/aliases/review-acknowledgement"),
     onSuccess: (r) => {
       qc.invalidateQueries({ queryKey: ["aliases"] }); // the list empties (review W5)
-      toast(`${plural(r.acknowledged, "new alias", "new aliases")} marked reviewed.`);
+      toast(`${plural(r.acknowledged, "new alias", "new aliases")} marked reviewed.`, "success");
     },
   });
   if (q.isLoading) return <Loading />;

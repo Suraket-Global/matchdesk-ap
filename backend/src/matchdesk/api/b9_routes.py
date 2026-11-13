@@ -32,7 +32,7 @@ from matchdesk.exceptions import (
     retire_line_result,
 )
 from matchdesk.exceptions.models import ExceptionRow
-from matchdesk.identity import Membership, Tenant
+from matchdesk.identity import Membership, Tenant, User
 from matchdesk.intake import VersionConflict, describe_fields, remove_line
 from matchdesk.intake.models import DocumentRow, InvoiceRow
 from matchdesk.reporting.models import ArchiveExport, DeletionRequest, ReportFinding
@@ -424,9 +424,21 @@ def register_b9_routes(app: FastAPI, engine: Engine) -> None:
         rows = reporting.operator_deletions(engine)
         with global_session(engine) as g:
             names = dict(g.execute(select(Tenant.id, Tenant.name)).all())
+            # B10 (outside QA item 15): who asked, beside the account and the date.
+            people = {
+                uid: name or email
+                for uid, name, email in g.execute(
+                    select(User.id, User.display_name, User.email).where(
+                        User.id.in_({r.requested_by for r in rows})
+                    )
+                ).all()
+            }
         return {
             "items": [
-                {**(reporting.describe_deletion(r) or {}), "tenant_name": names.get(r.tenant_id)}
+                {
+                    **(reporting.describe_deletion(r, people) or {}),
+                    "tenant_name": names.get(r.tenant_id),
+                }
                 for r in sorted(rows, key=lambda r: r.created_at, reverse=True)
             ]
         }

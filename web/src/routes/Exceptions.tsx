@@ -725,12 +725,12 @@ function BulkAssign({ chosen, members, me, onDone }: { chosen: ExceptionItem[]; 
     onSuccess: ({ changed, to }) => {
       qc.invalidateQueries({ queryKey: ["exceptions"] });
       const who = to === "none" ? "nobody" : to === me ? "you" : members.find((m) => m.user_id === to)?.name ?? "a member";
-      toast(`${plural(changed, "exception")} assigned to ${who}.`);
+      toast(`${plural(changed, "exception")} assigned to ${who}.`, "success");
       onDone();
     },
     onError: (err) => {
       qc.invalidateQueries({ queryKey: ["exceptions"] });
-      toast(`Not all were assigned: ${errorText(err)}`);
+      toast(`Not all were assigned: ${errorText(err)}`, "error");
     },
   });
   return (

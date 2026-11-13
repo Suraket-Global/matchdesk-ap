@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, Download, Maximize2, Minimize2, MoveHorizontal, ZoomIn, ZoomOut } from "lucide-react";
 import { getDocument, GlobalWorkerOptions, type PDFDocumentProxy } from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
-import { documentBytes, download } from "../api/client";
+import { documentBytes } from "../api/client";
+import { DownloadButton } from "./DownloadButton";
 
 // Supplier PDFs are drawn by PDF.js with script execution and dynamic code evaluation off
 // (TRD 8.7): no eval, no XFA forms, no scripting; the bytes come only through the API.
@@ -116,9 +117,9 @@ export default function PdfViewer({ documentId, label, initialPage = 1 }: { docu
         <button className="btn small icon-btn sm" onClick={() => setExpanded((x) => !x)} aria-label={expanded ? "Close the expanded view" : "Expand the document"}>
           {expanded ? <Minimize2 size={16} aria-hidden="true" /> : <Maximize2 size={16} aria-hidden="true" />}
         </button>
-        <button className="btn small icon-btn sm" onClick={() => void download(`/api/v1/documents/${documentId}/content`, "document.pdf")} aria-label="Download original">
+        <DownloadButton className="btn small icon-btn sm" path={`/api/v1/documents/${documentId}/content`} filename="document.pdf" ariaLabel="Download original">
           <Download size={16} aria-hidden="true" />
-        </button>
+        </DownloadButton>
       </div>
       <div className="pdf-canvas-wrap" ref={wrap} tabIndex={0} aria-label={`${label}, page ${page}`}>
         <canvas ref={canvas} role="img" aria-label={`${label}, page ${page}. The values read from it are listed as text beside it.`} />

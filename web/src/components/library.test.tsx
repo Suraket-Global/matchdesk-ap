@@ -207,7 +207,7 @@ describe("Toast", () => {
   it("announces a result politely and removes it after six seconds", () => {
     vi.useFakeTimers();
     render(<ToastHost />);
-    act(() => toast("Resolved: price agreed."));
+    act(() => toast("Resolved: price agreed.", "success"));
     expect(screen.getByRole("status")).toHaveTextContent("Resolved: price agreed.");
     act(() => {
       vi.advanceTimersByTime(6100);

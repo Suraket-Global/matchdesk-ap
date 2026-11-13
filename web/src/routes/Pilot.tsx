@@ -85,7 +85,7 @@ export function PilotSection({ r }: { r: Report }) {
       qc.invalidateQueries({ queryKey: ["pilot"] });
       qc.invalidateQueries({ queryKey: ["refund", r.id] });
       qc.invalidateQueries({ queryKey: ["report-outcomes", r.id] }); // B9: section 8 opens on the governing version
-      toast(`Version ${r.version_no} now governs the pilot refund.`);
+      toast(`Version ${r.version_no} now governs the pilot refund.`, "success");
     },
   });
   const p = q.data?.pilot;

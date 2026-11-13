@@ -1,7 +1,7 @@
 import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { errorText, get, send } from "../api/client";
-import type { InvoiceDetail, InvoiceSummary, Page, PurchaseOrder } from "../api/types";
+import { errorText, get, getAll, send } from "../api/client";
+import type { InvoiceDetail, InvoiceSummary, PurchaseOrder } from "../api/types";
 import { useSession } from "../app/session";
 import { Banner, ErrorState, Loading, PageHead, toast, usePageTitle } from "../components/ui";
 import { money, price, qty } from "../lib/decimal";
@@ -20,7 +20,7 @@ export function PurchaseOrderPage() {
   usePageTitle("Purchase order", q.data ? `PO ${q.data.po_number}` : null);
   const invoices = useQuery({
     queryKey: ["invoices", "po", q.data?.vendor_id],
-    queryFn: () => get<Page<InvoiceSummary>>(`/api/v1/invoices?limit=200&vendor_id=${q.data?.vendor_id}`),
+    queryFn: () => getAll<InvoiceSummary>(`/api/v1/invoices?limit=200&vendor_id=${q.data?.vendor_id}`),
     enabled: !!q.data,
   });
   const onPo = (invoices.data?.items ?? []).filter((i) => i.po_number === q.data?.po_number);
@@ -32,7 +32,7 @@ export function PurchaseOrderPage() {
   });
   const reread = useMutation({
     mutationFn: () => send("POST", "/api/v1/qbo/sync-runs", { mode: "po_references", po_references: [q.data?.po_number] }),
-    onSuccess: () => toast("Reading this purchase order from QuickBooks again."),
+    onSuccess: () => toast("Reading this purchase order from QuickBooks again.", "info"),
   });
   if (q.isLoading) return <Loading />;
   if (q.error) return <ErrorState error={q.error} retry={() => q.refetch()} />;

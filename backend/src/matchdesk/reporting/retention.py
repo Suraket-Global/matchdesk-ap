@@ -269,9 +269,25 @@ def build_archive(
             .where(DocumentRow.purpose.in_(ORIGINAL_PURPOSES), DocumentRow.deleted_at.is_(None))
             .order_by(DocumentRow.created_at, DocumentRow.id)
         ):
-            expected += 1
             ext = "xlsx" if doc.mime_type == XLSX else EXT.get(doc.mime_type, "bin")
             path = f"documents/{doc.id}.{ext}"
+            if doc.state == "duplicate_file" and doc.duplicate_of_document_id is not None:
+                # A byte-identical upload stores no second copy (intake): it is the earlier file,
+                # listed with a pointer, and is neither expected again nor missing.
+                index.append(
+                    {
+                        "id": doc.id,
+                        "purpose": doc.purpose,
+                        "original_name": doc.original_name,
+                        "mime_type": doc.mime_type,
+                        "byte_size": doc.byte_size,
+                        "uploaded_at": doc.created_at,
+                        "state": doc.state,
+                        "file_in_archive": f"same file as documents/{doc.duplicate_of_document_id}.{ext}",
+                    }
+                )
+                continue
+            expected += 1
             try:
                 z.writestr(path, blobstore.get(tenant_id, doc.blob_key))
                 files += 1

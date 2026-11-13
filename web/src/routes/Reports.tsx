@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { AlertTriangle, Download, FileBarChart, HelpCircle, PackageCheck, PackageX, ShieldCheck } from "lucide-react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { download, errorText, get, send } from "../api/client";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { download, errorText, get, getAll, send } from "../api/client";
 import type { Page, Refund, Report } from "../api/types";
 import { useSession } from "../app/session";
 import { usePeriod } from "../app/period";
@@ -44,7 +44,13 @@ export function ReportsPage() {
   const [month, setMonth] = useState(period.month);
   // Follows the top-bar period when it changes, not only on mount (B6 review minor).
   useEffect(() => setMonth(period.month), [period.month]);
-  const list = useQuery({ queryKey: ["reports"], queryFn: () => get<Page<Report>>("/api/v1/reports/backtest?limit=200") });
+  // B10: the server sorts by period and version and pages by that key; every page can be loaded.
+  const list = useInfiniteQuery({
+    queryKey: ["reports", "pages"],
+    queryFn: ({ pageParam }) => get<Page<Report>>(`/api/v1/reports/backtest?limit=200${pageParam ? `&cursor=${encodeURIComponent(pageParam)}` : ""}`),
+    initialPageParam: "",
+    getNextPageParam: (l) => l.next_cursor ?? undefined,
+  });
   const create = useMutation({
     mutationFn: () => send<Report>("POST", "/api/v1/reports/backtest", { period_start: monthRange(month).start, period_end: monthRange(month).end }),
     onSuccess: (r) => {
@@ -52,7 +58,7 @@ export function ReportsPage() {
       navigate(`/reports/backtest/${r.id}`);
     },
   });
-  const rows = [...(list.data?.items ?? [])].sort((a, b) => b.period_start.localeCompare(a.period_start) || b.version_no - a.version_no);
+  const rows = (list.data?.pages ?? []).flatMap((p) => p.items);
   const pilot = usePilot();
   const governingId = pilot.data?.governing?.report_id;
   const latest = rows[0];
@@ -148,6 +154,11 @@ export function ReportsPage() {
           </table>
         </div>
       )}
+      {list.hasNextPage && (
+        <button className="btn" style={{ marginTop: 12 }} onClick={() => list.fetchNextPage()} disabled={list.isFetchingNextPage}>
+          {list.isFetchingNextPage ? "Loading…" : "Show older versions"}
+        </button>
+      )}
     </>
   );
 }
@@ -231,7 +242,7 @@ export function ReportPage() {
   });
   const approver = users.data?.items.find((u) => u.user_id === r?.approved_by);
   usePageTitle("Back-test report", r ? `${monthName(r.period_start.slice(0, 7))} v${r.version_no}` : null);
-  const list = useQuery({ queryKey: ["reports"], queryFn: () => get<Page<Report>>("/api/v1/reports/backtest?limit=200") });
+  const list = useQuery({ queryKey: ["reports", "all"], queryFn: () => getAll<Report>("/api/v1/reports/backtest?limit=200") });
   const refund = useQuery({
     queryKey: ["refund", reportId],
     queryFn: () => get<Refund>(`/api/v1/reports/backtest/${reportId}/refund-evaluation`),
@@ -246,7 +257,7 @@ export function ReportPage() {
     onSuccess: (n) => {
       qc.invalidateQueries({ queryKey: ["reports"] });
       navigate(`/reports/backtest/${n.id}`);
-      toast(`Draft version ${n.version_no} is ready for review.`);
+      toast(`Draft version ${n.version_no} is ready for review.`, "success");
     },
   });
   const approve = useMutation({
@@ -255,15 +266,18 @@ export function ReportPage() {
       setApproveOpen(false);
       qc.invalidateQueries({ queryKey: ["report", reportId] });
       qc.invalidateQueries({ queryKey: ["reports"] });
-      toast("Report approved. Its figures are now frozen.");
+      toast("Report approved. Its figures are now frozen.", "success");
     },
   });
+  const [exportFailed, setExportFailed] = useState<{ format: "pdf" | "csv"; reason: string } | null>(null);
   async function exportAs(format: "pdf" | "csv") {
     setExporting(format);
+    setExportFailed(null);
     try {
       await download(`/api/v1/reports/backtest/${reportId}/export?format=${format}`, `backtest.${format}`);
     } catch (err) {
-      toast(errorText(err));
+      // B10 (item 9): the reason and a retry next to the export buttons, not a toast.
+      setExportFailed({ format, reason: errorText(err) });
     } finally {
       setExporting(null);
     }
@@ -317,6 +331,16 @@ export function ReportPage() {
               <Download size={16} aria-hidden="true" />
               {exporting === "csv" ? "Preparing your file…" : "Export CSV"}
             </button>
+            {exportFailed && (
+              <span className="download-failed" role="alert">
+                <span className="error-text small">
+                  {exportFailed.format.toUpperCase()} download failed: {exportFailed.reason}
+                </span>
+                <button className="btn small" onClick={() => exportAs(exportFailed.format)}>
+                  Retry download
+                </button>
+              </span>
+            )}
             {can("draft_report") && (r.status === "draft" || (r.status === "approved" && (r.is_stale || r.changed_since_cutoff))) && (
               <button className="btn" onClick={() => refresh.mutate()} disabled={refresh.isPending}>
                 {refresh.isPending ? "Generating…" : r.status === "draft" ? "Refresh draft" : "Create a new draft version"}

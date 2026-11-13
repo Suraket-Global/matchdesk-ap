@@ -68,30 +68,50 @@ function Provenance({ src, changed, value, onHistory }: { src?: FieldSource; cha
 }
 
 /** B8: the printed total, the calculated total, the value in the field and the result, side by side,
- * so the clerk sees what a correction changes before confirming (FF-1006). */
+ * so the clerk sees what a correction changes before confirming (FF-1006). B10 (outside QA item 12):
+ * when they agree it is one compact line; on a mismatch it opens to both amounts, the exact
+ * difference, the field to correct and where each amount comes from. */
 function TotalCheck({ printed, edited, tax, lines }: { printed: string; edited: string; tax: string; lines: string[] }) {
   const calc = sumCents(lines.map((l) => plainNumber(l))) + (toCents(plainNumber(tax) || "0") ?? 0n);
   const field = toCents(plainNumber(edited));
   const read = toCents(plainNumber(printed));
   const agrees = field !== null && field === calc;
   const changed = field !== null && read !== null && field !== read;
+  if (agrees)
+    return (
+      <section className="total-check compact ok" aria-label="Total check" data-testid="total-check">
+        <p role="status">
+          <strong>Total agrees:</strong> <span className="num">CAD {formatCents(field)}</span> = lines + tax
+          {changed ? ` (you changed it from ${formatCents(read!)})` : read !== null ? ", as printed" : ""}.
+        </p>
+      </section>
+    );
+  const diff = field === null ? null : field > calc ? field - calc : calc - field;
   return (
-    <section className="total-check" aria-label="Total check">
+    <section className="total-check open" aria-label="Total check" data-testid="total-check">
       <div>
         <span className="k">Printed on the document</span>
         <span className="v num">{read === null ? "Not read" : formatCents(read)}</span>
+        <span className="n">Source: the document as read</span>
       </div>
       <div>
         <span className="k">Lines + tax</span>
         <span className="v num">{formatCents(calc)}</span>
+        <span className="n">Source: the line amounts and the tax field below</span>
       </div>
       <div className={changed ? "edited" : ""}>
         <span className="k">Total field{changed ? " (edited)" : ""}</span>
         <span className="v num">{field === null ? "Empty" : formatCents(field)}</span>
+        <span className="n">Source: {changed ? "your correction" : "the value read"}</span>
       </div>
-      <div className={agrees ? "ok" : "bad"} role="status">
+      <div className="bad" role="status">
         <span className="k">Result</span>
-        <span className="v">{agrees ? "Adds up" : field === null ? "No total" : `Differs by ${formatCents(field > calc ? field - calc : calc - field)}`}</span>
+        <span className="v">{field === null ? "No total" : `Differs by ${formatCents(diff!)}`}</span>
+        <span className="n">
+          {field === null
+            ? "Fill in the Total field."
+            : `Check the Total field, the Tax field or a line amount: the total is ${field > calc ? "higher" : "lower"} than lines + tax by ${formatCents(diff!)}.`}
+        </span>
         {changed && <span className="n">You changed the total from {formatCents(read!)} to {formatCents(field!)}.</span>}
       </div>
     </section>
@@ -260,7 +280,7 @@ export function ReviewPage() {
       qc.invalidateQueries({ queryKey: ["invoices"] });
       qc.invalidateQueries({ queryKey: ["batch"] });
       qc.invalidateQueries({ queryKey: ["exceptions"] });
-      toast("Confirmed. The match view shows the result when matching finishes.");
+      toast("Confirmed. The match view shows the result when matching finishes.", "success");
       navigate(`/invoices/${invoiceId}`);
     } catch (err) {
       if (!onConflict(err)) setError(errorText(err));
@@ -297,7 +317,7 @@ export function ReviewPage() {
       setRemoveReason("");
       qc.invalidateQueries({ queryKey: ["invoice", invoiceId] });
       const ok = Object.values(after.gates ?? {}).every(Boolean);
-      toast(`Line ${removing.line_no} removed. ${ok ? "The checks pass on the remaining lines." : "The checks were run again on the remaining lines."}`);
+      toast(`Line ${removing.line_no} removed. ${ok ? "The checks pass on the remaining lines." : "The checks were run again on the remaining lines."}`, "success");
     } catch (err) {
       if (!onConflict(err)) setError(errorText(err));
       setRemoving(null);

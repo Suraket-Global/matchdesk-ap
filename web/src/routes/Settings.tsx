@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { errorText, get, send } from "../api/client";
@@ -6,7 +6,7 @@ import type { Invitation, Page, SupportGrant, Tolerance, UserRow, Vendor } from 
 import { useSession } from "../app/session";
 import { SETTINGS_NAV } from "../app/routes";
 import { Banner, Dialog, ErrorState, Field, Loading, PageHead, StatusChip, toast, usePageTitle } from "../components/ui";
-import { AMOUNT_INPUT, compareDecimal, numberError, plainNumber, type NumberRules } from "../lib/decimal";
+import { AMOUNT_INPUT, compareDecimal, money, multiply, numberError, plainNumber, type NumberRules } from "../lib/decimal";
 import { plural, when } from "../lib/format";
 import { ROLES } from "../lib/words";
 import { AccountDataPanel } from "./AccountData";
@@ -85,6 +85,26 @@ export function TolerancesPage() {
   };
   // Sent as plain decimals ("1,000" -> "1000"); validate() has refused anything that cannot be read.
   const plainVals = () => Object.fromEntries(FIELDS.map((f) => [f.key, plainNumber(vals[f.key], TOL_INPUT)]));
+  // B10 (outside QA item 14): a live example on the last valid values, and the lines a save would
+  // re-match, previewed while typing (the preview changes nothing).
+  const invalid = validate();
+  const lastValid = useRef<Record<string, string> | null>(null);
+  if (!invalid && Object.keys(vals).length) lastValid.current = plainVals();
+  const [live, setLive] = useState<{ lines_rematched: number; exceptions_cleared: number } | null>(null);
+  const liveKey = invalid ? "" : JSON.stringify([scope, plainVals()]);
+  useEffect(() => {
+    if (!editable || !liveKey) return;
+    let gone = false;
+    const t = window.setTimeout(() => {
+      send<{ lines_rematched: number; exceptions_cleared: number }>("POST", "/api/v1/tolerances/preview", { ...JSON.parse(liveKey)[1], vendor_id: scope === "default" ? null : scope })
+        .then((p) => !gone && setLive(p))
+        .catch(() => !gone && setLive(null));
+    }, 500);
+    return () => {
+      gone = true;
+      window.clearTimeout(t);
+    };
+  }, [liveKey, editable, scope]);
   const doPreview = useMutation({
     mutationFn: () => send<{ lines_rematched: number; exceptions_cleared: number }>("POST", "/api/v1/tolerances/preview", { ...plainVals(), vendor_id: scope === "default" ? null : scope }),
     onSuccess: (p) => {
@@ -99,7 +119,7 @@ export function TolerancesPage() {
       setConfirm(false);
       qc.invalidateQueries({ queryKey: ["tolerances"] });
       qc.invalidateQueries({ queryKey: ["exceptions"] });
-      toast("Saved as a new version. Affected lines are being re-matched.");
+      toast("Saved as a new version. Affected lines are being re-matched.", "info");
     },
   });
   if (q.isLoading) return <Loading />;
@@ -158,23 +178,33 @@ export function TolerancesPage() {
               <Field label="Clerk waiver cap per 30 days (CAD)">{(f) => <input id={f.id} inputMode="decimal" className="num" value={cap} disabled={!editable} onChange={(e) => setCap(e.target.value)} />}</Field>
             </div>
           )}
+          <ToleranceExample values={lastValid.current} invalid={invalid} />
           {err && (
             <p className="error-text" role="alert">
               {err}
             </p>
           )}
           {editable && (
-            <button
-              className="btn primary"
-              onClick={() => {
-                const e = validate();
-                setErr(e);
-                if (!e) doPreview.mutate();
-              }}
-              disabled={doPreview.isPending}
-            >
-              Review and save
-            </button>
+            <div className="save-row">
+              <button
+                className="btn primary"
+                onClick={() => {
+                  const e = validate();
+                  setErr(e);
+                  if (!e) doPreview.mutate();
+                }}
+                disabled={doPreview.isPending}
+              >
+                Review and save
+              </button>
+              <p className="small" data-testid="tolerance-consequence" aria-live="polite">
+                {invalid
+                  ? "Fix the value marked above to see which lines a save would re-match."
+                  : live
+                    ? `Saving re-matches ${plural(live.lines_rematched, "line")}; about ${plural(live.exceptions_cleared, "exception")} would then pass. Earlier results keep the version they used.`
+                    : "Checking which lines a save would re-match…"}
+              </p>
+            </div>
           )}
         </div>
       </section>
@@ -257,7 +287,7 @@ export function UsersPage() {
     onSuccess: () => {
       setEmail("");
       qc.invalidateQueries({ queryKey: ["invitations"] });
-      toast("Invitation sent. It works once and expires in 7 days.");
+      toast("Invitation sent. It works once and expires in 7 days.", "success");
     },
   });
   const revoke = useMutation({
@@ -269,7 +299,7 @@ export function UsersPage() {
     onSuccess: () => {
       setChange(null);
       qc.invalidateQueries({ queryKey: ["users"] });
-      toast("Saved.");
+      toast("Saved.", "success");
     },
   });
   if (users.isLoading) return <Loading />;
@@ -442,7 +472,7 @@ function SupportAccessPanel() {
     onSuccess: (g) => {
       setPick(null);
       qc.invalidateQueries({ queryKey: ["support-grants"] });
-      toast(g.status === "active" ? `Support access granted until ${when(g.ends_at)}.` : g.status === "declined" ? "Request declined." : "Support access ended.");
+      toast(g.status === "active" ? `Support access granted until ${when(g.ends_at)}.` : g.status === "declined" ? "Request declined." : "Support access ended.", "success");
     },
   });
   const items = grants.data?.items ?? [];
@@ -533,4 +563,39 @@ function SupportAccessPanel() {
       </Dialog>
     </section>
   );
+}
+
+/** "A PO price of CAD 10.00 passes up to CAD 10.25 per unit": the tolerances on one invented line,
+ * from the last valid values (B10, item 14). */
+export function ToleranceExample({ values, invalid }: { values: Record<string, string> | null; invalid: string | null }) {
+  if (!values) return null;
+  const price = "10.00";
+  const byPct = multiply(price, values.price_tol_pct || "0", 4);
+  const pct = multiply(byPct, "0.01", 4);
+  const allowance = compareDecimal(values.price_tol_abs || "0", pct) >= 0 ? values.price_tol_abs || "0" : pct;
+  const ceiling = addDecimal(price, allowance);
+  const qtyMax = addDecimal("100", values.qty_tolerance || "0");
+  return (
+    <div className="tol-example" data-testid="tolerance-example" aria-live="polite">
+      {invalid && <p className="error-text small">Not valid yet: {invalid} The example below uses the last valid values.</p>}
+      <p className="small">
+        <strong>Example:</strong> a PO price of CAD {price} passes up to CAD {money(ceiling)} per unit; 100 received passes when up to {qtyMax.replace(/\.?0+$/, "")} are invoiced;
+        a freight or fee line not on the PO passes up to CAD {money(values.charge_allowance || "0")}.
+      </p>
+    </div>
+  );
+}
+
+function addDecimal(a: string, b: string): string {
+  // a + b exactly, via the same integer arithmetic as the other helpers (no floats).
+  const scale = 6;
+  const toInt = (v: string) => {
+    const neg = v.startsWith("-");
+    const [i, f = ""] = v.replace("-", "").split(".");
+    const n = BigInt((i || "0") + f.padEnd(scale, "0").slice(0, scale));
+    return neg ? -n : n;
+  };
+  const n = toInt(a) + toInt(b);
+  const s = (n < 0n ? -n : n).toString().padStart(scale + 1, "0");
+  return `${n < 0n ? "-" : ""}${s.slice(0, -scale)}.${s.slice(-scale)}`;
 }

@@ -97,7 +97,7 @@ function useUploader(onDone: (batchId: string) => void) {
         qc.invalidateQueries({ queryKey: ["batches"] });
         onDone(id);
       } catch (err) {
-        toast(errorText(err));
+        toast(errorText(err), "error");
       } finally {
         setBusy(false);
       }
@@ -259,7 +259,7 @@ export function BatchPage() {
   const retry = useMutation({
     mutationFn: () => send<{ requeued: number }>("POST", `/api/v1/intake/batches/${batchId}/retry-failed`),
     onSuccess: (r) => {
-      toast(`${plural(r.requeued, "failed file")} queued again.`);
+      toast(`${plural(r.requeued, "failed file")} queued again.`, "info");
       qc.invalidateQueries({ queryKey: ["batch", batchId] });
     },
   });
@@ -431,7 +431,7 @@ function EmailIntake() {
     onSuccess: () => {
       setSender("");
       refresh();
-      toast("Sender allowed. Their next emailed invoices go straight into a batch.");
+      toast("Sender allowed. Their next emailed invoices go straight into a batch.", "success");
     },
   });
   const remove = useMutation({
@@ -443,7 +443,7 @@ function EmailIntake() {
     onSuccess: (r) => {
       setDiscard(null);
       refresh();
-      toast(r.status === "processed" ? "Released: its attachments are in a new batch." : "Discarded. Nothing was imported.");
+      toast(r.status === "processed" ? "Released: its attachments are in a new batch." : "Discarded. Nothing was imported.", "success");
     },
   });
   const d = q.data;

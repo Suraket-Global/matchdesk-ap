@@ -208,7 +208,7 @@ export function MatchViewPage() {
   const go = (e: Neighbour | null | undefined) => {
     if (!e) {
       navigate(fromUrl);
-      window.setTimeout(() => toast("That was the last exception in this queue."), 50);
+      window.setTimeout(() => toast("That was the last exception in this queue.", "info"), 50);
       return;
     }
     navigate(`/invoices/${e.invoice_id}?line=${e.invoice_line_id ?? ""}&exc=${e.id}&from=${encodeURIComponent(fromUrl)}`);
@@ -232,7 +232,7 @@ export function MatchViewPage() {
       qc.invalidateQueries({ queryKey: ["exceptions"] });
       qc.invalidateQueries({ queryKey: ["invoice", invoiceId] });
       qc.invalidateQueries({ queryKey: ["approvals"] });
-      toast(r.result === "pending_approval" ? "Sent to your controller for approval." : `Resolved: ${RESOLUTION_CODES[code] ?? code}.`);
+      toast(r.result === "pending_approval" ? "Sent to your controller for approval." : `Resolved: ${RESOLUTION_CODES[code] ?? code}.`, "success");
       setNote("");
       if (!fromQueue) {
         await q.refetch();
@@ -263,7 +263,7 @@ export function MatchViewPage() {
       await send("POST", `/api/v1/exceptions/${current.id}/${path}`, undefined, { ifMatch: current.version });
       qc.invalidateQueries({ queryKey: ["exceptions"] });
       await q.refetch();
-      toast(path === "withdraw" ? "Request withdrawn. The exception is open again." : "Reopened. History is kept.");
+      toast(path === "withdraw" ? "Request withdrawn. The exception is open again." : "Reopened. History is kept.", "success");
     } catch (err) {
       setMsg({ tone: "error", text: errorText(err) });
     } finally {

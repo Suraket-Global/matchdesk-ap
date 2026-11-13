@@ -39,26 +39,8 @@ function TenantList() {
     <>
       <PageHead
         title="Operator console"
-        lede="Accounts, what each agreed and paid, and billable units. An account's documents open only with support access its controller grants."
+        lede="Decisions waiting for you come first, then the worker's operations and the accounts. An account's documents open only with support access its controller grants."
       />
-      <form
-        className="inline-form panel panel-body"
-        style={{ marginBottom: 16 }}
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (name.trim().length >= 2) create.mutate();
-        }}
-      >
-        <div className="field">
-          <label htmlFor="t-name">New pilot account</label>
-          <input id="t-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Company name" />
-        </div>
-        <button className="btn" type="submit" disabled={create.isPending || name.trim().length < 2}>
-          <Plus size={16} aria-hidden="true" />
-          Create account
-        </button>
-        {create.error && <span className="error-text">{errorText(create.error)}</span>}
-      </form>
       <DeletionRequests />
       <OperationsPanel />
       {list.isLoading && <Loading />}
@@ -66,7 +48,7 @@ function TenantList() {
       {list.data && list.data.items.length === 0 && (
         <div className="panel">
           <Empty title="No accounts yet" icon={<Building2 size={22} />}>
-            <p>Create the first pilot account above.</p>
+            <p>Create the first pilot account below.</p>
           </Empty>
         </div>
       )}
@@ -107,6 +89,29 @@ function TenantList() {
           </table>
         </div>
       )}
+      {/* B10 (outside QA item 15): creating an account is a secondary action, after the decisions. */}
+      <details className="panel secondary-action" style={{ marginTop: 16 }}>
+        <summary className="panel-head">
+          <span>Create a pilot account</span>
+        </summary>
+      <form
+        className="inline-form panel-body"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (name.trim().length >= 2) create.mutate();
+        }}
+      >
+        <div className="field">
+          <label htmlFor="t-name">New pilot account</label>
+          <input id="t-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Company name" />
+        </div>
+        <button className="btn" type="submit" disabled={create.isPending || name.trim().length < 2}>
+          <Plus size={16} aria-hidden="true" />
+          Create account
+        </button>
+        {create.error && <span className="error-text">{errorText(create.error)}</span>}
+      </form>
+      </details>
     </>
   );
 }
@@ -155,7 +160,7 @@ function TenantDetail() {
     onSuccess: () => {
       setMsg(null);
       qc.invalidateQueries({ queryKey: ["operator"] });
-      toast(p ? "Pilot record saved." : "Pilot record created.");
+      toast(p ? "Pilot record saved." : "Pilot record created.", "success");
     },
     onError: (err) => setMsg(err instanceof ApiError && err.status === 409 ? "Someone changed this record meanwhile. The current values are shown; check them and save again." : errorText(err)),
   });
@@ -164,7 +169,7 @@ function TenantDetail() {
     onSuccess: () => {
       setReason("");
       qc.invalidateQueries({ queryKey: ["operator"] });
-      toast("Request sent. A controller of the account grants it under Users and access.");
+      toast("Request sent. A controller of the account grants it under Users and access.", "success");
     },
   });
   const enter = useMutation({
@@ -443,13 +448,22 @@ function DeletionRequests() {
     mutationFn: () => send<{ request: DeletionRequest }>("POST", `/api/v1/operator/deletion-requests/${pick!.r.id}/decision`, { decision: pick!.decision, note: note.trim() || null }, { ifMatch: pick!.r.version }),
     onSuccess: (x) => {
       qc.invalidateQueries({ queryKey: ["operator"] });
-      toast(x.request.status === "scheduled" ? `Deletion scheduled for ${day(x.request.delete_after)}.` : "Deletion request declined.");
+      toast(x.request.status === "scheduled" ? `Deletion scheduled for ${day(x.request.delete_after)}.` : "Deletion request declined.", "success");
       setPick(null);
       setNote("");
     },
   });
   const items = q.data?.items ?? [];
-  const open = items.filter((r) => r.status === "requested" || r.status === "scheduled" || r.status === "deleting");
+  // B10 (item 15): what needs the operator first (the oldest request first), then deletions under
+  // way, then scheduled ones by the soonest date; closed requests are folded away.
+  const rank = (r: DeletionRequest) => (r.status === "requested" ? 0 : r.status === "deleting" ? 1 : r.status === "scheduled" ? 2 : 3);
+  const ordered = [...items].sort(
+    (a, b) =>
+      rank(a) - rank(b) ||
+      (rank(a) === 0 ? a.requested_at.localeCompare(b.requested_at) : rank(a) === 2 ? (a.delete_after ?? "").localeCompare(b.delete_after ?? "") : b.requested_at.localeCompare(a.requested_at)),
+  );
+  const open = ordered.filter((r) => rank(r) < 3);
+  const closed = ordered.filter((r) => rank(r) === 3);
   if (!items.length) return null;
   return (
     <section className="panel" aria-labelledby="del-h" style={{ marginBottom: 16 }}>
@@ -458,34 +472,20 @@ function DeletionRequests() {
         <span className="muted small">{plural(open.length, "open request")}</span>
       </div>
       <div className="panel-body stack">
-        {items.slice(0, 10).map((r) => (
-          <div key={r.id} className="grant-row">
-            <div>
-              <DeletionStateChip status={r.status} />{" "}
-              <strong>{r.tenant_name ?? "Account"}</strong>: asked {when(r.requested_at)}
-              {r.reason ? `. Reason: ${r.reason}` : ""}.
-              {r.status === "scheduled" && <div className="small muted">Deletes on {day(r.delete_after)} unless the controller cancels.</div>}
-              {r.status === "deleting" && <div className="small">Deleting now (started {when(r.claimed_at)}); it can no longer be cancelled.</div>}
-              {r.archive && (
-                <div className={`small ${r.archive.state === "complete" ? "muted" : "error-text"}`} data-testid="op-archive">
-                  Archive: {archiveSnapshotText(r.archive)}
-                  {r.archive.acknowledged ? "; the controller acknowledged deletion without a complete archive" : ""}.
-                </div>
-              )}
-              {r.decision_note && <div className="small muted">Note: {r.decision_note}</div>}
-            </div>
-            {r.status === "requested" && (
-              <div className="actions">
-                <button className="btn small" onClick={() => setPick({ r, decision: "decline" })}>
-                  Decline
-                </button>
-                <button className="btn small danger" onClick={() => setPick({ r, decision: "schedule" })}>
-                  Schedule deletion
-                </button>
-              </div>
-            )}
-          </div>
+        {open.length === 0 && <p className="muted">No deletion request is waiting.</p>}
+        {open.map((r) => (
+          <DeletionRow key={r.id} r={r} onPick={(decision) => setPick({ r, decision })} />
         ))}
+        {closed.length > 0 && (
+          <details>
+            <summary className="small">{plural(closed.length, "earlier request")}</summary>
+            <div className="stack" style={{ marginTop: 8 }}>
+              {closed.slice(0, 20).map((r) => (
+                <DeletionRow key={r.id} r={r} onPick={() => undefined} />
+              ))}
+            </div>
+          </details>
+        )}
       </div>
       <Dialog
         open={!!pick}
@@ -549,5 +549,51 @@ export function OperationsPanel() {
         ))}
       </ul>
     </section>
+  );
+}
+
+/** One deletion request: account, requesting controller, effective date and archive completeness. */
+function DeletionRow({ r, onPick }: { r: DeletionRequest; onPick: (d: "schedule" | "decline") => void }) {
+  const effective = r.status === "scheduled" || r.status === "deleting" ? day(r.delete_after) : r.status === "requested" ? "Set when scheduled (30 days' notice)" : "–";
+  return (
+    <div className={`grant-row deletion-row ${r.status === "requested" ? "needs-decision" : ""}`} data-testid="deletion-row">
+      <div>
+        <DeletionStateChip status={r.status} /> <strong>{r.tenant_name ?? "Account"}</strong>
+        {r.status === "requested" && <span className="decision-tag">Needs your decision</span>}
+        <dl className="deletion-facts">
+          <div>
+            <dt>Requested by</dt>
+            <dd>
+              {r.requested_by_name ?? "A controller"}, {when(r.requested_at)}
+            </dd>
+          </div>
+          <div>
+            <dt>Effective</dt>
+            <dd>{effective}</dd>
+          </div>
+          <div>
+            <dt>Archive</dt>
+            <dd className={r.archive && r.archive.state !== "complete" ? "error-text" : undefined} data-testid="op-archive">
+              {archiveSnapshotText(r.archive)}
+              {r.archive?.acknowledged ? "; deletion acknowledged without a complete archive" : ""}
+            </dd>
+          </div>
+        </dl>
+        {r.reason && <div className="small muted">Reason: {r.reason}</div>}
+        {r.status === "scheduled" && <div className="small muted">Deletes on {day(r.delete_after)} unless the controller cancels.</div>}
+        {r.status === "deleting" && <div className="small">Deleting now (started {when(r.claimed_at)}); it can no longer be cancelled.</div>}
+        {r.decision_note && <div className="small muted">Note: {r.decision_note}</div>}
+      </div>
+      {r.status === "requested" && (
+        <div className="actions">
+          <button className="btn small" onClick={() => onPick("decline")}>
+            Decline
+          </button>
+          <button className="btn small danger" onClick={() => onPick("schedule")}>
+            Schedule deletion
+          </button>
+        </div>
+      )}
+    </div>
   );
 }

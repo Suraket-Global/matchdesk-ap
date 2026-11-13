@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { errorText, get, send } from "../api/client";
@@ -64,6 +64,8 @@ export function AliasesPage() {
   const [reason, setReason] = useState("");
   const [filter, setFilter] = useState("all");
   const [formErr, setFormErr] = useState<string | null>(null);
+  const lastFactor = useRef("1");
+  const lastExample = useRef({ qty: "5", price: "50.40" });
   const items = useQuery({
     queryKey: ["items", itemQuery],
     queryFn: () => get<Page<Item>>(`/api/v1/items?limit=20${itemQuery ? `&q=${encodeURIComponent(itemQuery)}` : ""}`),
@@ -100,6 +102,7 @@ export function AliasesPage() {
         a.status === "pending_approval"
           ? "Alias saved. Lines using this alias stay in exceptions until your controller approves the conversion."
           : "Alias confirmed. Lines using it are being re-matched; your controller sees it for review.",
+        "success",
       );
       setCode("");
       setDescription("");
@@ -115,7 +118,7 @@ export function AliasesPage() {
       setReason("");
       qc.invalidateQueries({ queryKey: ["aliases"] });
       qc.invalidateQueries({ queryKey: ["exceptions"] });
-      toast("Alias retired. Lines that used it are being re-matched.");
+      toast("Alias retired. Lines that used it are being re-matched.", "info");
     },
   });
   const rows = useMemo(() => (list.data?.items ?? []).filter((a) => filter === "all" || a.status === filter), [list.data, filter]);
@@ -138,6 +141,15 @@ export function AliasesPage() {
     create.mutate();
   }
   const chosenItem = (items.data?.items ?? []).find((i) => i.id === itemId);
+  // B10: the live example keeps the last valid conversion while the field holds something unreadable.
+  const plainFactor = plainNumber(factor, FACTOR_INPUT);
+  const factorValid = !!plainFactor && !/^0+(\.0+)?$/.test(plainFactor);
+  if (factorValid) lastFactor.current = plainFactor;
+  const shownFactor = factorValid ? plainFactor : lastFactor.current;
+  if (plainNumber(exQty, QTY_INPUT)) lastExample.current.qty = plainNumber(exQty, QTY_INPUT);
+  if (plainNumber(exPrice, PRICE_INPUT)) lastExample.current.price = plainNumber(exPrice, PRICE_INPUT);
+  const needsApproval = !/^1(\.0*)?$/.test(shownFactor);
+  const affected = unconfirmedCodes.filter((c) => c.vendor_id === vendorId && c.code.trim().toLowerCase() === code.trim().toLowerCase()).reduce((n, c) => n + c.n, 0);
   return (
     <>
       <PageHead title="Alias and unit map" lede="A supplier's item code mapped once to our item and unit. Conversions other than 1 need the controller." />
@@ -237,18 +249,32 @@ export function AliasesPage() {
                     </p>
                   ),
               )}
-              <WorkedExample factor={plainNumber(factor, FACTOR_INPUT)} supUom={supUom} itemUom={itemUom} exQty={plainNumber(exQty, QTY_INPUT)} exPrice={plainNumber(exPrice, PRICE_INPUT)} />
-              {isDecimal(plainNumber(factor, FACTOR_INPUT)) && !/^1(\.0*)?$/.test(plainNumber(factor, FACTOR_INPUT)) && (
-                <p className="muted">Lines using this alias stay in exceptions until your controller approves the conversion.</p>
-              )}
+              {/* B10 (outside QA item 14): the example follows the typing and keeps the last valid one. */}
+              <p className="alias-headline" aria-live="polite" data-testid="alias-headline">
+                <strong>
+                  1 {supUom || "supplier unit"} → {qty(shownFactor)} {itemUom || (qty(shownFactor) === "1" ? "our unit" : "our units")}
+                </strong>
+                {!factorValid && <span className="error-text small"> Conversion not valid; the example still shows the last valid value, {qty(shownFactor)}.</span>}
+              </p>
+              <WorkedExample factor={shownFactor} supUom={supUom} itemUom={itemUom} exQty={plainNumber(exQty, QTY_INPUT) || lastExample.current.qty} exPrice={plainNumber(exPrice, PRICE_INPUT) || lastExample.current.price} />
               {formErr && (
                 <p className="error-text" role="alert">
                   {formErr}
                 </p>
               )}
-              <button className="btn primary" onClick={submit} disabled={create.isPending}>
-                Confirm alias
-              </button>
+              <div className="save-row">
+                <button className="btn primary" onClick={submit} disabled={create.isPending || !factorValid}>
+                  Confirm alias
+                </button>
+                <p className="small" data-testid="alias-consequence">
+                  {affected > 0 ? `${plural(affected, "open line")} with code ${code.trim()} from this supplier ${affected === 1 ? "uses" : "use"} this alias. ` : "No open line uses this code yet. "}
+                  {needsApproval
+                    ? "Conversions other than 1 need your controller: those lines stay in exceptions until it is approved, then they are re-matched."
+                    : affected > 0
+                      ? "Saving re-matches them now."
+                      : "Lines that arrive with this code are matched with it."}
+                </p>
+              </div>
             </div>
           </div>
         </section>

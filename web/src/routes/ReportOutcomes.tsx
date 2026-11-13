@@ -3,12 +3,12 @@
 // separate counts; recording an outcome never changes the report's own figures.
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { errorText, get, send } from "../api/client";
-import type { InvoiceSummary, Outcomes, Page, Report } from "../api/types";
+import { errorText, get, getAll, send } from "../api/client";
+import type { InvoiceSummary, Outcomes, Report } from "../api/types";
 import { useSession } from "../app/session";
-import { Dialog, toast } from "../components/ui";
+import { Dialog, StatusChip, toast } from "../components/ui";
 import { AMOUNT_INPUT, cad, compareDecimal, numberError, plainNumber } from "../lib/decimal";
-import { day } from "../lib/format";
+import { day, plural } from "../lib/format";
 import { typeWord } from "../lib/words";
 
 type Finding = NonNullable<Report["findings"]>[number];
@@ -36,6 +36,29 @@ export function OutcomesSection({ report, flagged }: { report: Report; flagged: 
         </p>
       ) : (
         <>
+          {/* B10 (outside QA item 16): the scope and the three totals stay readable above the rows. */}
+          <div className="outcome-scope" data-testid="outcome-scope">
+            <p>
+              <strong>Scope:</strong> {day(report.period_start)} to {day(report.period_end)}, version {report.version_no}, the governing version.
+            </p>
+            <dl className="outcome-totals">
+              <div>
+                <dt>Flagged</dt>
+                <dd className="num">{cad(o.totals.flagged.amount)}</dd>
+                <dd className="small muted">{plural(o.totals.flagged.count, "discrepancy", "discrepancies")}</dd>
+              </div>
+              <div>
+                <dt>Confirmed by the controller</dt>
+                <dd className="num">{cad(o.totals.controller_confirmed.amount)}</dd>
+                <dd className="small muted">{plural(o.totals.controller_confirmed.count, "confirmation")}</dd>
+              </div>
+              <div>
+                <dt>Credit recovered</dt>
+                <dd className="num">{cad(o.totals.credit_recovered.amount)}</dd>
+                <dd className="small muted">{plural(o.totals.credit_recovered.count, "credit")}</dd>
+              </div>
+            </dl>
+          </div>
           <p className="small muted" style={{ margin: "0 0 8px" }}>
             Record what the supplier agreed and what was actually credited. Each record is kept as entered, with who and when; it never changes this
             version&apos;s figures.
@@ -50,14 +73,16 @@ export function OutcomesSection({ report, flagged }: { report: Report; flagged: 
                   <th scope="col" className="num">Flagged (CAD)</th>
                   <th scope="col">Confirmed by the controller</th>
                   <th scope="col">Credit recovered</th>
+                  <th scope="col">State and next step</th>
                 </tr>
               </thead>
               <tbody>
                 {[...flagged].sort((a, b) => compareDecimal(b.amount, a.amount) || a.id.localeCompare(b.id)).map((f) => {
                   const rec = o.by_finding[f.id] ?? {};
                   const sn = f.snapshot as Record<string, string | number | null>;
+                  const state = rec.credit_recovered ? "recovered" : rec.controller_confirmed ? "confirmed" : "flagged";
                   return (
-                    <tr key={f.id}>
+                    <tr key={f.id} className={`outcome-${state}`} data-testid={`outcome-row-${f.id}`}>
                       <td data-label="Document">
                         {sn.doc_number ?? "No number"}
                         {sn.line_no ? <span className="muted"> line {sn.line_no}</span> : null}
@@ -93,6 +118,20 @@ export function OutcomesSection({ report, flagged }: { report: Report; flagged: 
                           <span className="muted">{rec.controller_confirmed ? "Not recovered yet" : "Needs a confirmation first"}</span>
                         )}
                       </td>
+                      <td data-label="State and next step">
+                        {/* A permanent row state from the stored records, not only the toast. */}
+                        <StatusChip
+                          status={state === "recovered" ? "succeeded" : state === "confirmed" ? "approved" : "open"}
+                          word={state === "recovered" ? "Credit recovered" : state === "confirmed" ? "Confirmed overcharge" : "Flagged"}
+                        />
+                        <div className="small muted">
+                          {state === "recovered"
+                            ? "Nothing left to record."
+                            : state === "confirmed"
+                              ? "Next: record the credit when the supplier issues it."
+                              : "Next: record the controller's confirmation once the supplier agrees."}
+                        </div>
+                      </td>
                     </tr>
                   );
                 })}
@@ -127,7 +166,7 @@ function RecordDialog({
   const [note, setNote] = useState("");
   const credits = useQuery({
     queryKey: ["invoices", "credit-notes"],
-    queryFn: () => get<Page<InvoiceSummary>>("/api/v1/invoices?limit=200&doc_type=credit_note"),
+    queryFn: () => getAll<InvoiceSummary>("/api/v1/invoices?limit=200&doc_type=credit_note"),
     enabled: outcome === "credit_recovered",
   });
   const save = useMutation({
@@ -141,7 +180,7 @@ function RecordDialog({
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["report-outcomes", report.id] });
-      toast(outcome === "credit_recovered" ? "Credit recovered recorded." : "Confirmation recorded.");
+      toast(outcome === "credit_recovered" ? "Credit recovered recorded." : "Confirmation recorded.", "success");
       onClose();
     },
   });

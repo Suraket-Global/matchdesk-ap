@@ -43,7 +43,7 @@ export function WeeklyPage() {
       qc.invalidateQueries({ queryKey: ["weekly", week] });
       const failed = r.failed_now ?? 0;
       if (failed > 0) toast(`Weekly summary not delivered to ${plural(failed, "controller")}. Delivered to ${r.sent ?? 0} of ${r.recipients}.`, "error");
-      else toast(`Weekly summary delivered to ${plural(r.delivered_now ?? r.recipients, "controller")}.`, "success");
+      else toast(`Weekly summary emailed to ${plural(r.delivered_now ?? r.recipients, "controller")}.`, "success");
     },
   });
   useEffect(() => sendNow.reset(), [week]); // eslint-disable-line react-hooks/exhaustive-deps

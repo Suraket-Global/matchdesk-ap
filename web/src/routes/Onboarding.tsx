@@ -85,7 +85,7 @@ export function OnboardingPage() {
     },
     onSuccess: (r) => {
       setRun(r);
-      toast("Reading from QuickBooks started.");
+      toast("Reading from QuickBooks started.", "info");
       qc.invalidateQueries({ queryKey: ["purchase-orders"] });
     },
   });
@@ -311,7 +311,7 @@ function NoReceivingRecords({
     onSuccess: () => {
       setOpen(false);
       done();
-      toast("Recorded: no warehouse receiving records.");
+      toast("Recorded: no warehouse receiving records.", "success");
     },
   });
   const withdraw = useMutation({
@@ -320,7 +320,7 @@ function NoReceivingRecords({
       setWithdrawOpen(false);
       setReason("");
       done();
-      toast("Withdrawn. Load the receiving file to count receipts.");
+      toast("Withdrawn. Load the receiving file to count receipts.", "success");
     },
   });
   if (declaration)

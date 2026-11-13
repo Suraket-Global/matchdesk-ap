@@ -7,10 +7,12 @@ and independent scheduled operations (8).
 
 from __future__ import annotations
 
+import hashlib
 import io
+import random
 import uuid
 import zipfile
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -20,8 +22,9 @@ from matchdesk import blobstore
 from matchdesk.api.app import create_app
 from matchdesk.core import ConflictError, OutgoingMail, load_settings
 from matchdesk.identity import Tenant, User, enroll_operator, issue_session
-from matchdesk.intake.models import DocumentRow
+from matchdesk.intake.models import DocumentRow, InvoiceRow
 from matchdesk.qbo import FakeIntuitTokenEndpoint
+from matchdesk.receiving.models import ReceivingImportRow
 from matchdesk.reporting import (
     cancel_deletion,
     claim_due_deletions,
@@ -29,13 +32,13 @@ from matchdesk.reporting import (
     last_sent,
     send_weekly,
 )
-from matchdesk.reporting.models import ArchiveExport, DeletionRequest
+from matchdesk.reporting.models import ArchiveExport, BacktestReport, DeletionRequest
 from matchdesk.reporting.weekly import recipients as reporting_recipients
 from matchdesk.tenancy import PermanentJobError, claim, enqueue_raw, global_session, run_claimed, session
 from matchdesk.worker import __main__ as worker_main
 from matchdesk.worker.__main__ import run_once
 
-from .seed import add_invoice, add_user, auth_headers, make_tenant
+from .seed import NOW, add_invoice, add_user, auth_headers, make_tenant
 
 pytestmark = pytest.mark.integration
 
@@ -130,6 +133,38 @@ def test_archive_with_unreadable_original_is_incomplete_and_retry_completes_it(
     assert ok.json()["request"]["archive"]["acknowledged"] is False
 
 
+def test_a_byte_identical_upload_is_the_earlier_file_not_a_missing_one(app_engine, client):  # type: ignore[no-untyped-def]
+    """Found by Playwright on the B10 branch: the duplicate upload of the full flow stores no second
+    copy, so counting it as an expected original made a complete archive read Incomplete 14/15."""
+    w = make_tenant(app_engine, "Fictional Distributor B10-A3")
+    _c, ctrl = add_user(app_engine, w, "controller")
+    first = add_invoice(app_engine, w, "a3", "INV-B10A3", date(2026, 10, 6), "10")
+    with session(w.tenant_id, app_engine) as s:
+        doc = s.get(DocumentRow, s.scalar(text("select document_id from invoices where id = :i"), {"i": str(first)}))
+        assert doc is not None
+        s.add(
+            DocumentRow(
+                tenant_id=w.tenant_id,
+                purpose="invoice",
+                source="upload",
+                blob_key=f"{doc.blob_key}/duplicate/{uuid.uuid4()}",  # as intake names it: never stored
+                sha256=doc.sha256,
+                mime_type=doc.mime_type,
+                byte_size=doc.byte_size,
+                state="duplicate_file",
+                duplicate_of_document_id=doc.id,
+                correlation_id=uuid.uuid4(),
+            )
+        )
+    client.post("/api/v1/exports/archive", headers=ctrl)
+    drain(app_engine)
+    got = client.get("/api/v1/exports/archive", headers=ctrl).json()["items"][0]
+    assert got["status"] == "ready" and (got["expected_count"], got["included_count"]) == (1, 1)
+    z = client.get(f"/api/v1/exports/archive/{got['id']}/content", headers=ctrl)
+    index = zipfile.ZipFile(io.BytesIO(z.content)).read("documents.csv").decode()
+    assert f"same file as documents/{doc.id}.pdf" in index
+
+
 def test_deletion_without_complete_archive_needs_acknowledgement_shown_to_operator(app_engine, client):  # type: ignore[no-untyped-def]
     w = make_tenant(app_engine, "Fictional Distributor B10-A2")
     _c, ctrl = add_user(app_engine, w, "controller")
@@ -146,6 +181,8 @@ def test_deletion_without_complete_archive_needs_acknowledgement_shown_to_operat
     items = client.get("/api/v1/operator/deletion-requests", headers=oh).json()["items"]
     mine = next(i for i in items if i["id"] == ok.json()["request"]["id"])
     assert mine["archive"]["state"] == "none" and mine["archive"]["acknowledged"] is True
+    # Item 15: the operator's row names the requesting controller.
+    assert mine["requested_by_name"] == "Synthetic controller"
 
 
 # --- item 2: the worker claims the deletion before the first file goes; cancelling is then refused ---
@@ -233,10 +270,10 @@ def test_cancel_before_the_claim_wins_and_nothing_is_removed(app_engine, owner_e
         f"/api/v1/account/deletion-requests/{rid}/cancel", headers={**ctrl, "If-Match": str(version)}
     )
     assert r.status_code == 200 and r.json()["request"]["status"] == "cancelled"
-    removed: list[str] = []
-    monkeypatch.setattr(blobstore, "delete", lambda _t, k: removed.append(k))
+    removed: list[uuid.UUID] = []
+    monkeypatch.setattr(blobstore, "delete", lambda t, _k: removed.append(t))
     assert w.tenant_id not in execute_due_deletions(app_engine)
-    assert removed == []
+    assert w.tenant_id not in removed  # other accounts due in this database may go; this one keeps every file
     with session(w.tenant_id, app_engine) as s:
         assert s.scalar(select(ArchiveExport.id).limit(1)) is None
         assert s.scalar(text("select count(*) from documents")) >= 1
@@ -395,3 +432,118 @@ def test_a_failing_weekly_email_does_not_stop_the_other_scheduled_operations(app
     worker_main.scheduled(app_engine, load_settings())
     items = client.get("/api/v1/operator/operations", headers=oh).json()["items"]
     assert all(i["state"] == "ok" for i in items)
+
+
+# --- group 4: item 10, server-side order with a keyset cursor (201+ records) ------------------------
+
+
+def _all_pages(client, headers, url: str, limit: int) -> list[dict]:  # type: ignore[no-untyped-def]
+    items: list[dict] = []  # type: ignore[type-arg]
+    cursor = None
+    for _ in range(50):
+        r = client.get(
+            url, params={"limit": limit, **({"cursor": cursor} if cursor else {})}, headers=headers
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        items += body["items"]
+        cursor = body["next_cursor"]
+        if not cursor:
+            return items
+    raise AssertionError("paging did not end")
+
+
+def _bulk_documents(s, w, n: int, purpose: str) -> list[uuid.UUID]:  # type: ignore[no-untyped-def]
+    ids = []
+    for i in range(n):
+        doc = DocumentRow(
+            tenant_id=w.tenant_id,
+            purpose=purpose,
+            source="upload",
+            blob_key=f"t/{w.tenant_id}/{purpose}/{uuid.uuid4().hex}",
+            sha256=hashlib.sha256(f"{w.tenant_id}-{purpose}-{i}".encode()).digest(),
+            mime_type="application/pdf" if purpose == "invoice" else "text/csv",
+            byte_size=10,
+            state="succeeded",
+            correlation_id=uuid.uuid4(),
+        )
+        s.add(doc)
+        s.flush()
+        ids.append(doc.id)
+    return ids
+
+
+def test_invoices_page_in_document_date_order_across_201_plus(app_engine, client):  # type: ignore[no-untyped-def]
+    w = make_tenant(app_engine, "Fictional Distributor B10-P1")
+    rng = random.Random(10)
+    days = [date(2026, 1, 1) + timedelta(days=rng.randrange(0, 300)) for _ in range(205)]
+    with session(w.tenant_id, app_engine) as s:
+        docs = _bulk_documents(s, w, len(days), "invoice")
+        for i, (doc_id, d) in enumerate(zip(docs, days, strict=True)):
+            s.add(
+                InvoiceRow(
+                    tenant_id=w.tenant_id,
+                    document_id=doc_id,
+                    file_order_key=hashlib.sha256(f"p1-{i}".encode()).digest(),
+                    doc_type="invoice",
+                    vendor_id=w.vendor_id,
+                    doc_number=f"INV-P1-{i:03d}",
+                    doc_number_norm=f"invp1{i:03d}",
+                    doc_date=d,
+                    currency="CAD",
+                    verification_status="passed",
+                )
+            )
+    for limit in (200, 37):
+        got = _all_pages(client, w.headers, "/api/v1/invoices", limit)
+        assert len(got) == 205 and len({g["id"] for g in got}) == 205
+        keys = [(g["doc_date"], g["doc_number"], g["id"]) for g in got]
+        assert keys == sorted(keys), "an older invoice appeared in a later page"
+
+
+def test_reports_and_receiving_imports_page_in_display_order_across_201_plus(app_engine, client):  # type: ignore[no-untyped-def]
+    w = make_tenant(app_engine, "Fictional Distributor B10-P2")
+    rng = random.Random(11)
+    months = list(range(203))
+    rng.shuffle(months)
+    with session(w.tenant_id, app_engine) as s:
+        for m in months:
+            start = date(2000 + m // 12, m % 12 + 1, 1)
+            s.add(
+                BacktestReport(
+                    tenant_id=w.tenant_id,
+                    period_start=start,
+                    period_end=start + timedelta(days=27),
+                    version_no=1 + m % 2,
+                    status="superseded",
+                    data_cutoff_at=NOW,
+                    totals={},
+                )
+            )
+        docs = _bulk_documents(s, w, 204, "receiving")
+        order = list(range(204))
+        rng.shuffle(order)
+        for i, doc_id in zip(order, docs, strict=True):
+            s.add(
+                ReceivingImportRow(
+                    tenant_id=w.tenant_id,
+                    source_type="spreadsheet",
+                    evidence_class="A",
+                    document_id=doc_id,
+                    file_sha256=hashlib.sha256(f"p2-{i}".encode()).digest(),
+                    state="voided",
+                    created_at=NOW + timedelta(minutes=i // 2),  # pairs share a time: the id breaks it
+                )
+            )
+    reports = _all_pages(client, w.headers, "/api/v1/reports/backtest", 200)
+    assert len(reports) == 203
+    rkeys = [(r["period_start"], r["version_no"]) for r in reports]
+    assert rkeys == sorted(rkeys, reverse=True)
+    imports = _all_pages(client, w.headers, "/api/v1/receiving/imports", 200)
+    assert len(imports) == 204 and len({i["id"] for i in imports}) == 204
+    ikeys = [(i["created_at"], i["id"]) for i in imports]
+    assert ikeys == sorted(ikeys, reverse=True)
+    assert (
+        client.get("/api/v1/invoices", params={"cursor": "not-a-cursor"}, headers=w.headers).status_code
+        == 422
+    )

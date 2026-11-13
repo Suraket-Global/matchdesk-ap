@@ -1,8 +1,9 @@
 // B9, S-16 (controller): the account's archive (records as CSV and the original files in one ZIP) and
 // a request to delete the account, which MatchDesk processes with 30 days' notice (schema.md 8).
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { download, errorText, get, send } from "../api/client";
+import { errorText, get, send } from "../api/client";
+import { DownloadButton } from "../components/DownloadButton";
 import type { ArchiveExport, ArchiveSnapshot, DeletionRequest } from "../api/types";
 import { useSession } from "../app/session";
 import { Banner, Dialog, StatusChip, toast } from "../components/ui";
@@ -52,15 +53,20 @@ export function AccountDataPanel() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["archives"] });
       qc.invalidateQueries({ queryKey: ["deletion-request"] });
-      toast("Reading the missing files again. The archive is rebuilt when they are read.");
+      toast("Reading the missing files again. The archive is rebuilt when they are read.", "info");
     },
   });
   const [ack, setAck] = useState(false);
+  // When an archive finishes, the deletion dialog's "latest verified archive" is read again.
+  const finished = archives.data?.items[0]?.finished_at ?? null;
+  useEffect(() => {
+    if (finished) qc.invalidateQueries({ queryKey: ["deletion-request"] });
+  }, [finished, qc]);
   const build = useMutation({
     mutationFn: () => send<ArchiveExport>("POST", "/api/v1/exports/archive", {}),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["archives"] });
-      toast("Preparing the archive. It appears here when it is ready.");
+      toast("Preparing the archive. It appears here when it is ready.", "info");
     },
   });
   const [askOpen, setAskOpen] = useState(false);
@@ -72,14 +78,14 @@ export function AccountDataPanel() {
       setAskOpen(false);
       setTyped("");
       qc.invalidateQueries({ queryKey: ["deletion-request"] });
-      toast("Deletion requested. MatchDesk will confirm the date.");
+      toast("Deletion requested. MatchDesk will confirm the date.", "success");
     },
   });
   const cancel = useMutation({
     mutationFn: (r: DeletionRequest) => send("POST", `/api/v1/account/deletion-requests/${r.id}/cancel`, {}, { ifMatch: r.version }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["deletion-request"] });
-      toast("Deletion request cancelled. Nothing will be deleted.");
+      toast("Deletion request cancelled. Nothing will be deleted.", "success");
     },
   });
   if (!can("request_deletion_or_archive")) return null;
@@ -130,9 +136,9 @@ export function AccountDataPanel() {
               </button>
             )}
             {latest?.downloadable && (
-              <button className={`btn ${latest.status === "incomplete" ? "" : "primary"}`} onClick={() => download(`/api/v1/exports/archive/${latest.id}/content`, "matchdesk-archive.zip").catch((e) => toast(errorText(e)))}>
+              <DownloadButton className={`btn ${latest.status === "incomplete" ? "" : "primary"}`} path={`/api/v1/exports/archive/${latest.id}/content`} filename="matchdesk-archive.zip">
                 {latest.status === "incomplete" ? "Download the incomplete archive" : "Download the archive"}
-              </button>
+              </DownloadButton>
             )}
             <button className="btn" disabled={build.isPending || latest?.status === "queued" || latest?.status === "running"} onClick={() => build.mutate()}>
               {latest?.downloadable ? "Prepare a new archive" : "Prepare an archive"}

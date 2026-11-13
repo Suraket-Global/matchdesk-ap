@@ -4,13 +4,14 @@ T-3.3.3; B3). Wiring only."""
 from __future__ import annotations
 
 import uuid
+from datetime import date
 from typing import Annotated, Any
 
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import Engine, select
+from sqlalchemy import Engine, func, literal, select
 
-from matchdesk.api import views
+from matchdesk.api import paging, views
 from matchdesk.api.common import Auth, StaleVersion, if_match, page_limit, require
 from matchdesk.core import NotFoundError
 from matchdesk.exceptions import related_invoices, request_runs
@@ -59,42 +60,46 @@ def _summary(
     }
 
 
+# Documents without a date sort last and without a number first within their date.
+INVOICE_ORDER = (
+    func.coalesce(InvoiceRow.doc_date, literal(date(9999, 12, 31))),
+    func.coalesce(InvoiceRow.doc_number, literal("")),
+    InvoiceRow.id,
+)
+INVOICE_PARSERS = (paging.AS_DATE, paging.AS_TEXT, paging.AS_UUID)
+
+
 def register_invoice_routes(app: FastAPI, engine: Engine) -> None:
     @app.get("/api/v1/invoices")
     def list_invoices(
         p: Auth,
-        cursor: uuid.UUID | None = None,
+        cursor: str | None = None,
         limit: int | None = None,
         verification_status: str | None = None,
         document_state: str | None = None,
         vendor_id: uuid.UUID | None = None,
+        doc_type: str | None = None,
     ) -> dict[str, Any]:
         require(p, "read")
         n = page_limit(limit)
         with session(p.tenant_id, engine) as s:
-            q = (
-                select(InvoiceRow, DocumentRow.state)
-                .join(
-                    DocumentRow,
-                    (DocumentRow.id == InvoiceRow.document_id)
-                    & (DocumentRow.tenant_id == InvoiceRow.tenant_id),
-                )
-                .order_by(InvoiceRow.id)
-                .limit(n + 1)
+            q = select(InvoiceRow, DocumentRow.state).join(
+                DocumentRow,
+                (DocumentRow.id == InvoiceRow.document_id) & (DocumentRow.tenant_id == InvoiceRow.tenant_id),
             )
-            if cursor is not None:
-                q = q.where(InvoiceRow.id > cursor)
             if verification_status:
                 q = q.where(InvoiceRow.verification_status == verification_status)
             if document_state:
                 q = q.where(DocumentRow.state == document_state)
             if vendor_id:
                 q = q.where(InvoiceRow.vendor_id == vendor_id)
-            rows = s.execute(q).all()
-            return {
-                "items": [_summary(inv, st, views.vendor_names(s)) for inv, st in rows[:n]],
-                "next_cursor": str(rows[n - 1][0].id) if len(rows) > n else None,
-            }
+            if doc_type:  # B10: S-13 asked for credit notes; the filter was ignored
+                q = q.where(InvoiceRow.doc_type == doc_type)
+            # B10: the order S-06 shows (document date, then number, then id), paged by that key.
+            q = paging.keyset(q, INVOICE_ORDER, INVOICE_PARSERS, cursor, n)
+            shown, nxt = paging.page(s.execute(q).all(), len(INVOICE_ORDER), n)
+            names = views.vendor_names(s)
+            return {"items": [_summary(inv, st, names) for inv, st in shown], "next_cursor": nxt}
 
     @app.patch("/api/v1/invoices/{invoice_id}/extraction")
     def patch_extraction(

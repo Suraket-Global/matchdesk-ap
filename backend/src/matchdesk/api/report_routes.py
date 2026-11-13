@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from sqlalchemy import Engine, select
 
 from matchdesk import reporting
+from matchdesk.api import paging
 from matchdesk.api.common import Auth, body_hash, idempotent_replay, page_limit, remember, require
 from matchdesk.core import NotFoundError
 from matchdesk.reporting.models import BacktestReport
@@ -59,18 +60,22 @@ def register_report_routes(app: FastAPI, engine: Engine) -> None:
             return reporting.live_coverage(s, period_start, period_end)
 
     @app.get("/api/v1/reports/backtest")
-    def list_reports(p: Auth, cursor: uuid.UUID | None = None, limit: int | None = None) -> dict[str, Any]:
+    def list_reports(p: Auth, cursor: str | None = None, limit: int | None = None) -> dict[str, Any]:
         require(p, "read")
         n = page_limit(limit)
         with session(p.tenant_id, engine) as s:
-            q = select(BacktestReport).order_by(BacktestReport.id).limit(n + 1)
-            if cursor is not None:
-                q = q.where(BacktestReport.id > cursor)
-            rows = s.scalars(q).all()
-            return {
-                "items": [reporting.describe_report(r) for r in rows[:n]],
-                "next_cursor": str(rows[n - 1].id) if len(rows) > n else None,
-            }
+            # B10: the order S-13 shows (newest period, then newest version), paged by that key.
+            keys = (BacktestReport.period_start, BacktestReport.version_no, BacktestReport.id)
+            q = paging.keyset(
+                select(BacktestReport),
+                keys,
+                (paging.AS_DATE, paging.AS_INT, paging.AS_UUID),
+                cursor,
+                n,
+                descending=True,
+            )
+            shown, nxt = paging.page(s.execute(q).all(), len(keys), n)
+            return {"items": [reporting.describe_report(r[0]) for r in shown], "next_cursor": nxt}
 
     def _load(s: Any, report_id: uuid.UUID) -> BacktestReport:
         r = s.get(BacktestReport, report_id)

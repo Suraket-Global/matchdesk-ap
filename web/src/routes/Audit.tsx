@@ -1,9 +1,10 @@
 import { Fragment, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
-import { download, get } from "../api/client";
+import { get } from "../api/client";
+import { DownloadButton } from "../components/DownloadButton";
 import type { AuditEvent, Page, UserRow } from "../api/types";
-import { Empty, ErrorState, Loading, PageHead, toast, usePageTitle } from "../components/ui";
+import { Empty, ErrorState, Loading, PageHead, usePageTitle } from "../components/ui";
 import { when } from "../lib/format";
 import { actionWord, changes, entityWord, type Change } from "../lib/audit";
 
@@ -39,6 +40,9 @@ export function AuditPage() {
   if (f.entity_id) qs.set("entity_id", f.entity_id);
   if (f.since) qs.set("since", `${f.since}T00:00:00`);
   if (f.until) qs.set("until", `${f.until}T23:59:59`);
+  const exportParams = new URLSearchParams(qs);
+  exportParams.delete("limit");
+  const exportQuery = exportParams.toString();
   const list = useInfiniteQuery({
     queryKey: ["audit", qs.toString()],
     queryFn: ({ pageParam }) => get<Page<AuditEvent>>(`/api/v1/audit-events?${qs}${pageParam ? `&cursor=${encodeURIComponent(pageParam)}` : ""}`),
@@ -60,16 +64,9 @@ export function AuditPage() {
         crumbs={<Link to="/settings">Settings</Link>}
         lede="Every change, with who made it and the values before and after."
         actions={
-          <button
-            className="btn"
-            onClick={() => {
-              const e = new URLSearchParams(qs);
-              e.delete("limit");
-              download(`/api/v1/audit-events/export?${e}`, "audit-log.csv").catch(() => toast("The export could not be prepared. Try again."));
-            }}
-          >
+          <DownloadButton path={`/api/v1/audit-events/export?${exportQuery}`} filename="audit-log.csv">
             Export CSV
-          </button>
+          </DownloadButton>
         }
       />
       <div className="inline-form panel panel-body" style={{ marginBottom: 12 }}>

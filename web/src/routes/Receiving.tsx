@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, errorText, get, send, upload } from "../api/client";
 import type { Coverage, Page, ReceivingImport, SavedMapping } from "../api/types";
 import { FIGURE_STATES } from "../api/types";
@@ -46,10 +46,14 @@ function status(i: ReceivingImport): string {
 export function ReceivingListPage() {
   usePageTitle("Receiving imports");
   const { can } = useSession();
-  const list = useQuery({
-    queryKey: ["receiving", "imports"],
-    queryFn: () => get<Page<ReceivingImport>>("/api/v1/receiving/imports?limit=200"),
+  // B10: newest first from the server, paged by (created, id); every page can be loaded.
+  const list = useInfiniteQuery({
+    queryKey: ["receiving", "imports", "pages"],
+    queryFn: ({ pageParam }) => get<Page<ReceivingImport>>(`/api/v1/receiving/imports?limit=200${pageParam ? `&cursor=${encodeURIComponent(pageParam)}` : ""}`),
+    initialPageParam: "",
+    getNextPageParam: (l) => l.next_cursor ?? undefined,
   });
+  const imports = (list.data?.pages ?? []).flatMap((p) => p.items);
   return (
     <>
       <PageHead
@@ -64,7 +68,7 @@ export function ReceivingListPage() {
         </h2>
         {list.isLoading && <Loading />}
         {list.error && <ErrorState error={list.error} retry={() => list.refetch()} />}
-        {list.data && list.data.items.length === 0 && (
+        {list.data && imports.length === 0 && (
           <div className="panel">
             <Empty title="No receiving file yet">
               <p>
@@ -74,7 +78,7 @@ export function ReceivingListPage() {
             </Empty>
           </div>
         )}
-        {list.data && list.data.items.length > 0 && (
+        {imports.length > 0 && (
           <div className="table-wrap">
             <table className="stack-sm">
               <thead>
@@ -96,7 +100,7 @@ export function ReceivingListPage() {
                 </tr>
               </thead>
               <tbody>
-                {list.data.items.map((i) => (
+                {imports.map((i) => (
                   <tr key={i.id}>
                     <td data-label="File">
                       <Link to={`/receiving/imports/${i.id}`}>{i.file_name || "Receiving file"}</Link>
@@ -119,6 +123,11 @@ export function ReceivingListPage() {
               </tbody>
             </table>
           </div>
+        )}
+        {list.hasNextPage && (
+          <button className="btn" style={{ marginTop: 12 }} onClick={() => list.fetchNextPage()} disabled={list.isFetchingNextPage}>
+            {list.isFetchingNextPage ? "Loading…" : "Show older imports"}
+          </button>
         )}
       </section>
     </>
@@ -324,7 +333,7 @@ export function ReceivingImportPage() {
       setVoidOpen(false);
       qc.invalidateQueries({ queryKey: ["receiving"] });
       qc.invalidateQueries({ queryKey: ["exceptions"] });
-      toast("Import voided. Its receipt lines no longer count; affected lines are being re-matched.");
+      toast("Import voided. Its receipt lines no longer count; affected lines are being re-matched.", "info");
     },
   });
   const missing = useMemo(() => {
@@ -367,7 +376,7 @@ export function ReceivingImportPage() {
                       if (m) {
                         setMap({ ...m.columns });
                         setSaveAs(m.name);
-                        toast(`Mapping "${m.name}" filled in. Check the columns.`);
+                        toast(`Mapping "${m.name}" filled in. Check the columns.`, "success");
                       }
                     }}
                   >
@@ -381,24 +390,15 @@ export function ReceivingImportPage() {
                   </select>
                 </div>
               )}
-              <div className="inline-form map-form">
-                {TARGETS.map((t) => (
-                  <div className="field" key={t.key}>
-                    <label htmlFor={`map-${t.key}`}>
-                      {t.label}
-                      {t.required ? " (required)" : ""}
-                    </label>
-                    <select id={`map-${t.key}`} value={map[t.key] ?? ""} onChange={(e) => setMap({ ...map, [t.key]: e.target.value })}>
-                      <option value="">Not in this file</option>
-                      {headers.map((h) => (
-                        <option key={h} value={h}>
-                          {h}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                ))}
-              </div>
+              {/* B10 (outside QA item 13): each mapping shows a value from the file; required fields
+                  not yet matched come first; optional mappings are folded away. */}
+              <MappingRows targets={TARGETS.filter((t) => t.required)} map={map} setMap={setMap} headers={headers} sample={imp.preview?.sample_rows ?? []} sortUnmapped />
+              <details className="map-optional">
+                <summary>
+                  Optional columns ({TARGETS.filter((t) => !t.required && map[t.key]).length} of {TARGETS.filter((t) => !t.required).length} matched)
+                </summary>
+                <MappingRows targets={TARGETS.filter((t) => !t.required)} map={map} setMap={setMap} headers={headers} sample={imp.preview?.sample_rows ?? []} />
+              </details>
               {imp.preview && (
                 <div className="table-wrap" style={{ marginTop: 12, maxHeight: 320 }}>
                   <table className="compact">
@@ -748,5 +748,61 @@ function CoverageSummary() {
           ? `${pct(c.receipt_coverage_pct)} of ${plural(c.item_lines, "invoiced PO line")} have a counting receipt (signed delivery documents ${pct(c.coverage_class_b_pct)}); ${pct(c.coverage_class_a_pct)} are inside a warehouse log declared complete.`
           : "not measured yet: it needs invoices for the month and their match results."}
     </p>
+  );
+}
+
+/** The first value of a column in the stored sample rows, for "Received qty → Qty Received → 60". */
+export function sampleValue(headers: string[], sample: (string | null)[][], column: string | undefined): string | null {
+  if (!column) return null;
+  const j = headers.indexOf(column);
+  if (j < 0) return null;
+  for (const r of sample) {
+    const v = r[j];
+    if (v !== null && v !== undefined && String(v).trim() !== "") return String(v);
+  }
+  return null;
+}
+
+function MappingRows(props: {
+  targets: typeof TARGETS;
+  map: Record<string, string>;
+  setMap: (m: Record<string, string>) => void;
+  headers: string[];
+  sample: (string | null)[][];
+  sortUnmapped?: boolean;
+}) {
+  const { map, setMap, headers, sample } = props;
+  const rows = props.sortUnmapped ? [...props.targets].sort((a, b) => Number(!!map[a.key]) - Number(!!map[b.key])) : props.targets;
+  return (
+    <ul className="map-rows">
+      {rows.map((t) => {
+        const v = sampleValue(headers, sample, map[t.key]);
+        return (
+          <li key={t.key} className={`map-row ${t.required && !map[t.key] ? "missing" : ""}`} data-testid={`map-${t.key}`}>
+            <label htmlFor={`map-${t.key}`}>
+              {t.label}
+              {t.required ? " (required)" : ""}
+            </label>
+            <span className="map-arrow" aria-hidden="true">
+              →
+            </span>
+            <select id={`map-${t.key}`} value={map[t.key] ?? ""} aria-describedby={`map-${t.key}-sample`} onChange={(e) => setMap({ ...map, [t.key]: e.target.value })}>
+              <option value="">Not in this file</option>
+              {headers.map((h) => (
+                <option key={h} value={h}>
+                  {h}
+                </option>
+              ))}
+            </select>
+            <span className="map-arrow" aria-hidden="true">
+              →
+            </span>
+            <span className="map-sample" id={`map-${t.key}-sample`}>
+              {map[t.key] ? v !== null ? <code>{v}</code> : <span className="muted">empty in the first rows</span> : t.required ? <span className="error-text">Choose the column</span> : <span className="muted">not used</span>}
+            </span>
+          </li>
+        );
+      })}
+    </ul>
   );
 }

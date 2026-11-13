@@ -1373,14 +1373,19 @@ dialog.drawer .modal-foot {
 }
 
 /* ================================================================ toast and tooltip */
+/* B10 (outside QA item 16): toasts sit at the top, under the header, centred over the page, at most
+   two; they no longer cover the lower-right content (the actions and totals of S-13 and S-09). */
 .toasts {
   position: fixed;
-  right: var(--s-6);
-  bottom: var(--s-6);
+  top: calc(var(--topbar-h) + var(--s-3));
+  left: 50%;
+  transform: translateX(-50%);
   z-index: 60;
   display: grid;
   gap: var(--s-2);
-  justify-items: end;
+  justify-items: center;
+  width: max-content;
+  max-width: calc(100vw - 2 * var(--s-4));
   pointer-events: none;
 }
 .toast {
@@ -1402,6 +1407,26 @@ dialog.drawer .modal-foot {
 }
 .toast.error svg {
   color: var(--danger-solid);
+}
+.toast.info svg {
+  color: var(--gray-300);
+}
+.toast.error {
+  border-left: 3px solid var(--danger-solid);
+}
+.toast-close {
+  margin-left: var(--s-1);
+  padding: 2px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  opacity: 0.7;
+  cursor: pointer;
+  border-radius: var(--r-sm);
+}
+.toast-close:hover,
+.toast-close:focus-visible {
+  opacity: 1;
 }
 .tip {
   position: relative;
@@ -2417,7 +2442,8 @@ hr {
   .toasts {
     left: var(--s-4);
     right: var(--s-4);
-    bottom: var(--s-4);
+    width: auto;
+    transform: none;
   }
 }
 @media (max-width: 639px) {
@@ -3596,5 +3622,228 @@ details.fold {
   }
   .data-row .actions {
     width: 100%;
+  }
+}
+
+/* B10: a failed download keeps its reason and a retry next to the control (outside QA item 9). */
+.download-wrap {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2);
+}
+.download-failed {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+/* B10, S-09: the facts of a credit or duplicate decision, grouped beside the choice (item 11). */
+.decision-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: var(--s-2) var(--s-4);
+  margin: var(--s-2) 0;
+}
+.decision-facts dt {
+  font-size: 12px;
+  color: var(--text-2);
+}
+.decision-facts dd {
+  margin: 0;
+  font-weight: 500;
+}
+.decision-facts .wide {
+  grid-column: 1 / -1;
+}
+.decision-choice {
+  border: 0;
+  padding: 0;
+  margin: var(--s-3) 0;
+  display: grid;
+  gap: var(--s-2);
+}
+.decision-choice legend {
+  font-weight: 600;
+  margin-bottom: var(--s-1);
+}
+.decision-effect {
+  padding: var(--s-2) var(--s-3);
+  border-left: 3px solid var(--accent);
+  background: var(--accent-soft);
+  font-weight: 500;
+}
+
+/* B10, S-07 (item 12): totals that agree take one line; a mismatch opens the four columns. */
+.total-check.compact {
+  display: block;
+  padding: var(--s-2) var(--s-4);
+  border-color: var(--success-border, var(--border));
+}
+.total-check.compact p {
+  margin: 0;
+}
+.total-check.open {
+  border-color: var(--danger-border);
+}
+.le-error {
+  display: block;
+  margin-top: 2px;
+}
+
+/* B10, S-05 (item 13): one line per mapping with a value from the file beside it. */
+.map-rows {
+  list-style: none;
+  margin: 0 0 var(--s-2);
+  padding: 0;
+  display: grid;
+  gap: var(--s-2);
+}
+.map-row {
+  display: grid;
+  grid-template-columns: minmax(150px, 220px) auto minmax(150px, 240px) auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--s-2);
+}
+.map-row label {
+  font-weight: 500;
+}
+.map-row.missing label {
+  color: var(--danger-fg);
+}
+.map-arrow {
+  color: var(--text-3);
+}
+.map-sample code {
+  padding: 1px 6px;
+  border-radius: var(--r-sm);
+  background: var(--surface-sunken);
+  font-variant-numeric: tabular-nums;
+}
+.map-optional {
+  margin: var(--s-2) 0;
+}
+.map-optional summary {
+  cursor: pointer;
+  color: var(--link);
+  margin-bottom: var(--s-2);
+}
+@media (max-width: 639px) {
+  .map-row {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+  .map-row .map-arrow {
+    display: none;
+  }
+}
+
+/* B10 (item 14): the consequence of a save sits beside its button. */
+.save-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2) var(--s-4);
+  margin-top: var(--s-3);
+}
+.save-row p {
+  margin: 0;
+  max-width: 60ch;
+}
+.alias-headline {
+  margin: var(--s-2) 0 0;
+  font-size: var(--fs-lg);
+}
+.tol-example {
+  margin-top: var(--s-3);
+  padding: var(--s-2) var(--s-3);
+  border-left: 3px solid var(--border-strong);
+  background: var(--surface-sunken);
+}
+.tol-example p {
+  margin: 0;
+}
+
+/* B10, S-18 (item 15): a deletion row names the account, who asked, the date and the archive. */
+.deletion-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: var(--s-1) var(--s-4);
+  margin: var(--s-2) 0;
+}
+.deletion-facts dt {
+  font-size: 12px;
+  color: var(--text-2);
+}
+.deletion-facts dd {
+  margin: 0;
+}
+.deletion-row.needs-decision {
+  border-left: 3px solid var(--warning-solid);
+  padding-left: var(--s-3);
+}
+.decision-tag {
+  margin-left: var(--s-2);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--warning-fg, var(--text));
+}
+.secondary-action > summary {
+  cursor: pointer;
+  list-style: none;
+}
+.secondary-action > summary::-webkit-details-marker {
+  display: none;
+}
+.secondary-action > summary span::before {
+  content: "+ ";
+}
+.secondary-action[open] > summary span::before {
+  content: "− ";
+}
+.ops-list {
+  list-style: none;
+  margin: 0;
+}
+.ops-list li {
+  padding: var(--s-1) 0;
+}
+
+/* B10, S-13 (item 16): the report scope and the three outcome totals above the rows. */
+.outcome-scope {
+  margin: 0 0 var(--s-3);
+  padding: var(--s-3) var(--s-4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+.outcome-scope p {
+  margin: 0 0 var(--s-2);
+}
+.outcome-totals {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--s-3);
+  margin: 0;
+}
+.outcome-totals dt {
+  font-size: 12px;
+  color: var(--text-2);
+}
+.outcome-totals dd {
+  margin: 0;
+}
+.outcome-totals dd.num {
+  font-size: var(--fs-lg);
+  font-weight: 600;
+}
+tr.outcome-confirmed td:first-child,
+tr.outcome-recovered td:first-child {
+  box-shadow: inset 3px 0 0 var(--success-solid);
+}
+@media (max-width: 639px) {
+  .outcome-totals {
+    grid-template-columns: 1fr;
   }
 }

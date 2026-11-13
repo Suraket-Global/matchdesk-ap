@@ -169,10 +169,13 @@ test("B9 S-09 credit decision on the possibly credited case, S-13 outcomes on th
   await page.goto(`/invoices/${inv.id}`);
   const decision = page.getByRole("group", { name: "Credit decision" });
   await expect(decision).toContainText("VC-DEMO-9", { timeout: 30_000 });
-  await expect(decision).toContainText("listed as undecided, not as a finding");
+  await expect(decision).toContainText("Listed as undecided, not as a finding");
   await decision.scrollIntoViewIfNeeded();
   await shot(page, "credit-decision-1440");
-  await decision.getByRole("button", { name: "Credited", exact: true }).click();
+  // B10: choose, read the financial effect, then confirm.
+  await decision.getByRole("radio", { name: /^Credited/ }).check();
+  await expect(decision.getByTestId("decision-effect")).toContainText("nets against VC-DEMO-9 and leaves the findings");
+  await decision.getByRole("button", { name: "Confirm: Credited" }).click();
   await expect(page.getByText(/Recorded: credited/)).toBeVisible();
   await expect(page.getByText(/Credited in QuickBooks \(VC-DEMO-9\), decided by the controller/).first()).toBeVisible({ timeout: 30_000 });
   // S-13: make the approved October version governing, then record what happened to a finding.

@@ -42,12 +42,12 @@ describe("Toast leaves even when the host re-renders", () => {
   it("removes each toast after six seconds", () => {
     vi.useFakeTimers();
     const { rerender } = render(<ToastHost />);
-    act(() => toast("Confirmed."));
+    act(() => toast("Confirmed.", "success"));
     rerender(<ToastHost />);
     act(() => {
       vi.advanceTimersByTime(3000);
     });
-    act(() => toast("Second."));
+    act(() => toast("Second.", "success"));
     act(() => {
       vi.advanceTimersByTime(3100);
     });
