@@ -15,6 +15,7 @@ import hashlib
 import os
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from urllib.parse import urlsplit
 
 SECRET_FIELDS = frozenset(
     {
@@ -121,6 +122,10 @@ class Settings:
     intake_domain: str = "intake.matchdesk.invalid"
     # Weekly summary (B7, T-5.1.4): sent on Mondays from this hour, Pacific time, by the worker.
     weekly_summary_hour: int = 8
+    # Local demo over plain HTTP only: cookies without the Secure flag and the __Host- prefix, because
+    # Safari refuses Secure cookies on http://127.0.0.1 (the sign-in binding and the session then never
+    # arrive). Allowed only when the web app is served from a loopback http address outside production.
+    local_http_cookies: bool = False
 
     def fingerprint(self) -> str:
         """Hash of the non-secret settings; both entry points log it at start (CI-02)."""
@@ -137,6 +142,18 @@ class Settings:
             missing += [n for n in ("s3_bucket", "s3_access_key", "s3_secret_key") if not getattr(self, n)]
         if missing:
             raise SettingsError("missing settings: " + ", ".join(sorted(missing)))
+        if self.local_http_cookies and not self.loopback_http_app():
+            raise SettingsError(
+                "MATCHDESK_LOCAL_HTTP_COOKIES is for a local demo on http://127.0.0.1 or localhost only"
+            )
+
+    def loopback_http_app(self) -> bool:
+        parts = urlsplit(self.app_base_url)
+        return (
+            self.env.lower() not in {"production", "prod"}
+            and parts.scheme == "http"
+            and parts.hostname in {"127.0.0.1", "localhost"}
+        )
 
 
 def load_settings() -> Settings:
@@ -186,5 +203,6 @@ def load_settings() -> Settings:
         inbound_provider=env("MATCHDESK_INBOUND_PROVIDER", Settings.inbound_provider),
         inbound_signing_key=env("MATCHDESK_INBOUND_SIGNING_KEY", ""),
         intake_domain=env("MATCHDESK_INTAKE_DOMAIN", Settings.intake_domain),
+        local_http_cookies=env("MATCHDESK_LOCAL_HTTP_COOKIES", "false").lower() == "true",
         weekly_summary_hour=int(env("MATCHDESK_WEEKLY_SUMMARY_HOUR", "8")),
     )

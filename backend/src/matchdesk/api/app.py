@@ -28,12 +28,12 @@ from matchdesk.api.b9_routes import register_b9_routes
 from matchdesk.api.common import (
     CSRF_HEADER,
     MUTATING,
-    SESSION_COOKIE,
     Auth,
     StaleVersion,
     conflict_response,
     problem,
     require,
+    session_cookie,
 )
 from matchdesk.api.exception_routes import register_exception_routes
 from matchdesk.api.invoice_routes import register_invoice_routes
@@ -119,7 +119,7 @@ def create_app(mailer: Mailer | None = None, qbo_token_endpoint: TokenEndpoint |
             # the route before the body is used (B7, T-3.3.4).
             # Authenticate before the body is parsed or validated, so an anonymous caller gets
             # 401 and learns nothing about the request shape (B1-010). Only the cookie counts.
-            token = request.cookies.get(SESSION_COOKIE)
+            token = request.cookies.get(session_cookie(settings))
             # A background refresh (the web app's polling) is not activity: it does not reset the idle
             # timer, so an unattended screen is still signed out after 60 minutes (B3/B4 review W8).
             touch = request.headers.get("X-Background-Request") != "1"

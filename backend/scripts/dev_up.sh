@@ -10,6 +10,8 @@ mkdir -p "$RUN" "$LOG" var/blobs
 export MATCHDESK_DATABASE_URL="${MATCHDESK_DATABASE_URL:-postgresql+psycopg://matchdesk_app@localhost:5432/matchdesk_dev}"
 export MATCHDESK_MIGRATION_DATABASE_URL="${MATCHDESK_MIGRATION_DATABASE_URL:-postgresql+psycopg://${USER}@localhost:5432/matchdesk_dev}"
 export MATCHDESK_API_PORT="${MATCHDESK_API_PORT:-8101}"
+# Local demo over plain HTTP: cookies Safari accepts on http://127.0.0.1 (refused outside loopback http).
+export MATCHDESK_LOCAL_HTTP_COOKIES="${MATCHDESK_LOCAL_HTTP_COOKIES:-true}"
 export MATCHDESK_BLOB_ROOT="${MATCHDESK_BLOB_ROOT:-$PWD/var/blobs}"
 
 fail() { echo "make up: FAILED: $*" >&2; exit 1; }

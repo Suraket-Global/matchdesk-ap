@@ -10,7 +10,7 @@ from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import Engine
 
-from matchdesk.api.common import BINDING_COOKIE, SESSION_COOKIE, Auth, Ctx, require
+from matchdesk.api.common import Auth, Ctx, binding_cookie, cookie_secure, require, session_cookie
 from matchdesk.api.limits import client_address
 from matchdesk.core import Mailer, OutgoingMail, Settings, get_logger
 from matchdesk.identity import (
@@ -91,8 +91,15 @@ def _send(mailer: Mailer, mail: OutgoingMail) -> None:
         log.error("mail_failed", extra={"reason": type(exc).__name__})
 
 
-def set_session_cookie(response: Response, issued: IssuedSession) -> None:
-    response.set_cookie(SESSION_COOKIE, issued.token, httponly=True, secure=True, samesite="lax", path="/")
+def set_session_cookie(response: Response, issued: IssuedSession, settings: Settings) -> None:
+    response.set_cookie(
+        session_cookie(settings),
+        issued.token,
+        httponly=True,
+        secure=cookie_secure(settings),
+        samesite="lax",
+        path="/",
+    )
 
 
 def register_auth_routes(app: FastAPI, settings: Settings, engine: Engine, mailer: Mailer) -> None:
@@ -103,18 +110,18 @@ def register_auth_routes(app: FastAPI, settings: Settings, engine: Engine, maile
 
     def _replace_session(request: Request, response: Response, issued: IssuedSession) -> None:
         # A new token at every sign-in; any session this browser already had ends (ASVS 7.2.4).
-        old = request.cookies.get(SESSION_COOKIE)
+        old = request.cookies.get(session_cookie(settings))
         if old:
             ctx = load_session(engine, old, touch=False)
             if ctx is not None:
                 end_session(engine, ctx.session_id)
-        set_session_cookie(response, issued)
+        set_session_cookie(response, issued, settings)
 
     @app.post("/api/v1/auth/login-links", status_code=202)
     def post_login_link(
         body: LinkRequest, request: Request, response: Response, background: BackgroundTasks
     ) -> dict[str, str]:
-        binding = request.cookies.get(BINDING_COOKIE) or ""
+        binding = request.cookies.get(binding_cookie(settings)) or ""
         if not (40 <= len(binding) <= 64):
             binding = secrets.token_urlsafe(32)
         try:
@@ -122,11 +129,11 @@ def register_auth_routes(app: FastAPI, settings: Settings, engine: Engine, maile
         except AuthError as exc:
             raise HTTPException(*REFUSALS[exc.code]) from exc
         response.set_cookie(
-            BINDING_COOKIE,
+            binding_cookie(settings),
             binding,
             max_age=int(LINK_TTL.total_seconds()),
             httponly=True,
-            secure=True,
+            secure=cookie_secure(settings),
             samesite="lax",
             path="/",
         )
@@ -140,7 +147,7 @@ def register_auth_routes(app: FastAPI, settings: Settings, engine: Engine, maile
             issued = exchange_login_token(
                 engine,
                 body.token,
-                request.cookies.get(BINDING_COOKIE),
+                request.cookies.get(binding_cookie(settings)),
                 _ip(request, settings),
                 body.totp_code,
                 settings,
@@ -148,7 +155,9 @@ def register_auth_routes(app: FastAPI, settings: Settings, engine: Engine, maile
         except AuthError as exc:
             raise HTTPException(*REFUSALS[exc.code]) from exc
         _replace_session(request, response, issued)
-        response.delete_cookie(BINDING_COOKIE, path="/", secure=True, httponly=True, samesite="lax")
+        response.delete_cookie(
+            binding_cookie(settings), path="/", secure=cookie_secure(settings), httponly=True, samesite="lax"
+        )
         return _session_body(issued)
 
     @app.post("/api/v1/auth/session/extend")
@@ -163,13 +172,15 @@ def register_auth_routes(app: FastAPI, settings: Settings, engine: Engine, maile
     def delete_session(ctx: Ctx, response: Response) -> Response:
         end_session(engine, ctx.session_id)
         out = Response(status_code=204)
-        out.delete_cookie(SESSION_COOKIE, path="/", secure=True, httponly=True, samesite="lax")
+        out.delete_cookie(
+            session_cookie(settings), path="/", secure=cookie_secure(settings), httponly=True, samesite="lax"
+        )
         return out
 
     def _with_csrf(request: Request, body: dict[str, Any]) -> dict[str, Any]:
         # The web app keeps the anti-forgery token in memory only; after a reload it reads it here
         # (B4). It is derived from the session cookie, which script cannot read (httponly).
-        return {**body, "csrf_token": csrf_for(request.cookies[SESSION_COOKIE], settings)}
+        return {**body, "csrf_token": csrf_for(request.cookies[session_cookie(settings)], settings)}
 
     @app.get("/api/v1/me")
     def get_me(ctx: Ctx, request: Request) -> dict[str, Any]:
@@ -178,7 +189,7 @@ def register_auth_routes(app: FastAPI, settings: Settings, engine: Engine, maile
     @app.put("/api/v1/me/active-tenant")
     def put_active_tenant(body: ActiveTenant, ctx: Ctx, request: Request) -> dict[str, Any]:
         switch_tenant(engine, ctx, body.tenant_id)
-        fresh = load_session(engine, request.cookies[SESSION_COOKIE], touch=False)
+        fresh = load_session(engine, request.cookies[session_cookie(settings)], touch=False)
         assert fresh is not None
         return _with_csrf(request, describe_me(engine, fresh))
 

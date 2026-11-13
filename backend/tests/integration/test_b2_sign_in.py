@@ -786,3 +786,34 @@ def test_rate_limit_uses_the_peer_unless_it_is_a_trusted_proxy(app_engine, monke
         for i in range(1, 22)
     ]
     assert same[:20] == [202] * 20 and same[20] == 429
+
+
+def test_local_http_cookies_let_safari_sign_in_on_loopback(monkeypatch):  # type: ignore[no-untyped-def]
+    """Safari drops Secure cookies on http://127.0.0.1, so the local demo uses plain cookies there."""
+    import pytest
+
+    from matchdesk.api.common import binding_cookie, cookie_secure, session_cookie
+    from matchdesk.core.settings import Settings, SettingsError
+
+    local = Settings(local_http_cookies=True, session_key="k", token_key="k")
+    local.require_secrets()
+    assert (session_cookie(local), binding_cookie(local), cookie_secure(local)) == (
+        "md_session",
+        "md_signin",
+        False,
+    )
+    default = Settings(session_key="k", token_key="k")
+    assert (session_cookie(default), binding_cookie(default), cookie_secure(default)) == (
+        "__Host-md_session",
+        "__Host-md_signin",
+        True,
+    )
+    for bad in (
+        Settings(local_http_cookies=True, session_key="k", token_key="k", app_base_url="https://app.example"),
+        Settings(local_http_cookies=True, session_key="k", token_key="k", env="production"),
+        Settings(
+            local_http_cookies=True, session_key="k", token_key="k", app_base_url="http://192.0.2.1:5173"
+        ),
+    ):
+        with pytest.raises(SettingsError):
+            bad.require_secrets()

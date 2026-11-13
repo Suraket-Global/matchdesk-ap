@@ -18,7 +18,6 @@ from sqlalchemy import Engine, func, select
 
 from matchdesk.api import views
 from matchdesk.api.common import (
-    SESSION_COOKIE,
     Auth,
     body_hash,
     idempotent_replay,
@@ -26,6 +25,7 @@ from matchdesk.api.common import (
     page_limit,
     remember,
     require,
+    session_cookie,
 )
 from matchdesk.core import ConflictError, NotFoundError, Settings
 from matchdesk.identity import load_session
@@ -81,7 +81,7 @@ def register_qbo_routes(app: FastAPI, settings: Settings, engine: Engine, endpoi
 
     @app.get("/oauth/intuit/callback")
     def intuit_callback(request: Request, state: str = "", code: str = "", realmId: str = "") -> Response:
-        token = request.cookies.get(SESSION_COOKIE)
+        token = request.cookies.get(session_cookie(settings))
         ctx = load_session(engine, token) if token else None
         p = ctx.principal() if ctx is not None else None
         target = f"{settings.app_base_url}/settings/quickbooks"

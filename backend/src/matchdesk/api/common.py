@@ -13,13 +13,30 @@ from fastapi import Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
 
-from matchdesk.core import get_correlation_id
+from matchdesk.core import Settings, get_correlation_id
 from matchdesk.identity import Principal, SessionContext
 from matchdesk.tenancy import can
 from matchdesk.tenancy.models import IdempotencyKey
 
 SESSION_COOKIE = "__Host-md_session"
 BINDING_COOKIE = "__Host-md_signin"
+# Local demo over plain HTTP (settings.local_http_cookies): same cookies without Secure and __Host-.
+LOCAL_SESSION_COOKIE = "md_session"
+LOCAL_BINDING_COOKIE = "md_signin"
+
+
+def session_cookie(settings: Settings) -> str:
+    return LOCAL_SESSION_COOKIE if settings.local_http_cookies else SESSION_COOKIE
+
+
+def binding_cookie(settings: Settings) -> str:
+    return LOCAL_BINDING_COOKIE if settings.local_http_cookies else BINDING_COOKIE
+
+
+def cookie_secure(settings: Settings) -> bool:
+    return not settings.local_http_cookies
+
+
 CSRF_HEADER = "X-CSRF-Token"
 MUTATING = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
