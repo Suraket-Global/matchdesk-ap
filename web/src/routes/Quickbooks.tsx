@@ -81,8 +81,8 @@ export function QuickbooksPage() {
             {c.intuit_environment === "sandbox"
               ? "This account connects to an Intuit sandbox company (Intuit's invented sample data). "
               : "This account connects to a real QuickBooks company. "}
-            Connecting works; reading purchase orders from it is not available yet, so a read is refused and nothing is
-            copied. MatchDesk never creates or changes anything in QuickBooks.
+            MatchDesk reads its purchase orders, bills, vendor credits, vendors and items, and never creates or changes
+            anything in QuickBooks.
           </p>
         </Banner>
       )}

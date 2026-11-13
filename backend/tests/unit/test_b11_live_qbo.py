@@ -245,3 +245,120 @@ def test_limit_headers_are_kept_and_others_dropped() -> None:
     )
     assert kept == {"intuit_tid": REQUEST_ID_PLACEHOLDER, "retry-after": "60", "x-ratelimit-remaining": "499"}
     assert sanitise_text("a@b.example", REALM) == EMAIL_PLACEHOLDER
+
+
+# --- Phase B: the live reader against the responses recorded from the sandbox on 2026-11-13 ---
+
+from datetime import date  # noqa: E402
+from decimal import Decimal  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+from matchdesk.matching import evaluate, input_fingerprint  # noqa: E402
+from matchdesk.qbo import IntuitQboReader, PageQuery, QboReadError, build_statement  # noqa: E402
+
+from .builders import build, class_a, invoice, po_4471, qbo_bill, receipt, replace  # noqa: E402
+
+SANDBOX = Path(__file__).resolve().parents[2] / "fixtures" / "qbo" / "sandbox"
+
+
+def recorded(entity: str) -> bytes:
+    """The body Intuit returned for the first page of ``entity`` (sanitised, committed fixture)."""
+    page = next(SANDBOX.glob(f"*-{entity}-page.json"))
+    text = page.read_text()
+    return text[text.index('"body": ') + len('"body": ') : text.rstrip().rindex("}")].strip().encode()
+
+
+class Replay:
+    """Answers each query with the recorded page of the entity it names."""
+
+    def __init__(self) -> None:
+        self.statements: list[str] = []
+
+    def __call__(self, url: str, headers: dict[str, str], timeout: int) -> HttpAnswer:
+        statement = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)["query"][0]
+        self.statements.append(statement)
+        entity = statement.split(" from ")[1].split(" ")[0]
+        return HttpAnswer(200, {"content-type": "application/json"}, recorded(entity))
+
+
+def reader() -> tuple[IntuitQboReader, Replay]:
+    t = Replay()
+    return IntuitQboReader(settings(), IntuitApi(settings(), REALM, Tokens(), transport=t)), t
+
+
+def test_contract_recorded_purchase_orders_bills_and_empty_credits() -> None:
+    r, _t = reader()
+    pos = r.page("PurchaseOrder", 1, 100, PageQuery(since=date(2026, 10, 1), until=date(2026, 10, 31)))
+    assert sorted(p["DocNumber"] for p in pos) == ["1002", "1003", "1004"]
+    po = next(p for p in pos if p["DocNumber"] == "1004")
+    assert po["LinkedTxn"] == [{"TxnId": "126", "TxnType": "Bill"}]  # the link is on the PO only
+    line = po["Line"][0]["ItemBasedExpenseLineDetail"]
+    assert isinstance(line["Qty"], Decimal) and line["UnitPrice"] == Decimal("10")
+    assert "ReceivedQty" not in line and all("LinkedTxn" not in ln for ln in po["Line"])
+    bills = r.page("Bill", 1, 100, PageQuery(vendor_ids=("46",)))
+    b126 = next(b for b in bills if b["Id"] == "126")
+    assert b126["LinkedTxn"] == [] and all(ln["LinkedTxn"] == [] for ln in b126["Line"])
+    assert "DocNumber" not in b126  # the sample bills carry no number
+    assert r.page("VendorCredit", 1, 100, PageQuery(vendor_ids=("46",))) == []  # {"QueryResponse": {}}
+    assert {v["CurrencyRef"]["value"] for v in pos} == {"USD"}
+
+
+def test_statements_are_filtered_ordered_and_quoted() -> None:
+    q = build_statement("PurchaseOrder", 101, 100, PageQuery(references=("4471", "O'Neil\\1")))
+    assert q == (
+        "select * from PurchaseOrder where DocNumber in ('4471', 'O\\'Neil\\\\1') "
+        "orderby Id startposition 101 maxresults 100"
+    )
+    assert build_statement(
+        "PurchaseOrder", 1, 10, PageQuery(since=date(2026, 10, 1), until=date(2026, 10, 31))
+    ) == (
+        "select * from PurchaseOrder where TxnDate >= '2026-10-01' and TxnDate <= '2026-10-31' "
+        "orderby Id startposition 1 maxresults 10"
+    )
+    assert build_statement("Bill", 1, 10, PageQuery(vendor_ids=("46", "41"))).startswith(
+        "select * from Bill where VendorRef in ('46', '41') orderby Id"
+    )
+    assert "where Active in (true, false)" in build_statement("Vendor", 1, 10, PageQuery())
+
+
+def test_no_vendor_in_scope_asks_nothing_and_a_refusal_raises() -> None:
+    r, t = reader()
+    assert r.page("Bill", 1, 10, PageQuery(vendor_ids=())) == [] and t.statements == []
+    bad = IntuitQboReader(
+        settings(),
+        IntuitApi(settings(), REALM, Tokens(), transport=Transport([HttpAnswer(400, {}, b'{"Fault":{}}')])),
+    )
+    with pytest.raises(QboReadError):
+        bad.page("Item", 1, 10, PageQuery())
+    with pytest.raises(QboNotConfiguredError):
+        IntuitQboReader(settings()).page("Item", 1, 10, PageQuery())
+
+
+def test_unattributed_quickbooks_bill_on_a_po_blocks_a_pass() -> None:
+    base = {
+        "po": po_4471(),
+        "imports": (class_a(),),
+        "receipts": (receipt("r1", "100", date(2026, 10, 1)),),
+    }
+    oct_inv = invoice("oct", "INV-2", date(2026, 10, 5), "40")
+    assert evaluate(build(docs=(oct_inv,), **base)).line("oct-l1").status.value == "matched"
+    loose = replace(
+        qbo_bill("qb1", "", date(2026, 9, 20), "60", "252.00", po_line=None), unattributed_po_ids=("po-4471",)
+    )
+    res = evaluate(build(docs=(oct_inv,), bills=(loose,), **base))
+    assert res.line("oct-l1").status.value == "exception"
+    assert "history_incomplete" in {e.type.value for e in res.exceptions}
+    # A bill dated after the invoice does not reach back; an uploaded copy of it is counted instead.
+    later = replace(loose, txn_date=date(2026, 10, 20))
+    assert evaluate(build(docs=(oct_inv,), bills=(later,), **base)).line("oct-l1").status.value == "matched"
+
+
+def test_fingerprint_unchanged_while_no_bill_is_unattributed() -> None:
+    bill = qbo_bill("qb1", "INV-1", date(2026, 9, 20), "60", "252.00")
+    inp = build(docs=(invoice("oct", "INV-2", date(2026, 10, 5), "40"),), bills=(bill,))
+    from matchdesk.matching.fingerprint import _canonical
+
+    assert "unattributed_po_ids" not in _canonical(bill)  # so results stored before B11 stay current
+    assert input_fingerprint(inp) == input_fingerprint(replace(inp))
+    moved = replace(inp, qbo_bills=(replace(bill, unattributed_po_ids=("po-4471",)),))
+    assert input_fingerprint(moved) != input_fingerprint(inp)

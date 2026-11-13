@@ -631,7 +631,8 @@ def _history_gaps(
 
     An invoice line that stopped at check 1, 4 or 5 (or lacks a quantity) adds an unknown quantity
     to some line of its PO, unless a QuickBooks bill with the same number has lines linked to that
-    PO, in which case those bill lines count instead.
+    PO, in which case those bill lines count instead. Since B11 a QuickBooks bill with an item line
+    the sync could not attribute to one line of a PO that names it is a gap on that PO too.
     """
     active_ids = {d.id for d in active}
     resolved_ids = {r.line.id for r in resolved}
@@ -660,6 +661,21 @@ def _history_gaps(
         )
         if not represented:
             gaps[po.id].append(_doc_key(doc))
+    # B11 (T-1.1.1): a QuickBooks bill that a PO names but whose item line fits no single PO line
+    # adds an unknown quantity to that PO, unless an uploaded invoice with its number was counted.
+    for bill in bills:
+        if bill.txn_type != "bill":
+            continue
+        for po_id in bill.unattributed_po_ids:
+            uploaded = any(
+                r.po.id == po_id
+                and r.doc.vendor_id == bill.vendor_id
+                and r.doc.doc_number
+                and normalise_number(r.doc.doc_number) == normalise_number(bill.doc_number)
+                for r in resolved
+            )
+            if not uploaded:
+                gaps[po_id].append(_bill_key(bill))
     return gaps
 
 

@@ -18,7 +18,13 @@ from matchdesk.matching.types import MatchInput
 
 def _canonical(value: object) -> object:
     if dataclasses.is_dataclass(value) and not isinstance(value, type):
-        return {f.name: _canonical(getattr(value, f.name)) for f in dataclasses.fields(value)}
+        return {
+            f.name: _canonical(getattr(value, f.name))
+            for f in dataclasses.fields(value)
+            if not (
+                f.metadata.get("fingerprint") == "omit_if_default" and getattr(value, f.name) == f.default
+            )
+        }
     if isinstance(value, Enum):
         return value.value
     if isinstance(value, Decimal):

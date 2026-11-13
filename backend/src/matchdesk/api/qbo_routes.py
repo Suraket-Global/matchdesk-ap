@@ -38,10 +38,13 @@ from matchdesk.qbo import (
     describe_sync,
     disconnect,
     get_connection,
+    read_company_name,
     request_sync,
     start_authorization,
     tenant_qbo_mode,
+    urllib_get,
 )
+from matchdesk.qbo import Transport as QboTransport
 from matchdesk.qbo.models import PoLineRow, PurchaseOrderRow, SyncRun, Vendor
 from matchdesk.receiving import counting_receipt_totals
 from matchdesk.tenancy import session
@@ -55,7 +58,11 @@ class SyncRequest(BaseModel):
 
 
 def register_qbo_routes(
-    app: FastAPI, settings: Settings, engine: Engine, endpoints: dict[str, TokenEndpoint]
+    app: FastAPI,
+    settings: Settings,
+    engine: Engine,
+    endpoints: dict[str, TokenEndpoint],
+    transport: QboTransport = urllib_get,
 ) -> None:
     sandbox = "sandbox" in settings.qbo_api_base_url
 
@@ -100,8 +107,11 @@ def register_qbo_routes(
             with session(p.tenant_id, engine) as s:
                 endpoint = endpoints[tenant_qbo_mode(s, settings, p.tenant_id)]
                 complete_callback(s, settings, endpoint, p.tenant_id, ctx.session_id, state, code, realmId)  # type: ignore[union-attr]
+            mode = tenant_qbo_mode(s, settings, p.tenant_id)
         except (NotFoundError, ConflictError, PermissionError, QboNotConfiguredError, QboTransientError):
             return RedirectResponse(f"{target}?result=refused", status_code=303)
+        if mode == "intuit":  # B11: name the company on S-04 (one GET of CompanyInfo)
+            read_company_name(engine, settings, p.tenant_id, endpoints["intuit"], transport)
         return RedirectResponse(f"{target}?result=connected", status_code=303)
 
     @app.delete("/api/v1/qbo/connection")

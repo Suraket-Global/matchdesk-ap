@@ -138,9 +138,22 @@ Play these after section 9, in this order. Each one is recorded in the audit log
 8. **Archive and deletion (S-16, S-18).** The archive says "Complete: 15/15 originals" or "Incomplete: 14/15 originals" with **Retry missing files**. **Request deletion** shows the latest archive; without a complete one you must tick that the account is deleted without it. The request then reads Requested, Scheduled, Deleting (no cancel) or Cancelled.
 9. **Operator console (S-18).** Requests that need the operator come first (oldest first) with account, requesting controller, effective date and archive; an **Operations** panel lists the worker's scheduled operations, failing or late first; **Create a pilot account** is folded at the bottom.
 
+## 12. Live QuickBooks sandbox (B11)
+
+A second invented account, "Sandbox Distributor (Intuit sandbox)", reads Intuit's sandbox company instead of recorded responses. The demo account is unchanged. You need the Intuit app's sandbox Client ID, Client Secret and redirect URI in `backend/.env` (`MATCHDESK_QBO_CLIENT_ID`, `MATCHDESK_QBO_CLIENT_SECRET`, `MATCHDESK_QBO_REDIRECT_URI=http://localhost:5173/oauth/intuit/callback`), and that redirect URI registered under the app's Development settings at developer.intuit.com.
+
+1. `make sandbox-up` (the stack with the app on **http://localhost:5173**; the sign-in cookie belongs to one host, and Intuit returns to `localhost`), `make seed-sandbox`, `make web`.
+2. Open http://localhost:5173/login (not 127.0.0.1) and sign in as `controller.sandbox@example.invalid`; the link is in Mailpit (http://127.0.0.1:8025).
+3. **Settings > QuickBooks** says "Intuit sandbox". **Connect to QuickBooks**, **Continue to Intuit**, sign in to Intuit, choose the sandbox company, **Connect**. Back on S-04: Connected, the company's name, permission `com.intuit.quickbooks.accounting`.
+4. **Read now** with From 2026-10-01 and To 2026-10-31 (the sample company's purchase orders are dated October 2026 in this sandbox). It ends with "3 PurchaseOrder, 4 Bill, 18 Item, 26 Vendor, 0 VendorCredit".
+5. Open a purchase order (for example PO 1004) to see its lines on S-10. "Received independently" stays 0: QuickBooks bills are never receiving evidence.
+6. `make qbo-capture` reads everything again and writes the answers to `backend/var/qbo-capture/` (raw stays local; `sanitised/` has the realm, request IDs, Intuit user IDs and e-mail addresses removed). What the sandbox showed is in [qbo-fact-sheet.md](qbo-fact-sheet.md).
+
+MatchDesk only reads: every QuickBooks call is a GET, except Intuit's token exchange, refresh and revoke. **Disconnect** on S-04 revokes the token and erases it.
+
 ## Not built yet (the screens say so)
 
-- **Live QuickBooks.** The demo reads recorded, invented QuickBooks responses. The live connection is not built: it needs the owner's Intuit developer account and the sandbox check T-1.1.1 (`execution-plan.md`). The step that remains: the owner opens the Intuit developer account and sandbox company, T-1.1.1 records the real responses, then the live reader is written from them (TODO list in `TRD.md` section 11.1). Until then `MATCHDESK_QBO_MODE=intuit` refuses to start a sync, and the QuickBooks screen (S-04) says so.
+- **Live QuickBooks in production.** The demo reads recorded, invented responses; the sandbox account of section 12 reads Intuit's sandbox. A real company needs production keys and Intuit's app assessment (`execution-plan.md` section 3); a Canadian company (CAD, GST/HST) has not been read yet ([qbo-fact-sheet.md](qbo-fact-sheet.md)).
 - **Hosted extractor and region highlighting.** Documents are read by the local text-PDF reader. Selecting a field does not highlight its place on the page, because only a hosted extraction provider records regions, and that needs a provider account and no-training terms.
 - **Hosted email provider.** Email intake works with the local signed webhook (`make demo-email`). A real inbound address needs an email provider account; `MATCHDESK_INBOUND_PROVIDER` set to a provider refuses until then.
 

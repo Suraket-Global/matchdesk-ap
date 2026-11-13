@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import uuid
+from collections.abc import Sequence
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
@@ -22,7 +23,8 @@ from sqlalchemy.orm import Session
 from matchdesk.audit import write_audit
 from matchdesk.core import ConflictError, dec, get_correlation_id, get_logger, new_correlation_id
 from matchdesk.matching import normalise_number
-from matchdesk.qbo.client import ENTITIES, PageQuery, QboNotConfiguredError, QboReader
+from matchdesk.qbo.client import ENTITIES, PageQuery, QboNotConfiguredError, QboReader, QboReadError
+from matchdesk.qbo.intuit_http import QboAuthError
 from matchdesk.qbo.models import (
     Item,
     PoLineChange,
@@ -143,7 +145,7 @@ def execute_sync(
                 if not processing_allowed(s):
                     raise ConflictError("QuickBooks was disconnected")
                 done = _one_page(s, tenant_id, run, reader, page_size)
-        except (QboNotConfiguredError, ConflictError) as exc:
+        except (QboNotConfiguredError, QboReadError, QboAuthError, ConflictError) as exc:
             _finish(engine, tenant_id, run_id, "failed", type(exc).__name__)
             raise PermanentJobError(str(exc)) from exc
         except Exception:
@@ -295,6 +297,14 @@ def _pos(
         po.qbo_status = r.get("POStatus")
         po.total = _d(r.get("TotalAmt"))
         po.qbo_sync_token = r.get("SyncToken")
+        # T-1.1.1 (2026-11-13): the PO-to-bill link was seen only here, on the PO's own LinkedTxn.
+        po.linked_bill_qbo_ids = sorted(
+            {
+                str(t["TxnId"])
+                for t in r.get("LinkedTxn", []) or []
+                if t.get("TxnType") == "Bill" and t.get("TxnId")
+            }
+        )
         po.synced_at = now
         s.add(po)
         s.flush()
@@ -399,6 +409,7 @@ def _bills(
             )
         )
     }
+    items = _item_map(s)
     for r in rows:
         vendor_ref = _ref(r, "VendorRef")
         if vendor_ref not in vendors:
@@ -414,6 +425,14 @@ def _bills(
         b.synced_at = now
         s.add(b)
         s.flush()
+        # The POs whose own LinkedTxn names this bill (B11): the only link the sandbox showed.
+        header_pos = (
+            s.scalars(
+                select(PurchaseOrderRow).where(PurchaseOrderRow.linked_bill_qbo_ids.contains([b.qbo_id]))
+            ).all()
+            if txn_type == "bill"
+            else []
+        )
         # Bill lines have no stable key of their own here: replace them as one unit (idempotent).
         s.execute(delete(QboBillLineRow).where(QboBillLineRow.qbo_bill_id == b.id))
         for ln in r.get("Line", []):
@@ -428,6 +447,10 @@ def _bills(
                         PoLineRow.purchase_order_id == po_map[po_qbo], PoLineRow.qbo_line_id == po_line_qbo
                     )
                 )
+            elif linked is None and header_pos and detail:
+                po_qbo, po_line_qbo, po_line_id = _by_item(
+                    s, header_pos, items.get(_ref(detail, "ItemRef") or "")
+                )
             s.add(
                 QboBillLineRow(
                     tenant_id=tid,
@@ -441,6 +464,30 @@ def _bills(
                     po_line_id=po_line_id,
                 )
             )
+
+
+def _by_item(
+    s: Session, pos: Sequence[PurchaseOrderRow], item_id: uuid.UUID | None
+) -> tuple[str | None, str | None, uuid.UUID | None]:
+    """The one open PO line, across the POs that name this bill, with the bill line's item.
+
+    Only an exact, unique item match attributes the line; none or several leave it unattributed
+    (``po_line_id`` null), and matching then treats it as unknown history on those POs (B11)."""
+    if item_id is None:
+        return (pos[0].qbo_id if len(pos) == 1 else None), None, None
+    found = s.execute(
+        select(PoLineRow, PurchaseOrderRow.qbo_id)
+        .join(PurchaseOrderRow, PurchaseOrderRow.id == PoLineRow.purchase_order_id)
+        .where(
+            PoLineRow.purchase_order_id.in_([p.id for p in pos]),
+            PoLineRow.item_id == item_id,
+            PoLineRow.removed_at.is_(None),
+        )
+    ).all()
+    if len(found) == 1:
+        line, po_qbo = found[0]
+        return po_qbo, line.qbo_line_id, line.id
+    return (pos[0].qbo_id if len(pos) == 1 else None), None, None
 
 
 def make_sync_handler(engine: Engine, reader_factory: Any, page_size: int) -> Any:

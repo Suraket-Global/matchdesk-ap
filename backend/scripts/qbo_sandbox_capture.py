@@ -38,7 +38,7 @@ from matchdesk.qbo import (
     token_endpoint_for,
     token_source,
 )
-from matchdesk.qbo.capture import capture_all, leaks, request_ids, sanitised_record, summarise
+from matchdesk.qbo.capture import capture_all, leaks, request_ids, sanitised_record, summarise, user_ids
 from matchdesk.tenancy import get_engine, global_session, session
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -105,6 +105,7 @@ def main() -> int:
         "client ID": [settings.qbo_client_id],
         "client secret": [settings.qbo_client_secret],
         "request ID": sorted(request_ids(cap.answers)),
+        "Intuit user ID": sorted(user_ids(cap.answers)),
     }
     cleaned = {name: sanitised_record(a, realm) for name, a in zip(names, cap.answers, strict=True)}
     summary = json.dumps(

@@ -36,6 +36,11 @@ EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 REQUEST_ID_FIELD = re.compile(r'("(?:intuit_tid|requestId|RequestId|request_id|tid)"\s*:\s*")[^"]*(")')
 REQUEST_ID_HEADERS = ("intuit_tid", "intuit-tid", "x-request-id", "x-amzn-requestid", "x-amz-cf-id")
 DROP_HEADERS = ("set-cookie", "authorization")
+# Observed 2026-11-13: ``MetaData.LastModifiedByRef.value`` carries the Intuit user ID of whoever
+# owns the sandbox, and ``V4IDPseudonym`` an Intuit pseudonymous ID. Both are replaced.
+USER_PLACEHOLDER = "USER-REMOVED"
+USER_REF_FIELD = re.compile(r'("(?:LastModifiedByRef|CreatedByRef)"\s*:\s*\{\s*"value"\s*:\s*")[^"]*(")')
+PSEUDONYM_FIELD = re.compile(r'("V4IDPseudonym"\s*:\s*")[^"]*(")')
 
 
 @dataclass
@@ -70,7 +75,21 @@ def capture_all(api: IntuitApi, page_size: int = 100) -> Capture:
 def sanitise_text(text: str, realm_id: str) -> str:
     out = text.replace(realm_id, REALM_PLACEHOLDER) if realm_id else text
     out = REQUEST_ID_FIELD.sub(rf"\g<1>{REQUEST_ID_PLACEHOLDER}\g<2>", out)
+    out = USER_REF_FIELD.sub(rf"\g<1>{USER_PLACEHOLDER}\g<2>", out)
+    out = PSEUDONYM_FIELD.sub(rf"\g<1>{USER_PLACEHOLDER}\g<2>", out)
     return EMAIL.sub(EMAIL_PLACEHOLDER, out)
+
+
+def user_ids(answers: Iterable[ApiAnswer]) -> set[str]:
+    """Intuit user and pseudonym IDs in the raw answers, for the leak gate."""
+    found: set[str] = set()
+    for a in answers:
+        text = a.body.decode("utf-8", "replace")
+        for rx in (USER_REF_FIELD, PSEUDONYM_FIELD):
+            for m in rx.finditer(text):
+                end = text.index('"', m.end(1))
+                found.add(text[m.end(1) : end])
+    return found
 
 
 def sanitise_headers(headers: dict[str, str], realm_id: str) -> dict[str, str]:
@@ -131,7 +150,8 @@ def summarise(answers: Iterable[ApiAnswer]) -> dict[str, Any]:
             continue
         resp = a.json().get("QueryResponse", {})
         for entity in CAPTURE_ENTITIES:
-            if "count(*)" in (a.statement or "") and f"from {entity}" in (a.statement or ""):
+            words = (a.statement or "").split()
+            if "count(*)" in words and words[words.index("from") + 1] == entity:
                 out["entities"].setdefault(entity, _empty())["count"] = resp.get("totalCount")
             for row in resp.get(entity, []):
                 e = out["entities"].setdefault(entity, _empty())

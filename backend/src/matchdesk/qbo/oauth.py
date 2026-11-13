@@ -332,7 +332,10 @@ def _store_tokens(
     )
     conn.access_expires_at = now + timedelta(seconds=int(tokens.get("expires_in", 3600)))
     conn.refresh_expires_at = now + timedelta(seconds=int(tokens.get("x_refresh_token_expires_in", 0)))
-    conn.scopes_granted = tokens.get("scope")
+    # T-1.1.1 (2026-11-13): Intuit's token answer carried no "scope" (S-04 showed none after the
+    # sandbox connect). The authorization request asks for ``qbo_scopes`` only and the consent screen
+    # offers it as one grant, so the requested scope is recorded when Intuit does not echo one.
+    conn.scopes_granted = tokens.get("scope") or settings.qbo_scopes
 
 
 def _fresh(conn: QboConnection) -> bool:

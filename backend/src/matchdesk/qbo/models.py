@@ -17,8 +17,9 @@ from sqlalchemy import (
     LargeBinary,
     Text,
     UniqueConstraint,
+    text,
 )
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from matchdesk.tenancy import MONEY, PRICE, QTY, UUIDT, Base, TenantMixin, enum_check, tenant_args, tfk
@@ -55,6 +56,11 @@ class PurchaseOrderRow(TenantMixin, Base):
     total: Mapped[Decimal | None] = mapped_column(MONEY)
     qbo_sync_token: Mapped[str | None] = mapped_column(Text)
     synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    # QuickBooks ids of the bills this PO's own LinkedTxn names (B11, migration 0024; T-1.1.1 saw the
+    # PO-to-bill link only on the PO side).
+    linked_bill_qbo_ids: Mapped[list[str]] = mapped_column(
+        ARRAY(Text), nullable=False, server_default=text("'{}'::text[]"), default=list
+    )
 
 
 class PoLineRow(TenantMixin, Base):

@@ -243,6 +243,10 @@ class QboBill:
     total: Decimal
     lines: tuple[QboBillLine, ...] = ()
     references_invoice_number: str | None = None  # vendor credits tied by invoice number
+    # B11 (T-1.1.1): POs that name this bill in their own LinkedTxn while an item line of the bill
+    # fits no single line of them. Its quantity is unknown history on those POs (TRD 8.5). Left out
+    # of the input fingerprint while empty, so results computed before B11 stay current.
+    unattributed_po_ids: tuple[str, ...] = field(default=(), metadata={"fingerprint": "omit_if_default"})
 
 
 @dataclass(frozen=True)

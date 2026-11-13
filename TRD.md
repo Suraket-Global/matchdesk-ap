@@ -1,6 +1,6 @@
 # Technical requirements and design — MatchDesk AP three-way match
 
-Number labels follow [Decision.md section 0](Decision.md#0-how-numbers-are-labelled). **Every limit, timeout, size and target in this document is an author proposal and therefore an [assumption]** unless it carries another label. Every statement about the QuickBooks Online API is **unverified, no source consulted** until task T-1.1.1 confirms it in a sandbox; the developer documentation could not be read on 2026-11-10.
+Number labels follow [Decision.md section 0](Decision.md#0-how-numbers-are-labelled). **Every limit, timeout, size and target in this document is an author proposal and therefore an [assumption]** unless it carries another label. Statements about the QuickBooks Online API were **unverified, no source consulted** until task T-1.1.1; what the sandbox showed on 2026-11-13 is in [docs/qbo-fact-sheet.md](docs/qbo-fact-sheet.md), and every QuickBooks statement not covered there stays unverified.
 
 Nothing described here exists yet. All commands are proposed.
 
@@ -431,7 +431,7 @@ Evaluated by `matching.evaluate()`. Defaults are proposals **[assumption]**.
 - every QuickBooks bill line and vendor-credit line linked to that purchase-order line for which no uploaded document exists (matched by vendor and normalised number), so that an invoice billed before the test month still counts as invoiced;
 - QuickBooks' "billed against PO" quantity, as a cross-check on the invoiced side only.
 
-A QuickBooks bill line is replaced by an uploaded invoice only when that invoice's line on the same PO line was resolved and counted; if the uploaded line stopped at check 4 or 5, the bill line counts instead. An earlier invoice on an in-scope PO with an item line that did not resolve, and no QuickBooks bill line standing in for it, makes every later line on that PO `history_incomplete` (B1-002). Whether QuickBooks exposes bill lines linked to purchase-order lines is unverified until T-1.1.1. If it does not, earlier invoices must be uploaded, and check 6 below catches the gap.
+A QuickBooks bill line is replaced by an uploaded invoice only when that invoice's line on the same PO line was resolved and counted; if the uploaded line stopped at check 4 or 5, the bill line counts instead. An earlier invoice on an in-scope PO with an item line that did not resolve, and no QuickBooks bill line standing in for it, makes every later line on that PO `history_incomplete` (B1-002). T-1.1.1 (2026-11-13, sandbox sample data) saw no bill line linked to a purchase-order line: only the purchase order names its bill, on its header `LinkedTxn` ([fact sheet](docs/qbo-fact-sheet.md)). Since B11 the sync attributes a bill line to a PO line only when exactly one open line of a PO naming that bill has the same item; a linked bill with an item line that fits no single line makes every later line on each naming PO `history_incomplete`, unless an uploaded invoice with the bill's number was counted there. A bill made with "Add to bill" may carry line links; that is unverified until the owner adds one in the sandbox.
 
 **Counting receipt lines.** A receipt line counts when all hold: its import has evidence class A (warehouse record, including a QuickBooks Online item-receipt export, below) or B (receiver-attested delivery document, with receiver marks recorded for that document); the import is committed and not voided; and, if the line was added after an exception was raised on its purchase-order line, the controller has approved it. Class C (supplier document only) and QuickBooks quantities never count. Negative lines are returns and reduce the cumulative received quantity.
 
@@ -557,24 +557,28 @@ The 22 production risks, with tests and owning tasks, are in [verification-repor
 
 | Risk | Effect | Handling |
 |---|---|---|
-| QuickBooks API does not expose PO line billed quantity or bill lines linked to PO lines as assumed | Open-PO history cannot be taken from QuickBooks; the account must upload earlier invoices and check 6 loses its cross-check. No effect on the receipt rule (AD-05) | T-1.1.1 |
-| QuickBooks API call limits or programme fees are higher than assumed | Builder's 500,000 CorePlus calls a month are blocked above the cap, so a sync could stop mid-month; Silver adds $425 a month in Canada [source: SRC-17] | T-1.1.1 measures CorePlus calls per account; sensitivity in Decision.md section 7.3 |
+| QuickBooks API does not expose PO line billed quantity or bill lines linked to PO lines as assumed | **Observed in T-1.1.1 (2026-11-13):** no billed or received quantity on PO lines and no line-level link in the sample bills, only the PO header's `LinkedTxn`. Open-PO history from QuickBooks rests on item attribution; unattributed linked bills block a pass (`history_incomplete`). No effect on the receipt rule (AD-05) | B11 mapping and rule; owner adds an "Add to bill" bill in the sandbox |
+| QuickBooks API call limits or programme fees are higher than assumed | Builder's 500,000 CorePlus calls a month are blocked above the cap, so a sync could stop mid-month; Silver adds $425 a month in Canada [source: SRC-17] | T-1.1.1 (2026-11-13) saw no rate or limit header and no 429 on 11 reads; CorePlus calls per account are still unmeasured; sensitivity in Decision.md section 7.3 |
 | Supplier item codes rarely equal internal items [assumption] | Alias work dominates the first weeks | MH-10; support cost assumption; measured in T-0.1.3 |
 | Extraction quality on scanned packing slips | Receipt import by scan unusable | Spreadsheet import is the primary path; scans need human confirmation of every line |
 | Single VPS | One failure stops everything | Backups, restore drill, stated pilot hours |
 
 Decisions that can wait: extraction provider and model (T-1.1.3); object storage; a second factor at sign-in; Canadian cloud region; in-app billing; error-tracking product; whether staging gets its own server.
 
-### 11.1 Live QuickBooks reader: what remains (B6, 2026-11-12)
+### 11.1 Live QuickBooks reader (B6 list, done in B11, 2026-11-13)
 
-`IntuitQboReader.page()` raises `QboNotConfiguredError`; it is not faked. It needs the owner's Intuit developer account and sandbox company (`execution-plan.md` section 3 dependencies) and task T-1.1.1. TODO, in order:
+The B6 TODO list is done. Where the built version differs from it, that is said below.
 
-1. Owner: open the Intuit developer account, create the app and a sandbox company with synthetic POs, partial bills and vendor credits; put the sandbox client id, secret and redirect URI into the staging `.env` only.
-2. T-1.1.1: call each entity used by `qbo.sync` (vendors, items, purchase orders, bills, vendor credits) in the sandbox and record request and response samples as fixtures under `backend/fixtures/qbo/`, replacing the invented recordings where the shape differs.
-3. Write `IntuitQboReader.page()` over `httpx`: the query endpoint with `STARTPOSITION`/`MAXRESULTS` paging, the minor version T-1.1.1 records, `Authorization: Bearer` from `qbo.access_token`, timeouts of section 6.4, retry on 429 and 5xx with backoff, and no write method (test `test_readers_have_no_write_method`).
-4. Write `IntuitTokenEndpoint` (exchange, refresh, revoke) against the token and revoke URLs in settings; a refused refresh already commits `needs_reconnect`.
-5. Contract tests that replay the recorded sandbox responses through the real client; one manual sandbox run recorded in `verification-report-fixing.md`.
-6. Update S-04 wording (`App-flow.md`), `docs/PLAY.md` and `AGENTS.md`, and remove the recorded-response banner for `intuit` mode.
+1. **Done.** The owner opened the Intuit developer account and app; the sandbox client id, secret and redirect URI `http://localhost:5173/oauth/intuit/callback` are in the gitignored `backend/.env`. The sandbox company is Intuit's US sample, not one with MatchDesk's own POs, partial bills and credits; what to add by hand is in [docs/qbo-fact-sheet.md](docs/qbo-fact-sheet.md) section 5.
+2. **Done.** `make qbo-capture` read every entity `qbo.sync` uses. The sanitised responses are in `backend/fixtures/qbo/sandbox/`. The invented recordings stay for the demo; where their shape differs is in the fact sheet section 4.
+3. **Done.** `IntuitQboReader.page()` sends `select * from <Entity> [where ...] orderby Id startposition maxresults`, with `minorversion=75` and the bearer token from `qbo.access_token`.
+   - It goes through `qbo.IntuitApi` over the standard library (`urllib`), not `httpx`, which is a dev dependency only. The client has GET only.
+   - A 401 refreshes once and retries. 429, 5xx and network errors are transient: the sync retries from its cursor. Any other refusal is permanent.
+4. **Done.** `IntuitTokenEndpoint` maps Intuit's errors. The access token is refreshed 5 minutes before expiry [assumption] and after a 401, by one refresher per connection (a row lock in its own transaction). `needs_reconnect` is committed on its own.
+5. **Done.** Contract tests replay the recorded sandbox answers through the real client (`tests/unit/test_b11_live_qbo.py`, `tests/integration/test_b11_live_qbo.py`). A manual sandbox sync is recorded in verification-report-fixing.md, B11.
+6. **Done.** The mode is set per account (`tenants.qbo_mode`): S-04 says "Intuit sandbox", names the company from CompanyInfo and shows the requested scope. `docs/PLAY.md` section 12 and `AGENTS.md` are updated.
+
+**Still open:** a Canadian company (currency and tax), vendor credits, bills made from a PO, and production keys (Intuit's app assessment, execution-plan.md section 3).
 
 ## 12. API contracts
 
@@ -684,7 +688,7 @@ Roles: C controller, K clerk, V viewer, O operator. **Rule for the operator:** a
 
 ### 13.2 Threat model
 
-**Sensitive assets.** (1) QuickBooks refresh tokens: access to an account's full books. Until T-1.1.1 shows that a read-only scope exists, the token is treated as able to write to the books, although MatchDesk never does. (2) Supplier invoices and prices: a distributor's cost base, valuable to its competitors and customers. (3) Approved reports and audit log: evidence in supplier disputes. (4) User emails and sessions.
+**Sensitive assets.** (1) QuickBooks refresh tokens: access to an account's full books. T-1.1.1 (2026-11-13) requested only `com.intuit.quickbooks.accounting` and saw no read-only scope offered, so the token is treated as able to write to the books, although MatchDesk never does. (2) Supplier invoices and prices: a distributor's cost base, valuable to its competitors and customers. (3) Approved reports and audit log: evidence in supplier disputes. (4) User emails and sessions.
 
 **Trust boundaries.** Browser to proxy; email service to webhook; application to database; worker to QuickBooks; worker to extraction provider; operator to tenant data; server to backup bucket.
 
@@ -700,7 +704,7 @@ Roles: C controller, K clerk, V viewer, O operator. **Rule for the operator:** a
 | Stolen, forwarded, pre-opened or replayed sign-in link; link token leaking through logs | Section 8.1: 10-minute single use, bound to the requesting browser, consumed only on POST, fragment transport, rate limits, session limits | IT-18 |
 | Database or backup copy stolen | Refresh tokens encrypted with a key held outside the database; backups encrypted client-side | OPS-01 checks ciphertext |
 | Operator browses pilot data | Operator path of section 8.2: no tenant data without a grant; read-only `support_reader` with one; TOTP for operators; time-limited, audited, visible to controller | IT-13 |
-| Stolen QuickBooks token used to alter the books | Token encrypted, key off the database, erased on disconnect; minimum scopes requested once T-1.1.1 shows what exists; the consent wording shown to users reflects what Intuit actually grants | IT-11, OPS-01 |
+| Stolen QuickBooks token used to alter the books | Token encrypted, key off the database, erased on disconnect; only `com.intuit.quickbooks.accounting` requested (T-1.1.1, 2026-11-13); the consent wording shown to users reflects what Intuit actually grants | IT-11, OPS-01 |
 | Values replayed from a stored response | `idempotency_keys` stores status and the identifier of the created record, never a response body | IT-07 |
 | Formula injection through CSV export | Cells beginning `=`, `+`, `-`, `@` are prefixed with an apostrophe | UT-11 |
 | OAuth callback replay or cross-account binding | Signed, single-use `state` bound to session and tenant | IT-11 |

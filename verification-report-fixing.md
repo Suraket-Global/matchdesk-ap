@@ -1008,3 +1008,41 @@ Playwright walked review with a mismatch, the receiving mapping, aliases, tolera
 - The unique index on open deletion requests still covers `requested` and `scheduled` only; `deleting` is treated as open in code (changing the index needs a concurrent rebuild in its own migration).
 - Assumptions: 5 delivery attempts per recipient by the schedule, 10 minutes before an operation counts as late, 15 minutes before a stopped deletion claim is taken over.
 - The database `matchdesk_depth_137206` (the outside QA's leftover) was not touched.
+
+## B11 2026-11-13
+
+Source: the B11 brief (`_coordination/B11-GUIDE.md`, outside this repository). Branch `feat/b11-live-qbo` from `main` 8e9d69e. Migrations 0023 (`tenants.qbo_mode`) and 0024 (`purchase_orders.linked_bill_qbo_ids`). The owner created the Intuit app; the lead registered the redirect URI and connected the sandbox as `controller.sandbox@example.invalid`.
+
+### B11.1 What was built, and its tests
+
+| # | Item | Built | Test |
+|---|---|---|---|
+| 1 | Connect path beside the demo | QuickBooks mode per account; `make sandbox-up` (app on `http://localhost:5173`, the redirect URI's origin), `make seed-sandbox`; connect refused off that origin (409) or unconfigured (503) | `test_intuit_tenant_connects_beside_a_recorded_tenant`, `test_intuit_connect_refused_off_the_redirect_origin_or_unconfigured` |
+| 2 | Token refresh (review m2) | 5 minutes before expiry [assumption] and after a 401; one refresher per connection (row lock, own transaction); refused refresh commits `needs_reconnect`; Intuit errors mapped without the body | `test_refresh_shortly_before_expiry_not_earlier`, `test_a_401_refreshes_once_for_concurrent_callers`, `test_refused_refresh_marks_needs_reconnect_through_the_token_source`, `test_token_endpoint_errors_map_without_carrying_the_body` |
+| 3 | T-1.1.1 capture | `make qbo-capture`: GET only, paged; raw to `backend/var/` (gitignored); sanitised copy with the realm ID, request IDs (`intuit_tid`, `x-request-id`), Intuit user IDs (`LastModifiedByRef`, `V4IDPseudonym`) and e-mail addresses replaced, then a leak gate that refuses to write if the realm, a token, the client ID or secret, a request ID, a user ID or an address remains | `test_sanitise_removes_realm_request_ids_and_emails`, `test_capture_pages_every_entity_with_get_only`, `test_limit_headers_are_kept_and_others_dropped` |
+| 4 | Fact sheet | [docs/qbo-fact-sheet.md](docs/qbo-fact-sheet.md); "unverified" QuickBooks statements in TRD.md, Decision.md and PRD.md replaced where observed | review of the documents |
+| 5 | Live reader | `IntuitQboReader.page()`: filtered query, `orderby Id`, `minorversion=75`; 400 is permanent, 429 and 5xx transient | contract tests over `backend/fixtures/qbo/sandbox/` (`test_contract_recorded_purchase_orders_bills_and_empty_credits`, `test_statements_are_filtered_ordered_and_quoted`, `test_no_vendor_in_scope_asks_nothing_and_a_refusal_raises`) |
+| 6 | Bill-to-PO link as observed (only on the PO header) | PO keeps the bills it names; the sync attributes a bill line by the one open PO line with its item; otherwise the line stays unattributed and matching marks that PO's later lines `history_incomplete` (TRD 8.5). Left out of the input fingerprint while empty, so stored results stay current | `test_unattributed_quickbooks_bill_on_a_po_blocks_a_pass`, `test_fingerprint_unchanged_while_no_bill_is_unattributed`, `test_a_linked_bill_line_with_no_single_po_line_is_left_unattributed`, the sync assertions in item 1 |
+| 7 | Lead's findings after the connect | S-04 showed Company and Permission "None": CompanyInfo is read after the callback and the name stored; Intuit's token answer has no `scope`, so the requested scope is recorded | `test_intuit_tenant_connects_beside_a_recorded_tenant` (company name and scope) |
+| 8 | Tests read the real `.env` | `tests/conftest.py` blanks the three QuickBooks settings, so no test sees the app credentials or reaches Intuit | `test_tests_never_see_the_app_credentials` |
+
+### B11.2 Commands and results (from `matchdesk-ap/`)
+
+| Command | Result |
+|---|---|
+| `make test` (clean `matchdesk_test`, migrations 0001 to 0024) | 405 passed |
+| `make check` | passed |
+| `make web-check` (typecheck, lint, Vitest, build) | passed; Vitest 150 passed |
+| `make web-e2e` (own stack `matchdesk_e2e`) | 16 passed; `matchdesk_dev` unchanged by the run |
+| `make qbo-capture` against the sandbox | 11 reads, all 200 |
+| Real sync through S-04 **Read now** (2026-10-01 to 2026-10-31; `request_sync`, worker `execute_sync`, `IntuitQboReader`) | succeeded: 3 PurchaseOrder, 4 Bill, 18 Item, 26 Vendor, 0 VendorCredit; PO 1004 shown on S-10 in the in-app browser with its two lines and "Received independently" 0 |
+
+### B11.3 Left
+
+- **B11-1 Currency.** The sandbox company is US (USD); the sync does not read `CurrencyRef`, so a company in another currency than the account's would be stored without a check. A Canadian sandbox company (CAD, GST/HST) has not been read; Canadian behaviour is unverified.
+- **B11-2 Purchases against a PO.** PO 1003 is closed by a `Purchase` (an expense), which MatchDesk does not read; whether such a PO's history should count as unknown is a rule decision for the founder.
+- Vendor credits (none in the sandbox), bills made with "Add to bill" (line links), bill numbers, units of measure and SKUs are unverified until the owner adds them (fact sheet section 5).
+- Rate limits and CorePlus usage are unmeasured: no limit header and no 429 on 11 reads.
+- One diagnostic query `select count(*) from ItemReceipt` was sent by hand during B11 (answer 400, no such entity); the product never queries it.
+- Production keys and Intuit's app assessment are outside this milestone.
+

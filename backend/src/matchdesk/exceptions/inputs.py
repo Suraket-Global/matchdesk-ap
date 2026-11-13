@@ -8,7 +8,7 @@ the caller's tenant session, so row-level security bounds everything.
 from __future__ import annotations
 
 import uuid
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
@@ -180,6 +180,7 @@ def build_match_input(
     bill_lines = s.scalars(
         select(QboBillLineRow).where(QboBillLineRow.qbo_bill_id.in_([b.id for b in bill_rows]))
     ).all()
+    loose = unattributed_bills(s, vendor_ids, bill_rows, bill_lines)
     bills = tuple(
         QboBill(
             id=str(b.id),
@@ -194,6 +195,7 @@ def build_match_input(
                 for bl in bill_lines
                 if bl.qbo_bill_id == b.id
             ),
+            unattributed_po_ids=loose.get(b.id, ()),
         )
         for b in bill_rows
     )
@@ -292,3 +294,28 @@ def build_match_input(
         credit_decisions=credit_decisions,
         ruleset_code=ruleset_code,
     )
+
+
+def unattributed_bills(
+    s: Session,
+    vendor_ids: Sequence[uuid.UUID],
+    bill_rows: Sequence[QboBillRow],
+    bill_lines: Sequence[QboBillLineRow],
+) -> dict[uuid.UUID, tuple[str, ...]]:
+    """B11 (T-1.1.1): for each QuickBooks bill that a PO's own LinkedTxn names and that has an item
+    line the sync could not attribute to a single PO line, the ids of the POs naming it."""
+    named_by: dict[str, list[str]] = {}
+    for po_id, bill_qbo_ids in s.execute(
+        select(PurchaseOrderRow.id, PurchaseOrderRow.linked_bill_qbo_ids).where(
+            PurchaseOrderRow.vendor_id.in_(vendor_ids)
+        )
+    ).all():
+        for q in bill_qbo_ids or []:
+            named_by.setdefault(q, []).append(str(po_id))
+    out: dict[uuid.UUID, tuple[str, ...]] = {}
+    for b in bill_rows:
+        if b.txn_type != "bill" or b.qbo_id not in named_by:
+            continue
+        if any(bl.qbo_bill_id == b.id and bl.po_line_id is None and bl.qty is not None for bl in bill_lines):
+            out[b.id] = tuple(sorted(named_by[b.qbo_id]))
+    return out

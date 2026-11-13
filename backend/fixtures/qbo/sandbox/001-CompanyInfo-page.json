@@ -1,0 +1,15 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/v3/company/{realmId}/companyinfo/{realmId}",
+    "query": null
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "date": "Fri, 13 Nov 2026 17:47:36 GMT",
+    "intuit_tid": "REQUEST-ID-REMOVED",
+    "x-request-id": "REQUEST-ID-REMOVED"
+  },
+  "body": {"CompanyInfo":{"CompanyName":"Sandbox Company US 1499","LegalName":"Sandbox Company US 1499","CompanyAddr":{"Id":"1","Line1":"123 Sierra Way","City":"San Pablo","CountrySubDivisionCode":"CA","PostalCode":"87999"},"CustomerCommunicationAddr":{"Id":"1","Line1":"123 Sierra Way","City":"San Pablo","CountrySubDivisionCode":"CA","PostalCode":"87999"},"LegalAddr":{"Id":"1","Line1":"123 Sierra Way","City":"San Pablo","CountrySubDivisionCode":"CA","PostalCode":"87999"},"CustomerCommunicationEmailAddr":{"Address":"removed@example.invalid"},"PrimaryPhone":{},"CompanyStartDate":"2026-11-13","FiscalYearStartMonth":"January","Country":"US","Email":{"Address":"removed@example.invalid"},"WebAddr":{},"SupportedLanguages":"en","DefaultTimeZone":"America/Los_Angeles","NameValue":[{"Name":"NonTracking","Value":"false"},{"Name":"IsQbdtMigrated","Value":"false"},{"Name":"CompanyType","Value":"Other"},{"Name":"SubscriptionStatus","Value":"SUBSCRIBED"},{"Name":"OfferingSku","Value":"QuickBooks Online Plus"},{"Name":"PayrollFeature","Value":"false"},{"Name":"AccountantFeature","Value":"false"},{"Name":"ItemCategoriesFeature","Value":"true"},{"Name":"AssignedTime","Value":"2026-11-13T08:00:03-08:00"}],"domain":"QBO","sparse":false,"Id":"1","SyncToken":"9","MetaData":{"CreateTime":"2026-11-13T08:00:03-08:00","LastUpdatedTime":"2026-11-13T09:34:54-08:00"}},"time":"2026-11-13T09:47:36.401-08:00"}
+}

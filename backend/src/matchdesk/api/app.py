@@ -62,8 +62,10 @@ from matchdesk.intake.models import DocumentRow, InvoiceLineRow, InvoiceRow, Upl
 from matchdesk.qbo import (
     QboNotConfiguredError,
     TokenEndpoint,
+    Transport,
     processing_allowed,
     token_endpoint_for,
+    urllib_get,
 )
 from matchdesk.qbo.models import PurchaseOrderRow
 from matchdesk.tenancy import get_engine, global_session, session
@@ -95,7 +97,11 @@ def _same_origin(request: Request, app_base_url: str) -> bool:
     return origin is None or origin.rstrip("/") == app_base_url.rstrip("/")
 
 
-def create_app(mailer: Mailer | None = None, qbo_token_endpoint: TokenEndpoint | None = None) -> FastAPI:
+def create_app(
+    mailer: Mailer | None = None,
+    qbo_token_endpoint: TokenEndpoint | None = None,
+    qbo_transport: Transport | None = None,
+) -> FastAPI:
     settings = load_settings()
     settings.require_secrets()
     app = FastAPI(title="MatchDesk API", version="0.2.0", docs_url=None, redoc_url=None)
@@ -170,7 +176,7 @@ def create_app(mailer: Mailer | None = None, qbo_token_endpoint: TokenEndpoint |
             qbo_endpoints[mode] = qbo_token_endpoint or token_endpoint_for(settings, mode)
         except QboNotConfiguredError:  # Intuit unconfigured: connect answers 503
             qbo_endpoints[mode] = _Unconfigured()
-    register_qbo_routes(app, settings, engine(), qbo_endpoints)
+    register_qbo_routes(app, settings, engine(), qbo_endpoints, qbo_transport or urllib_get)
     register_receiving_routes(app, engine())
     register_invoice_routes(app, engine())
     register_exception_routes(app, engine())

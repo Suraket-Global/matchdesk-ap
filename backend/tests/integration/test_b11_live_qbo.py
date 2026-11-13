@@ -6,18 +6,20 @@ from __future__ import annotations
 
 import threading
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
+from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 
 from matchdesk.api.app import create_app
 from matchdesk.core import ConflictError, load_settings
 from matchdesk.identity import Membership, Tenant, User, issue_session
 from matchdesk.qbo import (
     FakeIntuitTokenEndpoint,
+    HttpAnswer,
     IntuitQboReader,
     QboNotConfiguredError,
     RecordedQboReader,
@@ -27,8 +29,15 @@ from matchdesk.qbo import (
     request_sync,
     token_source,
 )
-from matchdesk.qbo.models import QboConnection, SyncRun
-from matchdesk.tenancy import PermanentJobError, global_session, session
+from matchdesk.qbo.models import (
+    PoLineRow,
+    PurchaseOrderRow,
+    QboBillLineRow,
+    QboBillRow,
+    QboConnection,
+    SyncRun,
+)
+from matchdesk.tenancy import global_session, session
 
 from .seed import auth_headers
 
@@ -69,9 +78,32 @@ def connect(client: TestClient, endpoint: FakeIntuitTokenEndpoint, token: str, r
     return str(cb.headers["location"])
 
 
+SANDBOX = Path(__file__).resolve().parents[2] / "fixtures" / "qbo" / "sandbox"
+
+
+def recorded(name: str) -> bytes:
+    text = next(SANDBOX.glob(f"*-{name}.json")).read_text()
+    return text[text.index('"body": ') + len('"body": ') : text.rstrip().rindex("}")].strip().encode()
+
+
+class Replay:
+    """Intuit stand-in: answers with the sandbox responses recorded on 2026-11-13 (GET only)."""
+
+    def __init__(self) -> None:
+        self.urls: list[str] = []
+
+    def __call__(self, url: str, headers: dict[str, str], timeout: int) -> HttpAnswer:
+        self.urls.append(url)
+        if "/companyinfo/" in url:
+            return HttpAnswer(200, {}, recorded("CompanyInfo-page"))
+        statement = parse_qs(urlparse(url).query)["query"][0]
+        return HttpAnswer(200, {}, recorded(statement.split(" from ")[1].split(" ")[0] + "-page"))
+
+
 def test_intuit_tenant_connects_beside_a_recorded_tenant(app_engine, configured):  # type: ignore[no-untyped-def]
     endpoint = FakeIntuitTokenEndpoint()
-    client = TestClient(create_app(qbo_token_endpoint=endpoint))
+    replay = Replay()
+    client = TestClient(create_app(qbo_token_endpoint=endpoint, qbo_transport=replay))
     tid, _uid, token = tenant(app_engine, "intuit")
     _rtid, _ruid, rtoken = tenant(app_engine, None)
 
@@ -87,22 +119,46 @@ def test_intuit_tenant_connects_beside_a_recorded_tenant(app_engine, configured)
     live = client.get("/api/v1/qbo/connection", headers=auth_headers(token)).json()
     assert live["status"] == "connected" and live["mode"] == "intuit" and live["source"] == "intuit"
     assert live["intuit_environment"] == "sandbox"
+    # Named from CompanyInfo right after the connect; the granted scope is shown.
+    assert live["company_name"] == "Sandbox Company US 1499"
+    assert live["scopes_granted"] == "com.intuit.quickbooks.accounting"
     demo = client.get("/api/v1/qbo/connection", headers=auth_headers(rtoken)).json()
     assert demo["mode"] == "recorded" and demo["source"] == "demo_data" and demo["intuit_environment"] is None
 
     # The sync reader follows the tenant: Intuit for this one, recorded responses for the other.
     settings = load_settings()
-    reader = reader_for_tenant(app_engine, settings, tid, endpoint)
+    reader = reader_for_tenant(app_engine, settings, tid, endpoint, replay)
     assert isinstance(reader, IntuitQboReader) and reader.api is not None
     assert isinstance(reader_for_tenant(app_engine, settings, _rtid), RecordedQboReader)
-    # Phase A: the live reader is not written yet, so a read fails plainly and copies nothing.
+    # A real sync run over the recorded sandbox answers (request_sync, execute_sync).
     with session(tid, app_engine) as s:
-        run, _ = request_sync(s, tid, _uid, "po_references", references=["1001"])
-    with pytest.raises(PermanentJobError):
-        execute_sync(app_engine, tid, run.id, reader, settings.qbo_page_size)
+        run, _ = request_sync(s, tid, _uid, "date_range", date(2026, 10, 1), date(2026, 10, 31))
+    assert execute_sync(app_engine, tid, run.id, reader, settings.qbo_page_size) == "succeeded"
+    assert all(urlparse(u).scheme == "https" for u in replay.urls)
     with session(tid, app_engine) as s:
+        pos = {p.po_number: p for p in s.scalars(select(PurchaseOrderRow))}
+        assert sorted(pos) == ["1002", "1003", "1004"]
+        assert pos["1004"].linked_bill_qbo_ids == ["126"] and pos["1003"].linked_bill_qbo_ids == []
+        bill = s.scalar(select(QboBillRow).where(QboBillRow.qbo_id == "126"))
+        assert bill is not None and bill.doc_number is None
+        lines = s.scalars(select(QboBillLineRow).where(QboBillLineRow.qbo_bill_id == bill.id)).all()
+        po_lines = {
+            pl.id: pl.qbo_line_id
+            for pl in s.scalars(select(PoLineRow).where(PoLineRow.purchase_order_id == pos["1004"].id))
+        }
+        # Attributed by the one PO line with the same item on the PO that names the bill.
+        assert sorted(po_lines[ln.po_line_id] for ln in lines if ln.po_line_id) == ["1", "2"]
+        assert {ln.linked_po_qbo_id for ln in lines} == {pos["1004"].qbo_id}
+        other = s.scalars(select(QboBillLineRow).where(QboBillLineRow.qbo_bill_id != bill.id)).all()
+        assert all(ln.po_line_id is None for ln in other)
+    # The same read again changes nothing.
+    with session(tid, app_engine) as s:
+        again, _ = request_sync(s, tid, _uid, "date_range", date(2026, 10, 1), date(2026, 10, 31))
+    execute_sync(app_engine, tid, again.id, reader, settings.qbo_page_size)
+    with session(tid, app_engine) as s:
+        assert s.scalar(select(func.count()).select_from(PurchaseOrderRow)) == 3
         done = s.get(SyncRun, run.id)
-        assert done is not None and done.state == "failed" and done.error_code == "QboNotConfiguredError"
+        assert done is not None and done.counts["PurchaseOrder"] == 3 and done.counts["VendorCredit"] == 0
 
 
 def test_intuit_connect_refused_off_the_redirect_origin_or_unconfigured(app_engine, monkeypatch):  # type: ignore[no-untyped-def]
@@ -187,3 +243,62 @@ def test_refused_refresh_marks_needs_reconnect_through_the_token_source(app_engi
         access_token(s, settings, endpoint, tid)  # no token is handed out after that
     with pytest.raises(QboNotConfiguredError):
         IntuitQboReader(settings).page("Vendor", 1, 10, None)  # type: ignore[arg-type]
+
+
+def test_a_linked_bill_line_with_no_single_po_line_is_left_unattributed(app_engine):  # type: ignore[no-untyped-def]
+    """Two lines of the naming PO carry the bill line's item: no guess; the line stays loose and the
+    PO's history is unknown before that bill (inputs carry ``unattributed_po_ids``)."""
+    from matchdesk.exceptions.inputs import unattributed_bills
+    from matchdesk.qbo import FakeQboReader
+
+    endpoint = FakeIntuitTokenEndpoint()
+    tid = _connected(app_engine, endpoint)
+    item = {"value": "11"}
+    rows = {
+        "Vendor": [{"Id": "46", "DisplayName": "Invented Supplier"}],
+        "Item": [{"Id": "11", "Name": "Pump"}],
+        "PurchaseOrder": [
+            {
+                "Id": "900",
+                "DocNumber": "P-900",
+                "TxnDate": "2026-09-01",
+                "VendorRef": {"value": "46"},
+                "LinkedTxn": [{"TxnId": "901", "TxnType": "Bill"}],
+                "Line": [
+                    {
+                        "Id": str(n),
+                        "LineNum": n,
+                        "Amount": 10,
+                        "ItemBasedExpenseLineDetail": {"ItemRef": item, "Qty": 1, "UnitPrice": 10},
+                    }
+                    for n in (1, 2)
+                ],
+            }
+        ],
+        "Bill": [
+            {
+                "Id": "901",
+                "TxnDate": "2026-09-02",
+                "VendorRef": {"value": "46"},
+                "TotalAmt": 10,
+                "Line": [
+                    {
+                        "Id": "1",
+                        "Amount": 10,
+                        "LinkedTxn": [],
+                        "ItemBasedExpenseLineDetail": {"ItemRef": item, "Qty": 1},
+                    }
+                ],
+            }
+        ],
+    }
+    with session(tid, app_engine) as s:
+        run, _ = request_sync(s, tid, None, "po_references", references=["P-900"])
+    execute_sync(app_engine, tid, run.id, FakeQboReader(rows=rows), 100)
+    with session(tid, app_engine) as s:
+        ln = s.scalar(select(QboBillLineRow))
+        po = s.scalar(select(PurchaseOrderRow))
+        assert ln is not None and po is not None and ln.po_line_id is None and ln.linked_po_qbo_id == "900"
+        bills = s.scalars(select(QboBillRow)).all()
+        lines = s.scalars(select(QboBillLineRow)).all()
+        assert unattributed_bills(s, [po.vendor_id], bills, lines) == {bills[0].id: (str(po.id),)}

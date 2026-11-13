@@ -116,15 +116,64 @@ class RecordedQboReader(FakeQboReader):
 
 
 class IntuitQboReader:
-    """The live reader over ``IntuitApi`` (GET only). ``page()`` is written after T-1.1.1 records the
-    real responses; until then it refuses, so nothing is mapped from an assumed shape."""
+    """The live reader over ``IntuitApi`` (GET only), written from the responses T-1.1.1 recorded on
+    2026-11-13 (``backend/fixtures/qbo/sandbox``; docs/qbo-fact-sheet.md).
+
+    One page is one query ``select * from <Entity> [where ...] orderby Id startposition <start>
+    maxresults <size>``. Observed: the filters below are accepted, ``orderby Id`` gives a stable
+    numeric order across pages, an empty result is ``{"QueryResponse": {}}`` with no entity key,
+    and inactive vendors and items are left out unless ``Active in (true, false)`` is asked for.
+    Numbers are parsed as ``Decimal``. Any answer other than 200 raises: 429 and 5xx as
+    ``QboTransientError`` (the sync retries from its cursor), anything else as ``QboReadError``."""
 
     def __init__(self, settings: Settings, api: IntuitApi | None = None) -> None:
         self.settings = settings
         self.api = api
 
     def page(self, entity: str, start: int, size: int, query: PageQuery) -> list[dict[str, Any]]:
-        raise QboNotConfiguredError("live QuickBooks reader not built yet: T-1.1.1 runs first (B11 phase B)")
+        if self.api is None:
+            raise QboNotConfiguredError("QuickBooks is not connected for this account")
+        if entity not in ENTITIES:
+            raise ValueError(f"not an entity MatchDesk reads: {entity}")
+        if entity in ("Bill", "VendorCredit") and query.vendor_ids == ():
+            return []  # no vendor in scope: nothing to ask (an empty "in ()" is not a valid query)
+        statement = build_statement(entity, start, size, query)
+        answer = self.api.query(statement)
+        if not answer.ok:
+            raise QboReadError(f"QuickBooks answered HTTP {answer.status} to a {entity} query")
+        rows = answer.json().get("QueryResponse", {}).get(entity, [])
+        return list(rows)
+
+
+class QboReadError(RuntimeError):
+    """QuickBooks refused a read for a reason a retry will not fix (for example a 400)."""
+
+
+def _quote(value: str) -> str:
+    """A QuickBooks query string literal: single quotes, with backslash and quote escaped
+    (``\\'`` accepted by the sandbox, 2026-11-13)."""
+    return "'" + value.replace("\\", "\\\\").replace("'", "\\'") + "'"
+
+
+def build_statement(entity: str, start: int, size: int, query: PageQuery) -> str:
+    """The query for one page. Purchase orders by number or by date; bills and vendor credits of
+    the synced vendors with no date filter (AD-13); vendors and items active or not."""
+    where: list[str] = []
+    if entity == "PurchaseOrder":
+        if query.references is not None:
+            where.append("DocNumber in (" + ", ".join(_quote(r) for r in query.references) + ")")
+        else:
+            if query.since is not None:
+                where.append(f"TxnDate >= '{query.since.isoformat()}'")
+            if query.until is not None:
+                where.append(f"TxnDate <= '{query.until.isoformat()}'")
+    elif entity in ("Bill", "VendorCredit"):
+        if query.vendor_ids is not None:
+            where.append("VendorRef in (" + ", ".join(_quote(v) for v in query.vendor_ids) + ")")
+    else:
+        where.append("Active in (true, false)")
+    clause = (" where " + " and ".join(where)) if where else ""
+    return f"select * from {entity}{clause} orderby Id startposition {int(start)} maxresults {int(size)}"  # noqa: S608
 
 
 DEFAULT_FIXTURES = Path(__file__).resolve().parents[3] / "fixtures" / "qbo" / "recorded"
