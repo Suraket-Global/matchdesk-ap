@@ -9,6 +9,7 @@ import { Banner, Dialog, Empty, ErrorState, Field, Loading, PageHead, StatusChip
 import { cad } from "../lib/decimal";
 import { day, plural, when } from "../lib/format";
 import { OUTCOME_WORDS, PAYMENT_WORDS } from "./Pilot";
+import { archiveSnapshotText, DeletionStateChip } from "./AccountData";
 
 /** S-18: the operator's console. Accounts, pilot records, billable units and support access; never an
  * account's documents, which open only inside a support grant the account's controller gave. */
@@ -441,7 +442,7 @@ function DeletionRequests() {
     },
   });
   const items = q.data?.items ?? [];
-  const open = items.filter((r) => r.status === "requested" || r.status === "scheduled");
+  const open = items.filter((r) => r.status === "requested" || r.status === "scheduled" || r.status === "deleting");
   if (!items.length) return null;
   return (
     <section className="panel" aria-labelledby="del-h" style={{ marginBottom: 16 }}>
@@ -453,10 +454,17 @@ function DeletionRequests() {
         {items.slice(0, 10).map((r) => (
           <div key={r.id} className="grant-row">
             <div>
-              <StatusChip status={r.status === "scheduled" ? "pending_approval" : r.status === "requested" ? "queued" : "auto_closed"} word={{ requested: "Requested", scheduled: "Scheduled", declined: "Declined", cancelled: "Cancelled", executed: "Deleted" }[r.status]} />{" "}
+              <DeletionStateChip status={r.status} />{" "}
               <strong>{r.tenant_name ?? "Account"}</strong>: asked {when(r.requested_at)}
               {r.reason ? `. Reason: ${r.reason}` : ""}.
               {r.status === "scheduled" && <div className="small muted">Deletes on {day(r.delete_after)} unless the controller cancels.</div>}
+              {r.status === "deleting" && <div className="small">Deleting now (started {when(r.claimed_at)}); it can no longer be cancelled.</div>}
+              {r.archive && (
+                <div className={`small ${r.archive.state === "complete" ? "muted" : "error-text"}`} data-testid="op-archive">
+                  Archive: {archiveSnapshotText(r.archive)}
+                  {r.archive.acknowledged ? "; the controller acknowledged deletion without a complete archive" : ""}.
+                </div>
+              )}
               {r.decision_note && <div className="small muted">Note: {r.decision_note}</div>}
             </div>
             {r.status === "requested" && (

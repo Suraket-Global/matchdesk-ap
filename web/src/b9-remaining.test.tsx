@@ -336,13 +336,13 @@ describe("S-13 finding outcomes (B9)", () => {
 describe("S-16 account data (B9)", () => {
   it("needs the account name typed before a deletion request", async () => {
     handler = (url) => {
-      if (url.includes("/exports/archive")) return { body: { items: [{ id: "a1", status: "ready", requested_at: "2026-11-13T10:00:00Z", finished_at: "2026-11-13T10:01:00Z", expires_at: "2026-11-14T10:01:00Z", file_count: 14, byte_size: 2_400_000, downloadable: true }] } };
-      if (url.includes("/account/deletion-request")) return { body: { request: null, notice_days: 30 } };
+      if (url.includes("/exports/archive")) return { body: { items: [{ id: "a1", status: "ready", requested_at: "2026-11-13T10:00:00Z", finished_at: "2026-11-13T10:01:00Z", expires_at: "2026-11-14T10:01:00Z", file_count: 14, byte_size: 2_400_000, downloadable: true, complete: true, expected_count: 14, included_count: 14, missing_count: 0 }] } };
+      if (url.includes("/account/deletion-request")) return { body: { request: null, notice_days: 30, archive: { state: "complete", included: 14, expected: 14, checked_at: "2026-11-13T10:01:00Z" } } };
       return { status: 201, body: {} };
     };
     wrap(<AccountDataPanel />);
     expect(await screen.findByRole("button", { name: "Download the archive" })).toBeInTheDocument();
-    expect(screen.getByText(/14 original files, 2.4 MB/)).toBeInTheDocument();
+    expect(screen.getByText(/Complete: 14\/14 originals, 2.4 MB/)).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Request deletion" }));
     const confirm = screen.getAllByRole("button", { name: "Request deletion" }).at(-1)!;
     expect(confirm).toBeDisabled();

@@ -810,7 +810,11 @@ def test_account_deletion_request_operator_schedule_cancel_and_execute(app_engin
         keys = list(s.scalars(text("select blob_key from documents")).all())
     assert keys
     # Controller only, with the account name typed.
-    body = {"reason": "Pilot ended (synthetic)", "confirm_name": "Fictional Distributor B9-Z1"}
+    body = {
+        "reason": "Pilot ended (synthetic)",
+        "confirm_name": "Fictional Distributor B9-Z1",
+        "acknowledge_incomplete_archive": True,  # B10: no archive was prepared in this test
+    }
     assert client.post("/api/v1/account/deletion-requests", json=body, headers=w.headers).status_code == 403
     wrong = client.post("/api/v1/account/deletion-requests", json={**body, "confirm_name": "x"}, headers=ctrl)
     assert wrong.status_code == 422

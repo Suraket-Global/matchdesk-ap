@@ -601,20 +601,34 @@ export interface Outcomes {
 
 export interface ArchiveExport {
   id: string;
-  status: "queued" | "running" | "ready" | "failed" | "expired";
+  status: "queued" | "running" | "ready" | "incomplete" | "failed" | "expired";
   requested_at: string;
   finished_at: string | null;
   expires_at: string | null;
   file_count: number | null;
   byte_size: number | null;
   downloadable: boolean;
+  /** B10: every original read into the ZIP (expected = included, nothing missing). */
+  complete: boolean;
+  expected_count: number | null;
+  included_count: number | null;
+  missing_count: number | null;
+}
+
+/** B10: the latest verified archive as the deletion dialog and the operator's row show it. */
+export interface ArchiveSnapshot {
+  state: "none" | "complete" | "incomplete" | "failed" | "expired";
+  included: number | null;
+  expected: number | null;
+  checked_at: string | null;
+  acknowledged?: boolean;
 }
 
 export interface DeletionRequest {
   id: string;
   tenant_id: string;
   tenant_name?: string | null;
-  status: "requested" | "scheduled" | "declined" | "cancelled" | "executed";
+  status: "requested" | "scheduled" | "deleting" | "declined" | "cancelled" | "executed";
   reason: string | null;
   requested_by: string;
   requested_by_name?: string | null;
@@ -622,6 +636,10 @@ export interface DeletionRequest {
   decided_at: string | null;
   decision_note: string | null;
   delete_after: string | null;
+  claimed_at?: string | null;
+  cancelled_at?: string | null;
+  cancellable?: boolean;
+  archive?: ArchiveSnapshot;
   version: number;
 }
 

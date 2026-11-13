@@ -25,7 +25,7 @@ import zipfile
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import Engine, select, text
+from sqlalchemy import Engine, and_, or_, select, text, update
 from sqlalchemy.orm import Session
 
 from matchdesk import blobstore
@@ -247,7 +247,11 @@ TABLES: dict[str, tuple[type, list[str]]] = {
 def build_archive(
     s: Session, tenant_id: uuid.UUID, export_id: uuid.UUID, now: datetime | None = None
 ) -> ArchiveExport:
-    """Write the ZIP for one queued export (worker; inside the tenant session)."""
+    """Write the ZIP for one queued export (worker; inside the tenant session).
+
+    B10: every original the account holds is expected. One that cannot be read is listed in
+    ``documents.csv`` as missing and counted; the archive is then ``incomplete``, never ``ready``,
+    and ``retry_archive`` builds it again. A rebuilt archive replaces the earlier ZIP."""
     row = s.get(ArchiveExport, export_id)
     if row is None or row.status not in ("queued", "running"):
         raise ConflictError("this archive is not waiting to be built")
@@ -255,7 +259,9 @@ def build_archive(
     row.status = "running"
     s.flush()
     buf = io.BytesIO()
+    expected = 0
     files = 0
+    missing: list[str] = []
     with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as z:
         index: list[dict[str, Any]] = []
         for doc in s.scalars(
@@ -263,12 +269,15 @@ def build_archive(
             .where(DocumentRow.purpose.in_(ORIGINAL_PURPOSES), DocumentRow.deleted_at.is_(None))
             .order_by(DocumentRow.created_at, DocumentRow.id)
         ):
+            expected += 1
             ext = "xlsx" if doc.mime_type == XLSX else EXT.get(doc.mime_type, "bin")
             path = f"documents/{doc.id}.{ext}"
             try:
                 z.writestr(path, blobstore.get(tenant_id, doc.blob_key))
                 files += 1
-            except Exception:  # a missing file is listed, not silently dropped
+            except Exception:  # a missing file is listed and counted, never silently dropped
+                log.warning("archive_original_unreadable", extra={"document_id": str(doc.id)})
+                missing.append(str(doc.id))
                 path = ""
             index.append(
                 {
@@ -302,10 +311,17 @@ def build_archive(
             found: list[Any] = list(s.scalars(select(model)).all())
             rows = [_plain(r, cols) for r in found]
             z.writestr(name, _csv(rows, cols))
+        completeness = (
+            f"Complete: {files} of {expected} original files are included.\n"
+            if not missing
+            else f"INCOMPLETE: {files} of {expected} original files are included; {len(missing)} could not be "
+            "read and are marked missing in documents.csv. Retry the missing files on the Account data screen.\n"
+        )
         z.writestr(
             "README.txt",
             "MatchDesk archive of one account. documents.csv indexes the original files under documents/; "
-            "each other CSV holds one kind of record. Amounts are exact decimals; dates are ISO 8601.\n",
+            "each other CSV holds one kind of record. Amounts are exact decimals; dates are ISO 8601.\n"
+            + completeness,
         )
     data = buf.getvalue()
     doc_id = uuid.uuid4()
@@ -326,20 +342,90 @@ def build_archive(
     )
     s.add(doc)
     s.flush()
-    row.status, row.document_id = "ready", doc.id
+    earlier = s.get(DocumentRow, row.document_id) if row.document_id else None
+    if earlier is not None and earlier.deleted_at is None:  # a retry replaces the earlier ZIP
+        blobstore.delete(tenant_id, earlier.blob_key)
+        earlier.deleted_at = at
+    row.status, row.document_id = ("incomplete" if missing else "ready"), doc.id
     row.file_count, row.byte_size = files, len(data)
+    row.expected_count, row.included_count, row.missing_count = expected, files, len(missing)
+    row.missing_document_ids = missing
     row.finished_at, row.expires_at = at, at + ARCHIVE_LIFETIME
     s.flush()
     write_audit(
         s,
         tenant_id,
         actor_type="job",
-        action="archive.ready",
+        action="archive.incomplete" if missing else "archive.ready",
         entity_type="archive_export",
         entity_id=row.id,
-        after={"files": files, "bytes": len(data)},
+        after={"files": files, "expected": expected, "missing": len(missing), "bytes": len(data)},
+    )
+    open_req = open_deletion(s)
+    if open_req is not None:  # the operator's row shows the latest verified archive
+        _snapshot_archive(open_req, row, at)
+        s.flush()
+    return row
+
+
+def retry_archive(s: Session, row: ArchiveExport, user_id: uuid.UUID) -> ArchiveExport:
+    """Build an incomplete archive again, reading the missing originals once more (controller)."""
+    if row.status != "incomplete":
+        raise ConflictError("only an incomplete archive can be retried")
+    row.status = "queued"
+    s.flush()
+    enqueue(
+        s,
+        ARCHIVE_TASK,
+        row.tenant_id,
+        {"export_id": str(row.id)},
+        get_correlation_id() or new_correlation_id(),
+    )
+    write_audit(
+        s,
+        row.tenant_id,
+        actor_type="user",
+        actor_user_id=user_id,
+        action="archive.retry_requested",
+        entity_type="archive_export",
+        entity_id=row.id,
+        before={"missing": row.missing_count},
     )
     return row
+
+
+def archive_state(row: ArchiveExport | None) -> str:
+    """The verified state of an archive as the deletion screens show it."""
+    if row is None or (row.status in ("queued", "running") and row.finished_at is None):
+        return "none"
+    if row.status == "failed":
+        return "failed"
+    return "incomplete" if (row.missing_count or 0) > 0 else "complete"
+
+
+def latest_finished_archive(s: Session) -> ArchiveExport | None:
+    return s.scalar(
+        select(ArchiveExport)
+        .where(ArchiveExport.status.in_(("ready", "incomplete", "failed", "expired")))
+        .order_by(ArchiveExport.finished_at.desc().nulls_last(), ArchiveExport.created_at.desc())
+        .limit(1)
+    )
+
+
+def describe_archive_state(row: ArchiveExport | None) -> dict[str, Any]:
+    return {
+        "state": archive_state(row),
+        "included": row.included_count if row is not None else None,
+        "expected": row.expected_count if row is not None else None,
+        "checked_at": row.finished_at.isoformat() if row is not None and row.finished_at else None,
+    }
+
+
+def _snapshot_archive(req: DeletionRequest, row: ArchiveExport | None, at: datetime) -> None:
+    req.archive_state = archive_state(row)
+    req.archive_included = row.included_count if row is not None else None
+    req.archive_expected = row.expected_count if row is not None else None
+    req.archive_checked_at = (row.finished_at if row is not None else None) or at
 
 
 def make_archive_handler() -> Any:
@@ -356,7 +442,9 @@ def expire_archives(engine: Engine, now: datetime | None = None) -> int:
     for tid in _tenant_ids(engine):
         with session(tid, engine) as s:
             for row in s.scalars(
-                select(ArchiveExport).where(ArchiveExport.status == "ready", ArchiveExport.expires_at < at)
+                select(ArchiveExport).where(
+                    ArchiveExport.status.in_(("ready", "incomplete")), ArchiveExport.expires_at < at
+                )
             ):
                 doc = s.get(DocumentRow, row.document_id) if row.document_id else None
                 if doc is not None and doc.deleted_at is None:
@@ -369,10 +457,15 @@ def expire_archives(engine: Engine, now: datetime | None = None) -> int:
 
 def describe_archive(row: ArchiveExport, now: datetime | None = None) -> dict[str, Any]:
     at = now or datetime.now(UTC)
-    ready = row.status == "ready" and row.expires_at is not None and row.expires_at > at
+    built = row.status in ("ready", "incomplete")
+    ready = built and row.expires_at is not None and row.expires_at > at
     return {
         "id": str(row.id),
-        "status": row.status if row.status != "ready" or ready else "expired",
+        "status": row.status if not built or ready else "expired",
+        "complete": built and (row.missing_count or 0) == 0,
+        "expected_count": row.expected_count,
+        "included_count": row.included_count,
+        "missing_count": row.missing_count,
         "requested_at": row.created_at.isoformat(),
         "finished_at": row.finished_at.isoformat() if row.finished_at else None,
         "expires_at": row.expires_at.isoformat() if row.expires_at else None,
@@ -385,19 +478,55 @@ def describe_archive(row: ArchiveExport, now: datetime | None = None) -> dict[st
 # ------------------------------------------------------------------------------ account deletion
 
 
+OPEN_DELETION = ("requested", "scheduled", "deleting")
+CANCELLABLE = ("requested", "scheduled")
+RESUME_AFTER = timedelta(minutes=15)  # a claim older than this is taken over by the next run [assumption]
+
+
+class ArchiveNotComplete(ConflictError):
+    """Deletion asked without a complete archive and without the controller's acknowledgement."""
+
+
 def open_deletion(s: Session) -> DeletionRequest | None:
-    return s.scalar(select(DeletionRequest).where(DeletionRequest.status.in_(("requested", "scheduled"))))
+    return s.scalar(select(DeletionRequest).where(DeletionRequest.status.in_(OPEN_DELETION)))
 
 
 def request_deletion(
-    s: Session, tenant_id: uuid.UUID, user_id: uuid.UUID, reason: str | None
+    s: Session,
+    tenant_id: uuid.UUID,
+    user_id: uuid.UUID,
+    reason: str | None,
+    acknowledge_incomplete_archive: bool = False,
 ) -> DeletionRequest:
+    """Record the controller's request. Decision (B10, outside QA item 1): deletion may proceed
+    without a complete archive, but only when the controller explicitly acknowledges it; the
+    acknowledgement and the archive state at that moment are stored and shown to the operator."""
     found = open_deletion(s)
     if found is not None:
         raise ConflictError("a deletion request for this account is already open")
+    latest = latest_finished_archive(s)
+    state = archive_state(latest)
+    if state != "complete" and not acknowledge_incomplete_archive:
+        words = {
+            "none": "No archive of this account has been prepared",
+            "failed": "The last archive could not be built",
+            "incomplete": (
+                f"The latest archive is incomplete ({latest.included_count} of {latest.expected_count} originals)"
+                if latest is not None
+                else "The latest archive is incomplete"
+            ),
+        }[state]
+        raise ArchiveNotComplete(
+            f"{words}. Prepare a complete archive first, or acknowledge that the account is deleted without one."
+        )
     row = DeletionRequest(
-        tenant_id=tenant_id, scope="account", reason=(reason or "").strip() or None, requested_by=user_id
+        tenant_id=tenant_id,
+        scope="account",
+        reason=(reason or "").strip() or None,
+        requested_by=user_id,
+        archive_acknowledged=state != "complete",
     )
+    _snapshot_archive(row, latest, datetime.now(UTC))
     s.add(row)
     s.flush()
     write_audit(
@@ -408,7 +537,12 @@ def request_deletion(
         action="deletion.requested",
         entity_type="deletion_request",
         entity_id=row.id,
-        after={"scope": "account", "reason": row.reason},
+        after={
+            "scope": "account",
+            "reason": row.reason,
+            "archive": state,
+            "archive_acknowledged": row.archive_acknowledged,
+        },
     )
     return row
 
@@ -416,14 +550,35 @@ def request_deletion(
 def cancel_deletion(
     s: Session, row: DeletionRequest, user_id: uuid.UUID, expected_version: int
 ) -> DeletionRequest:
+    """Cancel while the files are still protected. B10 (outside QA item 2): one conditional UPDATE,
+    so a cancellation read before the worker's claim cannot win after it: once the worker has
+    claimed the deletion (``deleting``) the update matches no row and the request is refused."""
     if row.version != expected_version:
         raise ConflictError("stale version")
-    if row.status not in ("requested", "scheduled"):
-        raise ConflictError(f"a deletion request in status {row.status} cannot be cancelled")
     before = row.status
-    row.status, row.cancelled_by, row.cancelled_at = "cancelled", user_id, datetime.now(UTC)
-    row.version += 1
-    s.flush()
+    at = datetime.now(UTC)
+    changed = s.execute(
+        update(DeletionRequest)
+        .where(
+            DeletionRequest.id == row.id,
+            DeletionRequest.version == expected_version,
+            DeletionRequest.status.in_(CANCELLABLE),
+        )
+        .values(
+            status="cancelled", cancelled_by=user_id, cancelled_at=at, version=DeletionRequest.version + 1
+        )
+        .returning(DeletionRequest.id)
+        .execution_options(synchronize_session=False)
+    ).first()
+    s.refresh(row)
+    if changed is None:
+        if row.status == "deleting":
+            raise ConflictError(
+                "the deletion is already running: files are being removed, so it can no longer be cancelled"
+            )
+        if row.status in CANCELLABLE:
+            raise ConflictError("stale version")
+        raise ConflictError(f"a deletion request in status {row.status} cannot be cancelled")
     write_audit(
         s,
         row.tenant_id,
@@ -486,6 +641,16 @@ def describe_deletion(
         "decided_at": row.decided_at.isoformat() if row.decided_at else None,
         "decision_note": row.decision_note,
         "delete_after": row.delete_after.isoformat() if row.delete_after else None,
+        "claimed_at": row.claimed_at.isoformat() if row.claimed_at else None,
+        "cancelled_at": row.cancelled_at.isoformat() if row.cancelled_at else None,
+        "cancellable": row.status in CANCELLABLE,
+        "archive": {
+            "state": row.archive_state or "none",
+            "included": row.archive_included,
+            "expected": row.archive_expected,
+            "checked_at": row.archive_checked_at.isoformat() if row.archive_checked_at else None,
+            "acknowledged": row.archive_acknowledged,
+        },
         "version": row.version,
     }
 
@@ -500,20 +665,49 @@ def _tenant_ids(engine: Engine) -> list[uuid.UUID]:
         return [r[0] for r in g.execute(text("select id from tenants order by id")).all()]
 
 
-def execute_due_deletions(engine: Engine) -> list[uuid.UUID]:
-    """Delete every account whose scheduled deletion is due (worker schedule). Files first through
-    ``blobstore`` (each delete is idempotent, so a retry resumes), then ``purge_tenant`` removes the
-    rows in one transaction and writes the ledger."""
+def claim_due_deletions(engine: Engine, now: datetime | None = None) -> list[uuid.UUID]:
+    """Claim every due deletion (status ``deleting``) with one conditional UPDATE per account, inside
+    that account's session and committed before any file is removed. The operator session only
+    finds the candidates. A claim left by a worker that stopped is taken over after ``RESUME_AFTER``."""
+    at = now or datetime.now(UTC)
+    due = or_(
+        and_(DeletionRequest.status == "scheduled", DeletionRequest.delete_after <= at),
+        and_(DeletionRequest.status == "deleting", DeletionRequest.claimed_at < at - RESUME_AFTER),
+    )
     with operator_session(engine) as s:
-        due = list(
-            s.scalars(
-                select(DeletionRequest.tenant_id).where(
-                    DeletionRequest.status == "scheduled", DeletionRequest.delete_after <= datetime.now(UTC)
-                )
-            ).all()
-        )
+        candidates = list(s.scalars(select(DeletionRequest.tenant_id).where(due)).all())
+    claimed: list[uuid.UUID] = []
+    for tid in candidates:
+        with session(tid, engine) as s:
+            got = s.execute(
+                update(DeletionRequest)
+                .where(due)
+                .values(status="deleting", claimed_at=at, version=DeletionRequest.version + 1)
+                .returning(DeletionRequest.id)
+                .execution_options(synchronize_session=False)
+            ).first()
+            if got is None:  # cancelled (or claimed by another worker) since the candidates were read
+                continue
+            write_audit(
+                s,
+                tid,
+                actor_type="job",
+                action="deletion.started",
+                entity_type="deletion_request",
+                entity_id=got[0],
+                after={"status": "deleting"},
+            )
+        claimed.append(tid)
+    return claimed
+
+
+def execute_due_deletions(engine: Engine) -> list[uuid.UUID]:
+    """Delete every account whose scheduled deletion is due (worker schedule). The deletion is
+    claimed first (``claim_due_deletions``), so a cancellation after this point is refused; then the
+    files through ``blobstore`` (each delete is idempotent, so a retry resumes), then
+    ``purge_tenant`` removes the rows in one transaction and writes the ledger."""
     done: list[uuid.UUID] = []
-    for tid in due:
+    for tid in claim_due_deletions(engine):
         with session(tid, engine) as s:
             keys = list(s.scalars(select(DocumentRow.blob_key)).all())
         for key in keys:

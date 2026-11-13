@@ -73,6 +73,8 @@ class DeletionBody(BaseModel):
     reason: str | None = Field(default=None, max_length=2000)
     # The controller types the account name: the request is not made by a stray click.
     confirm_name: str = Field(min_length=1, max_length=200)
+    # B10: required when no complete archive exists (the controller deletes without one knowingly).
+    acknowledge_incomplete_archive: bool = False
 
 
 class DeletionDecision(BaseModel):
@@ -329,6 +331,15 @@ def register_b9_routes(app: FastAPI, engine: Engine) -> None:
         with session(p.tenant_id, engine) as s:
             return reporting.describe_archive(reporting.request_archive(s, p.tenant_id, p.user_id))
 
+    @app.post("/api/v1/exports/archive/{export_id}/retry", status_code=202)
+    def post_archive_retry(export_id: uuid.UUID, p: Auth) -> dict[str, Any]:
+        require(p, "request_deletion_or_archive")
+        with session(p.tenant_id, engine) as s:
+            row = s.get(ArchiveExport, export_id)
+            if row is None:
+                raise NotFoundError("archive")
+            return reporting.describe_archive(reporting.retry_archive(s, row, p.user_id))
+
     @app.get("/api/v1/exports/archive/{export_id}/content")
     def get_archive_content(export_id: uuid.UUID, p: Auth) -> Response:
         require(p, "request_deletion_or_archive")
@@ -371,7 +382,11 @@ def register_b9_routes(app: FastAPI, engine: Engine) -> None:
         require(p, "request_deletion_or_archive")
         with session(p.tenant_id, engine) as s:
             latest = s.scalar(select(DeletionRequest).order_by(DeletionRequest.created_at.desc()).limit(1))
-            return {"request": _deletion_body(s, latest), "notice_days": reporting.DELETION_NOTICE.days}
+            return {
+                "request": _deletion_body(s, latest),
+                "notice_days": reporting.DELETION_NOTICE.days,
+                "archive": reporting.describe_archive_state(reporting.latest_finished_archive(s)),
+            }
 
     @app.post("/api/v1/account/deletion-requests", status_code=201)
     def post_deletion(body: DeletionBody, p: Auth) -> dict[str, Any]:
@@ -382,7 +397,9 @@ def register_b9_routes(app: FastAPI, engine: Engine) -> None:
         if body.confirm_name.strip().casefold() != name.strip().casefold():
             raise HTTPException(422, "type the account name exactly to request its deletion")
         with session(p.tenant_id, engine) as s:
-            row = reporting.request_deletion(s, p.tenant_id, p.user_id, body.reason)
+            row = reporting.request_deletion(
+                s, p.tenant_id, p.user_id, body.reason, body.acknowledge_incomplete_archive
+            )
             return {"request": _deletion_body(s, row)}
 
     @app.post("/api/v1/account/deletion-requests/{request_id}/cancel")

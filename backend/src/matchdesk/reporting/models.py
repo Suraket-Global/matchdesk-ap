@@ -187,7 +187,8 @@ class FindingOutcomeRow(TenantMixin, Base):
     note: Mapped[str | None] = mapped_column(Text)
 
 
-DELETION_STATES = ("requested", "scheduled", "declined", "cancelled", "executed")
+DELETION_STATES = ("requested", "scheduled", "deleting", "declined", "cancelled", "executed")
+ARCHIVE_SNAPSHOT_STATES = ("none", "complete", "incomplete", "failed", "expired")
 
 
 class DeletionRequest(TenantMixin, Base):
@@ -203,6 +204,14 @@ class DeletionRequest(TenantMixin, Base):
         CheckConstraint(
             "status <> 'scheduled' or (delete_after is not null and decided_by is not null)",
             name="scheduled_has_date",
+        ),
+        CheckConstraint(
+            "status <> 'deleting' or (claimed_at is not null and delete_after is not null)",
+            name="deleting_claimed",
+        ),
+        CheckConstraint(
+            "archive_state is null or " + enum_check("archive_state", ARCHIVE_SNAPSHOT_STATES),
+            name="archive_state",
         ),
         Index(
             "uq_deletion_requests_open",
@@ -222,9 +231,17 @@ class DeletionRequest(TenantMixin, Base):
     cancelled_by: Mapped[uuid.UUID | None] = mapped_column(UUIDT, ForeignKey("users.id"))
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+    # B10: the worker claims the deletion (status ``deleting``) before it removes the first file.
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # B10: the latest verified archive when the request was made or an archive finished since.
+    archive_state: Mapped[str | None] = mapped_column(Text)
+    archive_included: Mapped[int | None] = mapped_column(Integer)
+    archive_expected: Mapped[int | None] = mapped_column(Integer)
+    archive_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    archive_acknowledged: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
 
 
-ARCHIVE_STATES = ("queued", "running", "ready", "failed", "expired")
+ARCHIVE_STATES = ("queued", "running", "ready", "incomplete", "failed", "expired")
 
 
 class ArchiveExport(TenantMixin, Base):
@@ -239,6 +256,11 @@ class ArchiveExport(TenantMixin, Base):
         CheckConstraint(
             "status <> 'ready' or (document_id is not null and expires_at is not null)", name="ready_has_file"
         ),
+        CheckConstraint("status <> 'ready' or coalesce(missing_count, 0) = 0", name="ready_complete"),
+        CheckConstraint(
+            "status <> 'incomplete' or (document_id is not null and expires_at is not null and missing_count > 0)",
+            name="incomplete_has_file",
+        ),
     )
     requested_by: Mapped[uuid.UUID] = mapped_column(UUIDT, ForeignKey("users.id"), nullable=False)
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default="queued")
@@ -248,6 +270,11 @@ class ArchiveExport(TenantMixin, Base):
     error: Mapped[str | None] = mapped_column(Text)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # B10: originals expected, written into the ZIP, and not readable (listed as missing).
+    expected_count: Mapped[int | None] = mapped_column(Integer)
+    included_count: Mapped[int | None] = mapped_column(Integer)
+    missing_count: Mapped[int | None] = mapped_column(Integer)
+    missing_document_ids: Mapped[list[str] | None] = mapped_column(JSONB)
 
 
 class DeletionLedger(GlobalMixin, Base):
