@@ -24,7 +24,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from matchdesk.audit import write_audit
-from matchdesk.core import ZERO, ConflictError, dec, round_cents, text_pdf
+from matchdesk.core import ZERO, ConflictError, dec, round_cents, round_half_up, text_pdf
 from matchdesk.exceptions import stale_runs
 from matchdesk.exceptions.models import Approval, ExceptionRow, LineMatch
 from matchdesk.identity import User
@@ -64,7 +64,7 @@ def section_of(e: ExceptionRow) -> str | None:
 def _pct(part: int, whole: int) -> Decimal | None:
     if whole == 0:
         return None
-    return (Decimal(part) * 100 / Decimal(whole)).quantize(Decimal("0.01"))
+    return round_half_up(Decimal(part) * 100 / Decimal(whole), Decimal("0.01"))
 
 
 def _paid_map(s: Session, invoices: list[InvoiceRow]) -> dict[uuid.UUID, str]:

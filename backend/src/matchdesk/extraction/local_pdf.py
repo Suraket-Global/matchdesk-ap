@@ -17,6 +17,7 @@ from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+from matchdesk.core import parse_typed_decimal
 from matchdesk.extraction.provider import Extracted, ExtractionPermanentError
 
 MAX_PAGES = 60  # TRD 8.7
@@ -71,9 +72,9 @@ _TYPE_LABELS: tuple[tuple[str, re.Pattern[str]], ...] = (
 
 
 def _money(text: str) -> Decimal | None:
-    try:
-        return Decimal(text.replace(",", ""))
-    except InvalidOperation:
+    try:  # B10: an ambiguous "1,5" is not read (the field goes to review), never read as 15
+        return Decimal(parse_typed_decimal(text, places=6, whole=12) or "x")
+    except (InvalidOperation, ValueError):
         return None
 
 

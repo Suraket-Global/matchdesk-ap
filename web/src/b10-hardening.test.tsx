@@ -7,6 +7,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { setLastInput } from "./api/client";
 import { SessionProvider } from "./app/session";
 import { AccountDataPanel } from "./routes/AccountData";
+import { ReviewPage } from "./routes/Review";
+import { fireEvent } from "@testing-library/react";
 
 vi.mock("./components/PdfViewer", () => ({ default: () => <div>pdf</div> }));
 
@@ -149,5 +151,70 @@ describe("item 2: Scheduled, Deleting and Cancelled are distinct", () => {
     };
     wrap(<AccountDataPanel />);
     expect(await screen.findByText(/was cancelled on .*nothing was deleted/)).toBeInTheDocument();
+  });
+});
+
+const reviewDoc = () => ({
+  id: "inv1",
+  document_id: "doc1",
+  vendor_id: "v1",
+  vendor_name: "Fictional Fasteners Ltd",
+  total: "1000.00",
+  verification_status: "failed",
+  qbo_bill: null,
+  stale: false,
+  doc_type: "invoice",
+  doc_number: "FF-B10",
+  doc_date: "2026-10-06",
+  version: 4,
+  lines: [],
+  exceptions: [],
+  review: {
+    document_id: "doc1",
+    document_state: "needs_review",
+    verification_status: "failed",
+    verification: {},
+    fields: { doc_type: "invoice", vendor_id: "v1", doc_number: "FF-B10", doc_date: "2026-10-06", total: "1000.00", tax_total: "0.00", currency: "CAD" },
+    vendor_name_read: "Fictional Fasteners Ltd",
+    purchase_order_id: null,
+    field_sources: {},
+    review_draft: null,
+    confirmed_by: null,
+    confirmed_at: null,
+    line_fields: [{ line_no: 1, id: "l1", supplier_item_code: "W-1", description: "Widget", qty: "100", uom: "EA", unit_price: "10", amount: "1000.00", line_kind: "item", page_no: null, field_sources: {} }],
+    removed_lines: [],
+    next_line_no: 2,
+    version: 7,
+  },
+});
+
+describe("item 3: pasting numbers on S-07 never breaks the page", () => {
+  it("accepts a pasted 1,000, shows an inline reason for 1.000,5, and sends plain decimals", async () => {
+    handler = (url, init) => {
+      if (url.includes("/extraction") && init?.method === "PATCH") return { body: { ...reviewDoc().review, version: 8 } };
+      if (url.includes("/confirm-extraction")) return { body: { id: "inv1", verification_status: "human_confirmed", version: 9 } };
+      if (url.includes("/api/v1/invoices/inv1")) return { body: reviewDoc() };
+      if (url.includes("/vendors")) return { body: { items: [{ id: "v1", name: "Fictional Fasteners Ltd" }] } };
+      return { body: { items: [] } };
+    };
+    wrap(<ReviewPage />, "/invoices/inv1/review", "/invoices/:invoiceId/review", "clerk");
+    const qtyField = await screen.findByLabelText("Line 1 Qty");
+    // A paste replaces the value in one event, as the browser does.
+    fireEvent.change(qtyField, { target: { value: "1,000" } });
+    fireEvent.change(screen.getByLabelText("Line 1 Unit price"), { target: { value: "1" } });
+    expect(screen.getByLabelText("Line 1 Qty")).toHaveValue("1,000"); // the field stays, as typed
+    expect(screen.queryByText("This page could not be shown.", { exact: false })).toBeNull();
+    expect(screen.getByText("All arithmetic checks pass.")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Line 1 Qty"), { target: { value: "1.000,5" } });
+    expect(screen.getByLabelText("Line 1 Qty")).toHaveAttribute("aria-invalid", "true");
+    expect(document.getElementById("l-1-qty-err")).toHaveTextContent("Use a dot for decimals: write 1000.50, not 1.000,50.");
+    await userEvent.click(screen.getByRole("button", { name: "Confirm and match" }));
+    expect(await screen.findByText("Fill in what is missing above before confirming.")).toBeInTheDocument();
+    expect(sent.some((x) => x.url.includes("/confirm-extraction"))).toBe(false);
+    fireEvent.change(screen.getByLabelText("Line 1 Qty"), { target: { value: "1,000" } });
+    await userEvent.click(screen.getByRole("button", { name: "Confirm and match" }));
+    await waitFor(() => expect(sent.some((x) => x.url.includes("/confirm-extraction"))).toBe(true));
+    const patch = sent.find((x) => x.method === "PATCH")!.body as { lines: { qty: string; unit_price: string }[] };
+    expect(patch.lines[0]).toMatchObject({ qty: "1000", unit_price: "1" });
   });
 });

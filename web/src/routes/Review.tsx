@@ -4,8 +4,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, errorText, get, send } from "../api/client";
 import type { FieldSource, InvoiceDetail, InvoiceSummary, Page, Review, Vendor } from "../api/types";
 import { Banner, Dialog, ErrorState, Loading, PageHead, StatusChip, toast, usePageTitle } from "../components/ui";
-import { failedChecks, type LineValues } from "../lib/checks";
-import { formatCents, sumCents, toCents } from "../lib/decimal";
+import { failedChecks, FIELD_RULES, type LineValues } from "../lib/checks";
+import { formatCents, numberError, plainNumber, sumCents, toCents } from "../lib/decimal";
 import { qty } from "../lib/decimal";
 import { time, when } from "../lib/format";
 
@@ -70,9 +70,9 @@ function Provenance({ src, changed, value, onHistory }: { src?: FieldSource; cha
 /** B8: the printed total, the calculated total, the value in the field and the result, side by side,
  * so the clerk sees what a correction changes before confirming (FF-1006). */
 function TotalCheck({ printed, edited, tax, lines }: { printed: string; edited: string; tax: string; lines: string[] }) {
-  const calc = sumCents(lines) + (toCents(tax || "0") ?? 0n);
-  const field = toCents(edited || "");
-  const read = toCents(printed || "");
+  const calc = sumCents(lines.map((l) => plainNumber(l))) + (toCents(plainNumber(tax) || "0") ?? 0n);
+  const field = toCents(plainNumber(edited));
+  const read = toCents(plainNumber(printed));
   const agrees = field !== null && field === calc;
   const changed = field !== null && read !== null && field !== read;
   return (
@@ -165,16 +165,26 @@ export function ReviewPage() {
     [header, lines],
   );
 
+  // Number fields are sent as plain decimals ("1,000" -> "1000"); one that cannot be read is sent
+  // as typed only in a draft, and confirmation is blocked until it is fixed (B10, item 3).
   const payload = useCallback(
-    (draft: boolean) => ({
-      draft,
-      fields: Object.fromEntries(HEADER_FIELDS.map((f) => [f.key, header[f.key] === "" ? null : header[f.key]])),
-      lines: lines.map((l) => ({
-        line_no: l.line_no,
-        ...Object.fromEntries(LINE_FIELDS.map((k) => [k, l[k] === "" ? null : l[k]])),
-        line_kind: l.line_kind,
-      })),
-    }),
+    (draft: boolean) => {
+      const plain = (k: string, v: string) => {
+        if (v === "") return null;
+        const rules = FIELD_RULES[k];
+        if (!rules) return v;
+        return plainNumber(v, rules) || (draft ? v : null);
+      };
+      return {
+        draft,
+        fields: Object.fromEntries(HEADER_FIELDS.map((f) => [f.key, plain(f.key, header[f.key] ?? "")])),
+        lines: lines.map((l) => ({
+          line_no: l.line_no,
+          ...Object.fromEntries(LINE_FIELDS.map((k) => [k, plain(k, l[k] ?? "")])),
+          line_kind: l.line_kind,
+        })),
+      };
+    },
     [header, lines],
   );
 
@@ -314,6 +324,7 @@ export function ReviewPage() {
   // draft, not only after confirmation (review W4; S-07).
   const asRead = fromReview(r);
   const readLine = (no: number) => asRead.lines.find((l) => l.line_no === no);
+  const headerError = (k: string) => (FIELD_RULES[k] ? numberError(header[k], FIELD_RULES[k]) : null);
   // Only the arithmetic checks can be accepted as "the document does not add up"; a missing
   // supplier, number, date or line has to be filled in (review, minor).
   const arithmetic = checks.filter((c) => /^Line \d+:|^Lines /.test(c));
@@ -412,11 +423,18 @@ export function ReviewPage() {
                       <input
                         id={`h-${f.key}`}
                         type={f.type ?? "text"}
-                        inputMode={["subtotal", "tax_total", "total"].includes(f.key) ? "decimal" : undefined}
-                        className={["subtotal", "tax_total", "total"].includes(f.key) ? "num" : undefined}
+                        inputMode={FIELD_RULES[f.key] ? "decimal" : undefined}
+                        className={FIELD_RULES[f.key] ? "num" : undefined}
                         value={header[f.key] ?? ""}
+                        aria-invalid={headerError(f.key) ? true : undefined}
+                        aria-describedby={headerError(f.key) ? `h-${f.key}-err` : undefined}
                         onChange={(e) => set(f.key, e.target.value)}
                       />
+                    )}
+                    {headerError(f.key) && (
+                      <span className="error-text small" id={`h-${f.key}-err`}>
+                        {headerError(f.key)}
+                      </span>
                     )}
                   </div>
                 );
@@ -444,17 +462,26 @@ export function ReviewPage() {
             <ol className="line-editor">
               {lines.map((l, i) => {
                 const src = r.line_fields.find((x) => x.line_no === l.line_no)?.field_sources ?? {};
-                const field = (k: (typeof LINE_FIELDS)[number]) => (
+                const field = (k: (typeof LINE_FIELDS)[number]) => {
+                  const bad = FIELD_RULES[k] ? numberError(l[k], FIELD_RULES[k]) : null;
+                  return (
                   <div className={`le-field le-${k}`} key={k}>
                     <label htmlFor={`l-${l.line_no}-${k}`}>{LINE_LABELS[k]}</label>
                     <input
                       id={`l-${l.line_no}-${k}`}
                       aria-label={`Line ${l.line_no} ${LINE_LABELS[k]}`}
-                      className={["qty", "unit_price", "amount"].includes(k) ? "num" : undefined}
-                      inputMode={["qty", "unit_price", "amount"].includes(k) ? "decimal" : undefined}
+                      className={FIELD_RULES[k] ? "num" : undefined}
+                      inputMode={FIELD_RULES[k] ? "decimal" : undefined}
                       value={l[k] ?? ""}
+                      aria-invalid={bad ? true : undefined}
+                      aria-describedby={bad ? `l-${l.line_no}-${k}-err` : undefined}
                       onChange={(e) => setLine(i, k, e.target.value)}
                     />
+                    {bad && (
+                      <span className="error-text small le-error" id={`l-${l.line_no}-${k}-err`}>
+                        {bad}
+                      </span>
+                    )}
                     {(src[k]?.source === "edited" || (readLine(l.line_no) && (l[k] ?? "") !== (readLine(l.line_no)?.[k] ?? ""))) && (
                       <span className="le-edited">
                         <span className="tag edited">edited</span>
@@ -470,7 +497,8 @@ export function ReviewPage() {
                       </span>
                     )}
                   </div>
-                );
+                  );
+                };
                 const stored = r.line_fields.find((x) => x.line_no === l.line_no);
                 return (
                   <li key={l.line_no} className="le-line">

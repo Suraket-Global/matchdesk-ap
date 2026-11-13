@@ -27,7 +27,13 @@ from sqlalchemy.orm import Session
 
 from matchdesk import blobstore
 from matchdesk.audit import write_audit
-from matchdesk.core import ConflictError, NotFoundError, get_correlation_id, new_correlation_id
+from matchdesk.core import (
+    ConflictError,
+    NotFoundError,
+    get_correlation_id,
+    new_correlation_id,
+    parse_typed_decimal,
+)
 from matchdesk.matching import normalise_code, normalise_number, normalise_uom
 from matchdesk.qbo.models import Item, PoLineRow, PurchaseOrderRow
 from matchdesk.receiving.declaration import current_declaration, withdraw_declaration
@@ -446,9 +452,9 @@ def validate(s: Session, imp: ReceivingImportRow) -> Validation:
             continue
         pl = matches[0]
         raw_qty = cell(row, "qty_received")
-        try:
-            qty = Decimal(raw_qty.replace(",", ""))
-        except InvalidOperation:
+        try:  # B10: "1,5" or "1.000,5" is refused, never read as 15 or 1.0005
+            qty = Decimal(parse_typed_decimal(raw_qty, places=4, whole=10) or "x")
+        except (InvalidOperation, ValueError):
             reject("qty_unreadable", raw_qty)
             continue
         if qty == 0:

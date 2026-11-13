@@ -10,7 +10,7 @@ import { useKeys } from "../app/shortcuts";
 import { CheckCircle2, ChevronRight, FileBarChart, Inbox, Info, SlidersHorizontal, Upload, X } from "lucide-react";
 import { Dialog, Empty, ErrorState, PageHead, StatusChip, toast, usePageTitle } from "../components/ui";
 import { TableSkeleton } from "../components/States";
-import { cad, cadCents, formatCents, money, qty, sumCents, toCents } from "../lib/decimal";
+import { AMOUNT_INPUT, cad, cadCents, formatCents, money, numberError, parseNumberInput, qty, sumCents, toCents } from "../lib/decimal";
 import { ageText, monthName, plural } from "../lib/format";
 import { apiQuery, assigneeWords, dateRangeWords, DEFAULT_STATUS, readScope, rememberQueue, scopeDates, STATUS_WORDS } from "../lib/queue";
 import { EXCEPTION_STATUS, RESOLUTION_CODES, RESOLUTION_HINTS, SUB_REASONS, typeWord, zeroCounted } from "../lib/words";
@@ -274,11 +274,11 @@ export function ExceptionsPage() {
         </div>
         <div className="field">
           <label htmlFor="f-min">Value from (CAD)</label>
-          <input id="f-min" key={`min-${scope.min}`} inputMode="decimal" size={8} placeholder="0.00" defaultValue={scope.min} onBlur={(e) => e.target.value.trim() !== scope.min && set({ min: e.target.value.trim() })} />
+          <ValueFilter id="f-min" placeholder="0.00" value={scope.min} onValue={(v) => set({ min: v })} />
         </div>
         <div className="field">
           <label htmlFor="f-max">Value to (CAD)</label>
-          <input id="f-max" key={`max-${scope.max}`} inputMode="decimal" size={8} placeholder="Any" defaultValue={scope.max} onBlur={(e) => e.target.value.trim() !== scope.max && set({ max: e.target.value.trim() })} />
+          <ValueFilter id="f-max" placeholder="Any" value={scope.max} onValue={(v) => set({ max: v })} />
         </div>
         <div className="field">
           <label htmlFor="f-sort">Sort</label>
@@ -749,5 +749,36 @@ function BulkAssign({ chosen, members, me, onDone }: { chosen: ExceptionItem[]; 
         <option value="none">Nobody (unassign)</option>
       </select>
     </label>
+  );
+}
+
+/** A value filter (CAD). Applied on leaving the field as a plain decimal ("1,000" -> "1000"); a value
+ * that cannot be read stays in the field with the reason beside it and is not applied (B10, item 3). */
+function ValueFilter({ id, placeholder, value, onValue }: { id: string; placeholder: string; value: string; onValue: (v: string) => void }) {
+  const [text, setText] = useState(value);
+  useEffect(() => setText(value), [value]);
+  const bad = numberError(text, AMOUNT_INPUT);
+  return (
+    <>
+      <input
+        id={id}
+        inputMode="decimal"
+        size={8}
+        placeholder={placeholder}
+        value={text}
+        aria-invalid={bad ? true : undefined}
+        aria-describedby={bad ? `${id}-err` : undefined}
+        onChange={(e) => setText(e.target.value)}
+        onBlur={() => {
+          const p = parseNumberInput(text, AMOUNT_INPUT);
+          if (p.ok && p.value !== value) onValue(p.value);
+        }}
+      />
+      {bad && (
+        <span className="error-text small" id={`${id}-err`}>
+          {bad}
+        </span>
+      )}
+    </>
   );
 }

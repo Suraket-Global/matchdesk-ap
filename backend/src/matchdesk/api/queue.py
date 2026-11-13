@@ -24,6 +24,7 @@ from fastapi import HTTPException
 from sqlalchemy import ColumnElement, Select, case, func, literal, select, tuple_
 from sqlalchemy.orm import Session
 
+from matchdesk.core import parse_typed_decimal, round_cents
 from matchdesk.exceptions.models import ExceptionRow
 from matchdesk.intake.models import InvoiceRow
 from matchdesk.qbo.models import Vendor
@@ -52,10 +53,10 @@ class QueueFilter:
 def parse_decimal(text: str | None, name: str) -> Decimal | None:
     if text is None or text.strip() == "":
         return None
-    try:
-        value = Decimal(text.strip().replace(",", ""))
-    except InvalidOperation:
-        raise HTTPException(422, f"{name} must be an amount such as 100.00") from None
+    try:  # B10: the same rules as the web field ("1,000" is 1000; "1,5" is refused)
+        value = Decimal(parse_typed_decimal(text, places=2, whole=12))
+    except (InvalidOperation, ValueError) as exc:
+        raise HTTPException(422, f"{name} must be an amount such as 100.00 ({exc})") from None
     if not value.is_finite():
         raise HTTPException(422, f"{name} must be an amount such as 100.00")
     return value
@@ -190,7 +191,7 @@ def page(s: Session, f: QueueFilter, limit: int, cursor: str | None) -> dict[str
         "counters": counters,
         "type_counters": type_counters,
         "total_count": int(total_count),
-        "total_value": str(Decimal(total_value).quantize(Decimal("0.01"))),
+        "total_value": str(round_cents(Decimal(total_value))),
         "next_cursor": nxt,
     }
 

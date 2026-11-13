@@ -6,7 +6,7 @@ import { ApiError, errorText, get, send } from "../api/client";
 import type { DeletionRequest, Me, OperatorTenant, Page, Pilot } from "../api/types";
 import { useSession } from "../app/session";
 import { Banner, Dialog, Empty, ErrorState, Field, Loading, PageHead, StatusChip, toast, usePageTitle } from "../components/ui";
-import { cad } from "../lib/decimal";
+import { AMOUNT_INPUT, cad, numberError, plainNumber } from "../lib/decimal";
 import { day, plural, when } from "../lib/format";
 import { OUTCOME_WORDS, PAYMENT_WORDS } from "./Pilot";
 import { archiveSnapshotText, DeletionStateChip } from "./AccountData";
@@ -143,7 +143,11 @@ function TenantDetail() {
   }, [q.data]);
   const save = useMutation({
     mutationFn: () => {
-      const body = Object.fromEntries(Object.entries(form).filter(([k, v]) => v !== "" || k === "signed_terms_ref"));
+      const body = Object.fromEntries(
+        Object.entries(form)
+          .filter(([k, v]) => v !== "" || k === "signed_terms_ref")
+          .map(([k, v]) => [k, k === "price" || k === "refund_threshold" ? plainNumber(v, AMOUNT_INPUT) || v : v]),
+      );
       if (p?.governing_report_id) delete body.refund_threshold;
       return send<Pilot>("PUT", `/api/v1/operator/tenants/${tenantId}/pilot`, body, p ? { ifMatch: p.version } : undefined);
     },
@@ -236,8 +240,10 @@ function TenantDetail() {
             }}
           >
             <div className="form-grid">
-              <Field label="Price (CAD)">{(f) => <input id={f.id} className="num" inputMode="decimal" value={form.price} onChange={(e) => set("price", e.target.value)} />}</Field>
-              <Field label="Refund threshold (CAD)" hint={fixedThreshold ? "Fixed: the governing version is chosen" : undefined}>
+              <Field label="Price (CAD)" error={numberError(form.price, AMOUNT_INPUT) ?? undefined}>
+                {(f) => <input id={f.id} className="num" inputMode="decimal" value={form.price} aria-invalid={f.invalid} aria-describedby={f.describedBy} onChange={(e) => set("price", e.target.value)} />}
+              </Field>
+              <Field label="Refund threshold (CAD)" hint={fixedThreshold ? "Fixed: the governing version is chosen" : undefined} error={numberError(form.refund_threshold, AMOUNT_INPUT) ?? undefined}>
                 {(f) => (
                   <input
                     id={f.id}

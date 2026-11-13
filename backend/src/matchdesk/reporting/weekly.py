@@ -25,7 +25,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from matchdesk.audit import write_audit
-from matchdesk.core import ZERO, Mailer, OutgoingMail, Settings, dec, round_cents
+from matchdesk.core import ZERO, Mailer, OutgoingMail, Settings, dec, round_cents, round_half_up
 from matchdesk.exceptions.models import ExceptionRow, LineMatch
 from matchdesk.identity.models import Membership, Tenant, User
 from matchdesk.intake.models import InvoiceLineRow, InvoiceRow
@@ -100,7 +100,9 @@ def summary(s: Session, week_start: date) -> dict[str, Any]:
             "documents": r["documents"],
             "lines": r["lines"],
             "lines_matched": r["lines_matched"],
-            "pass_rate_pct": str((Decimal(r["lines_matched"]) * 100 / r["lines"]).quantize(Decimal("0.1")))
+            "pass_rate_pct": str(
+                round_half_up(Decimal(r["lines_matched"]) * 100 / r["lines"], Decimal("0.1"))
+            )
             if r["lines"]
             else None,
             "open_count": r["open_count"],
@@ -121,7 +123,7 @@ def summary(s: Session, week_start: date) -> dict[str, Any]:
         "flagged_amount": str(round_cents(sum((r["flagged"] for r in by_vendor.values()), ZERO))),
     }
     total["pass_rate_pct"] = (
-        str((Decimal(total["lines_matched"]) * 100 / total["lines"]).quantize(Decimal("0.1")))
+        str(round_half_up(Decimal(total["lines_matched"]) * 100 / total["lines"], Decimal("0.1")))
         if total["lines"]
         else None
     )

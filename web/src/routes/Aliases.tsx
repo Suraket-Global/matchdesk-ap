@@ -5,7 +5,7 @@ import { errorText, get, send } from "../api/client";
 import type { Alias, ExceptionPage, Item, Page, Vendor } from "../api/types";
 import { useSession } from "../app/session";
 import { Banner, Dialog, Empty, ErrorState, Field, Loading, PageHead, StatusChip, toast, usePageTitle } from "../components/ui";
-import { divide, isDecimal, multiply, qty } from "../lib/decimal";
+import { divide, FACTOR_INPUT, isDecimal, multiply, numberError, plainNumber, PRICE_INPUT, qty, QTY_INPUT } from "../lib/decimal";
 import { plural, when } from "../lib/format";
 
 interface Suggestion {
@@ -87,7 +87,7 @@ export function AliasesPage() {
         vendor_id: vendorId,
         supplier_item_code: code.trim(),
         item_id: itemId,
-        conversion_factor: factor.trim(),
+        conversion_factor: plainNumber(factor, FACTOR_INPUT),
         supplier_uom: supUom.trim() || null,
         item_uom: itemUom.trim() || null,
         supplier_description: description.trim() || null,
@@ -133,7 +133,8 @@ export function AliasesPage() {
   function submit() {
     setFormErr(null);
     if (!vendorId || !code.trim() || !itemId) return setFormErr("Choose the supplier, the supplier's code and our item.");
-    if (!isDecimal(factor) || /^0+(\.0+)?$/.test(factor.trim())) return setFormErr("The conversion must be a positive number, for example 1 or 12.");
+    const f = plainNumber(factor, FACTOR_INPUT);
+    if (!f || /^0+(\.0+)?$/.test(f)) return setFormErr(numberError(factor, FACTOR_INPUT) ?? "The conversion must be a positive number, for example 1 or 12.");
     create.mutate();
   }
   const chosenItem = (items.data?.items ?? []).find((i) => i.id === itemId);
@@ -221,15 +222,23 @@ export function AliasesPage() {
                 <Field label="Supplier unit">{(f) => <input id={f.id} type="text" size={6} value={supUom} onChange={(e) => setSupUom(e.target.value)} />}</Field>
                 <Field label="Our unit">{(f) => <input id={f.id} type="text" size={6} value={itemUom} onChange={(e) => setItemUom(e.target.value)} />}</Field>
                 <Field label="Conversion (our units per supplier unit)">
-                  {(f) => <input id={f.id} inputMode="decimal" size={8} value={factor} onChange={(e) => setFactor(e.target.value)} aria-invalid={!isDecimal(factor)} />}
+                  {(f) => <input id={f.id} inputMode="decimal" size={8} value={factor} onChange={(e) => setFactor(e.target.value)} aria-invalid={!plainNumber(factor, FACTOR_INPUT)} />}
                 </Field>
               </div>
               <div className="inline-form">
                 <Field label="Example quantity">{(f) => <input id={f.id} inputMode="decimal" size={6} value={exQty} onChange={(e) => setExQty(e.target.value)} />}</Field>
                 <Field label="Example price per supplier unit">{(f) => <input id={f.id} inputMode="decimal" size={8} value={exPrice} onChange={(e) => setExPrice(e.target.value)} />}</Field>
               </div>
-              <WorkedExample factor={factor} supUom={supUom} itemUom={itemUom} exQty={exQty} exPrice={exPrice} />
-              {isDecimal(factor) && factor.trim() !== "1" && !/^1\.0*$/.test(factor.trim()) && (
+              {[numberError(factor, FACTOR_INPUT), numberError(exQty, QTY_INPUT), numberError(exPrice, PRICE_INPUT)].map(
+                (e, i) =>
+                  e && (
+                    <p className="error-text small" key={i}>
+                      {["Conversion", "Example quantity", "Example price"][i]}: {e}
+                    </p>
+                  ),
+              )}
+              <WorkedExample factor={plainNumber(factor, FACTOR_INPUT)} supUom={supUom} itemUom={itemUom} exQty={plainNumber(exQty, QTY_INPUT)} exPrice={plainNumber(exPrice, PRICE_INPUT)} />
+              {isDecimal(plainNumber(factor, FACTOR_INPUT)) && !/^1(\.0*)?$/.test(plainNumber(factor, FACTOR_INPUT)) && (
                 <p className="muted">Lines using this alias stay in exceptions until your controller approves the conversion.</p>
               )}
               {formErr && (

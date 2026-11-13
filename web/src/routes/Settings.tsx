@@ -6,7 +6,7 @@ import type { Invitation, Page, SupportGrant, Tolerance, UserRow, Vendor } from 
 import { useSession } from "../app/session";
 import { SETTINGS_NAV } from "../app/routes";
 import { Banner, Dialog, ErrorState, Field, Loading, PageHead, StatusChip, toast, usePageTitle } from "../components/ui";
-import { isDecimal, compareDecimal } from "../lib/decimal";
+import { AMOUNT_INPUT, compareDecimal, numberError, plainNumber, type NumberRules } from "../lib/decimal";
 import { plural, when } from "../lib/format";
 import { ROLES } from "../lib/words";
 import { AccountDataPanel } from "./AccountData";
@@ -44,6 +44,8 @@ const FIELDS: { key: keyof Tolerance; label: string; hint: string }[] = [
   { key: "charge_allowance", label: "Charge allowance", hint: "Freight or fees not on the PO that still pass, in CAD." },
 ];
 
+const TOL_INPUT: NumberRules = { places: 4, whole: 10 };
+
 /** S-15: how much difference is acceptable per supplier and how much the clerk may waive. */
 export function TolerancesPage() {
   usePageTitle("Tolerances");
@@ -68,20 +70,31 @@ export function TolerancesPage() {
     setPreview(null);
   }, [q.data, scope]);
   const validate = (): string | null => {
-    for (const f of FIELDS) if (!isDecimal(vals[f.key] ?? "")) return `${f.label} must be a number of 0 or more.`;
-    if (compareDecimal(vals.price_tol_pct, "10") > 0) return "The price tolerance percent can be at most 10.";
-    if (scope === "default" && (!isDecimal(limit) || !isDecimal(cap) || compareDecimal(cap, limit) < 0)) return "The 30-day cap must be at least the waiver limit.";
+    for (const f of FIELDS) {
+      const e = numberError(vals[f.key], TOL_INPUT);
+      if (e || !plainNumber(vals[f.key], TOL_INPUT)) return `${f.label}: ${e ?? "type a number of 0 or more."}`;
+    }
+    if (compareDecimal(plainNumber(vals.price_tol_pct, TOL_INPUT), "10") > 0) return "The price tolerance percent can be at most 10.";
+    if (scope === "default") {
+      const l = plainNumber(limit, AMOUNT_INPUT);
+      const c = plainNumber(cap, AMOUNT_INPUT);
+      if (!l || !c) return `Waiver limit and cap: ${numberError(limit, AMOUNT_INPUT) ?? numberError(cap, AMOUNT_INPUT) ?? "type both amounts."}`;
+      if (compareDecimal(c, l) < 0) return "The 30-day cap must be at least the waiver limit.";
+    }
     return null;
   };
+  // Sent as plain decimals ("1,000" -> "1000"); validate() has refused anything that cannot be read.
+  const plainVals = () => Object.fromEntries(FIELDS.map((f) => [f.key, plainNumber(vals[f.key], TOL_INPUT)]));
   const doPreview = useMutation({
-    mutationFn: () => send<{ lines_rematched: number; exceptions_cleared: number }>("POST", "/api/v1/tolerances/preview", { ...vals, vendor_id: scope === "default" ? null : scope }),
+    mutationFn: () => send<{ lines_rematched: number; exceptions_cleared: number }>("POST", "/api/v1/tolerances/preview", { ...plainVals(), vendor_id: scope === "default" ? null : scope }),
     onSuccess: (p) => {
       setPreview(p);
       setConfirm(true);
     },
   });
   const save = useMutation({
-    mutationFn: () => send("PUT", `/api/v1/tolerances/${scope}`, { ...vals, ...(scope === "default" ? { waiver_limit: limit, waiver_period_cap: cap } : {}) }),
+    mutationFn: () =>
+      send("PUT", `/api/v1/tolerances/${scope}`, { ...plainVals(), ...(scope === "default" ? { waiver_limit: plainNumber(limit, AMOUNT_INPUT), waiver_period_cap: plainNumber(cap, AMOUNT_INPUT) } : {}) }),
     onSuccess: () => {
       setConfirm(false);
       qc.invalidateQueries({ queryKey: ["tolerances"] });
@@ -122,7 +135,19 @@ export function TolerancesPage() {
             {FIELDS.map((f) => (
               <Field key={f.key} label={f.label} hint={f.hint}>
                 {(ids) => (
-                  <input id={ids.id} inputMode="decimal" className="num" value={vals[f.key] ?? ""} disabled={!editable} aria-describedby={ids.describedBy} onChange={(e) => setVals({ ...vals, [f.key]: e.target.value })} />
+                  <>
+                    <input
+                      id={ids.id}
+                      inputMode="decimal"
+                      className="num"
+                      value={vals[f.key] ?? ""}
+                      disabled={!editable}
+                      aria-invalid={numberError(vals[f.key], TOL_INPUT) ? true : undefined}
+                      aria-describedby={ids.describedBy}
+                      onChange={(e) => setVals({ ...vals, [f.key]: e.target.value })}
+                    />
+                    {numberError(vals[f.key], TOL_INPUT) && <span className="error-text small">{numberError(vals[f.key], TOL_INPUT)}</span>}
+                  </>
                 )}
               </Field>
             ))}

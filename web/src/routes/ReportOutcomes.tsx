@@ -7,7 +7,7 @@ import { errorText, get, send } from "../api/client";
 import type { InvoiceSummary, Outcomes, Page, Report } from "../api/types";
 import { useSession } from "../app/session";
 import { Dialog, toast } from "../components/ui";
-import { cad, compareDecimal } from "../lib/decimal";
+import { AMOUNT_INPUT, cad, compareDecimal, numberError, plainNumber } from "../lib/decimal";
 import { day } from "../lib/format";
 import { typeWord } from "../lib/words";
 
@@ -134,7 +134,7 @@ function RecordDialog({
     mutationFn: () =>
       send("POST", `/api/v1/reports/findings/${finding.id}/outcomes`, {
         outcome,
-        amount: amount.trim(),
+        amount: plainNumber(amount, AMOUNT_INPUT),
         credit_invoice_id: creditId || null,
         credit_reference: ref.trim() || null,
         note: note.trim() || null,
@@ -160,7 +160,7 @@ function RecordDialog({
           </button>
           <button
             className="btn primary"
-            disabled={save.isPending || !amount.trim() || (outcome === "credit_recovered" && !ref.trim() && !creditId)}
+            disabled={save.isPending || !plainNumber(amount, AMOUNT_INPUT) || (outcome === "credit_recovered" && !ref.trim() && !creditId)}
             onClick={() => save.mutate()}
           >
             Record
@@ -170,7 +170,20 @@ function RecordDialog({
     >
       <div className="field">
         <label htmlFor="oc-amount">{outcome === "credit_recovered" ? "Amount credited (CAD)" : "Overcharge confirmed (CAD)"}</label>
-        <input id="oc-amount" className="num" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} />
+        <input
+          id="oc-amount"
+          className="num"
+          inputMode="decimal"
+          value={amount}
+          aria-invalid={numberError(amount, AMOUNT_INPUT) ? true : undefined}
+          aria-describedby={numberError(amount, AMOUNT_INPUT) ? "oc-amount-err" : undefined}
+          onChange={(e) => setAmount(e.target.value)}
+        />
+        {numberError(amount, AMOUNT_INPUT) && (
+          <span className="error-text small" id="oc-amount-err">
+            {numberError(amount, AMOUNT_INPUT)}
+          </span>
+        )}
         <span className="hint">At most {cad(cap)}{outcome === "credit_recovered" ? ", the confirmed amount" : ", the flagged amount"}.</span>
       </div>
       {outcome === "credit_recovered" && (

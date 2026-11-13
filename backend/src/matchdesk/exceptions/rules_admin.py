@@ -19,7 +19,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from matchdesk.audit import write_audit
-from matchdesk.core import ConflictError, dec
+from matchdesk.core import ConflictError, dec, round_half_up
 from matchdesk.exceptions.inputs import build_match_input
 from matchdesk.exceptions.models import Approval, ItemAlias, LineMatch, MatchRun, ToleranceRule
 from matchdesk.exceptions.triggers import request_runs
@@ -235,7 +235,7 @@ def suggestions(
                     {
                         "item_id": str(item_id),
                         "basis": "description_similarity",
-                        "score": f"{Decimal(str(sim)).quantize(Decimal('0.01'))}",
+                        "score": f"{round_half_up(Decimal(str(sim)), Decimal('0.01'))}",
                     }
                 )
     names = {
