@@ -1,6 +1,8 @@
 """B10 (2026-11-13): the outside deep-QA findings on main 7206efb. All data synthetic.
 
 Group 1: archive completeness (item 1) and deletion claim versus cancellation (item 2).
+Group 3: weekly delivery per recipient (5), the unmeasured week's words (6), job claim attempts (7)
+and independent scheduled operations (8).
 """
 
 from __future__ import annotations
@@ -16,13 +18,21 @@ from sqlalchemy import select, text
 
 from matchdesk import blobstore
 from matchdesk.api.app import create_app
-from matchdesk.core import ConflictError
+from matchdesk.core import ConflictError, OutgoingMail, load_settings
 from matchdesk.identity import Tenant, User, enroll_operator, issue_session
 from matchdesk.intake.models import DocumentRow
 from matchdesk.qbo import FakeIntuitTokenEndpoint
-from matchdesk.reporting import cancel_deletion, claim_due_deletions, execute_due_deletions
+from matchdesk.reporting import (
+    cancel_deletion,
+    claim_due_deletions,
+    execute_due_deletions,
+    last_sent,
+    send_weekly,
+)
 from matchdesk.reporting.models import ArchiveExport, DeletionRequest
-from matchdesk.tenancy import global_session, session
+from matchdesk.reporting.weekly import recipients as reporting_recipients
+from matchdesk.tenancy import PermanentJobError, claim, enqueue_raw, global_session, run_claimed, session
+from matchdesk.worker import __main__ as worker_main
 from matchdesk.worker.__main__ import run_once
 
 from .seed import add_invoice, add_user, auth_headers, make_tenant
@@ -230,3 +240,158 @@ def test_cancel_before_the_claim_wins_and_nothing_is_removed(app_engine, owner_e
     with session(w.tenant_id, app_engine) as s:
         assert s.scalar(select(ArchiveExport.id).limit(1)) is None
         assert s.scalar(text("select count(*) from documents")) >= 1
+
+
+# --- group 3: item 5, weekly email delivery per recipient ------------------------------------------
+
+
+class FlakyMailer:
+    """Fails for the addresses in ``down``; records the rest (synthetic)."""
+
+    def __init__(self) -> None:
+        self.down: set[str] = set()
+        self.sent: list[OutgoingMail] = []
+
+    def send(self, mail: OutgoingMail) -> None:
+        if mail.to in self.down or "*" in self.down:
+            raise ConnectionRefusedError("synthetic SMTP outage")
+        self.sent.append(mail)
+
+
+def _emails(engine, w) -> list[str]:  # type: ignore[no-untyped-def]
+    with session(w.tenant_id, engine) as s:
+        return list(reporting_recipients(s))
+
+
+def test_weekly_email_lost_after_a_mail_failure_is_sent_on_retry(app_engine):  # type: ignore[no-untyped-def]
+    w = make_tenant(app_engine, "Fictional Distributor B10-W1")
+    add_user(app_engine, w, "controller")
+    add_user(app_engine, w, "controller")
+    to = _emails(app_engine, w)
+    assert len(to) == 2
+    mailer = FlakyMailer()
+    settings = load_settings()
+    mailer.down = {"*"}
+    first = send_weekly(app_engine, w.tenant_id, date(2026, 10, 5), "manual", mailer, settings)
+    assert first is not None and first["sent"] == 0 and first["failed"] == 2
+    with session(w.tenant_id, app_engine) as s:
+        actions = [
+            r[0] for r in s.execute(text("select action from audit_events order by occurred_at")).all()
+        ]
+    assert "weekly_summary.sent" not in actions and "weekly_summary.failed" in actions
+    # One controller's mailbox is back: only the failed recipients are tried; one is delivered.
+    mailer.down = {to[1]}
+    second = send_weekly(app_engine, w.tenant_id, date(2026, 10, 5), "manual", mailer, settings)
+    assert second is not None and (second["sent"], second["failed"]) == (1, 1)
+    assert [m.to for m in mailer.sent] == [to[0]]
+    mailer.down = set()
+    third = send_weekly(app_engine, w.tenant_id, date(2026, 10, 5), "manual", mailer, settings)
+    assert third is not None and (third["sent"], third["failed"], third["delivered_now"]) == (2, 0, 1)
+    assert [m.to for m in mailer.sent] == [to[0], to[1]]  # nobody received it twice
+    assert send_weekly(app_engine, w.tenant_id, date(2026, 10, 5), "manual", mailer, settings) is None
+    with session(w.tenant_id, app_engine) as s:
+        sent_events = s.execute(
+            text("select after from audit_events where action = 'weekly_summary.sent' order by occurred_at")
+        ).all()
+        runs = last_sent(s)
+    assert [e[0]["delivered_now"] for e in sent_events] == [1, 1]  # the audit says what was delivered
+    assert runs[0]["delivered"] == 2 and runs[0]["failed"] == 0 and runs[0]["sent_at"] is not None
+
+
+def test_send_now_retries_the_failed_recipients_of_the_scheduled_email(app_engine, client, monkeypatch):  # type: ignore[no-untyped-def]
+    w = make_tenant(app_engine, "Fictional Distributor B10-W2")
+    _c, ctrl = add_user(app_engine, w, "controller")
+    mailer = FlakyMailer()
+    mailer.down = {"*"}
+    send_weekly(app_engine, w.tenant_id, date(2026, 10, 5), "scheduled", mailer, load_settings())
+    week = client.get("/api/v1/weekly-summary?week_start=2026-10-05", headers=ctrl).json()
+    assert week["sent"][0]["failed"] == 1 and week["sent"][0]["sent_at"] is None
+    assert week["sent"][0]["deliveries"][0]["state"] == "failed"
+    # "Send now" retries that recipient (the app's mailer works), and creates no second email.
+    r = client.post("/api/v1/weekly-summary/send", json={"week_start": "2026-10-05"}, headers=ctrl)
+    assert r.status_code == 200, r.text
+    assert r.json()["trigger"] == "scheduled" and r.json()["sent"] == 1 and r.json()["failed"] == 0
+
+
+# --- item 6: an unmeasured week says so, in the email as on S-14 ------------------------------------
+
+
+def test_empty_week_email_says_no_invoices_checked_not_cad_zero(app_engine, client):  # type: ignore[no-untyped-def]
+    w = make_tenant(app_engine, "Fictional Distributor B10-W3")
+    _c, ctrl = add_user(app_engine, w, "controller")
+    mailer = FlakyMailer()
+    run = send_weekly(app_engine, w.tenant_id, date(2026, 10, 5), "manual", mailer, load_settings())
+    assert run is not None
+    body = mailer.sent[0].body
+    assert "No invoices checked for this week" in body
+    assert "CAD 0.00" not in body and "Flagged discrepancies" not in body
+    week = client.get("/api/v1/weekly-summary?week_start=2026-10-05", headers=ctrl).json()
+    assert week["state"] == "awaiting_invoices"
+    assert week["measurement"]["figures"] is False
+    assert week["measurement"]["title"] == "No invoices checked for this week"
+    assert week["measurement"]["text"] in body  # one rule, the same words
+
+
+# --- item 7: a stale worker cannot overwrite a newer job result -------------------------------------
+
+
+def test_expired_claim_late_failure_does_not_overwrite_a_success(app_engine):  # type: ignore[no-untyped-def]
+    drain(app_engine)
+    w = make_tenant(app_engine, "Fictional Distributor B10-J1")
+    with global_session(app_engine) as s:
+        job_id = enqueue_raw(s, "b10_probe", {"tenant_id": str(w.tenant_id)})
+    a = claim(lease_seconds=0, engine=app_engine)  # worker A: its lease expires at once
+    assert a is not None and a.id == job_id
+    b = claim(lease_seconds=300, engine=app_engine)  # worker B takes the expired claim
+    assert b is not None and b.id == job_id and b.attempts == a.attempts + 1
+
+    def ok(_s, _p):  # type: ignore[no-untyped-def]
+        return None
+
+    def boom(_s, _p):  # type: ignore[no-untyped-def]
+        raise PermanentJobError("synthetic late failure")
+
+    assert run_claimed(b, {"b10_probe": ok}, app_engine) == "succeeded"
+    assert run_claimed(a, {"b10_probe": boom}, app_engine) == "superseded"
+    with global_session(app_engine) as s:
+        state, err = s.execute(
+            text("select state, last_error from job_queue where id = :i"), {"i": str(job_id)}
+        ).one()
+    assert (state, err) == ("succeeded", None)
+
+
+# --- item 8: one failing scheduled operation does not block the others -----------------------------
+
+
+def test_a_failing_weekly_email_does_not_stop_the_other_scheduled_operations(app_engine, client, monkeypatch):  # type: ignore[no-untyped-def]
+    calls: list[str] = []
+
+    def boom(*_a, **_k):  # type: ignore[no-untyped-def]
+        raise ConnectionRefusedError("synthetic SMTP outage")
+
+    def spy(name: str):  # type: ignore[no-untyped-def]
+        def f(*_a, **_k):  # type: ignore[no-untyped-def]
+            calls.append(name)
+            return 0 if name != "due_deletions" else []
+
+        return f
+
+    monkeypatch.setattr(worker_main, "due_weekly", boom)
+    monkeypatch.setattr(worker_main, "purge_raw", spy("raw_email_cleanup"))
+    monkeypatch.setattr(worker_main, "purge_drafts_everywhere", spy("receiving_draft_cleanup"))
+    monkeypatch.setattr(worker_main, "expire_archives", spy("archive_expiry"))
+    monkeypatch.setattr(worker_main, "execute_due_deletions", spy("due_deletions"))
+    done = worker_main.scheduled(app_engine, load_settings())
+    assert calls == ["raw_email_cleanup", "receiving_draft_cleanup", "archive_expiry", "due_deletions"]
+    assert done["weekly_summary"] is None
+    oh = operator_headers(app_engine)
+    items = client.get("/api/v1/operator/operations", headers=oh).json()["items"]
+    assert items[0]["name"] == "weekly_summary" and items[0]["state"] == "failing"
+    assert items[0]["last_error"] == "ConnectionRefusedError"
+    ok = {i["name"]: i for i in items}
+    assert ok["archive_expiry"]["state"] == "ok" and ok["archive_expiry"]["last_success_at"]
+    # The next cycle succeeds: the failure count resets.
+    monkeypatch.setattr(worker_main, "due_weekly", spy("weekly_summary"))
+    worker_main.scheduled(app_engine, load_settings())
+    items = client.get("/api/v1/operator/operations", headers=oh).json()["items"]
+    assert all(i["state"] == "ok" for i in items)

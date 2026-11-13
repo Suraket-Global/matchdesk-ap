@@ -24,6 +24,7 @@ from matchdesk.reporting.finding_outcomes import (
     outcomes_for,
     record_outcome,
 )
+from matchdesk.reporting.operations import OPERATION_WORDS, describe_operations, run_operations
 from matchdesk.reporting.outcomes import (
     FindingOutcome,
     OutcomeCount,
@@ -63,13 +64,14 @@ from matchdesk.reporting.retention import (
     request_deletion,
     retry_archive,
 )
-from matchdesk.reporting.weekly import due_weekly, last_sent, send_weekly, summary, week_of
+from matchdesk.reporting.weekly import due_weekly, last_sent, retry_week, send_weekly, summary, week_of
 
 __all__ = [
     "ARCHIVE_TASK",
     "DEFAULT_THRESHOLD",
     "DELETION_NOTICE",
     "DRAFT_MARK",
+    "OPERATION_WORDS",
     "ArchiveNotComplete",
     "FindingOutcome",
     "OutcomeCount",
@@ -90,6 +92,7 @@ __all__ = [
     "describe_archive",
     "describe_archive_state",
     "describe_deletion",
+    "describe_operations",
     "describe_outcome",
     "describe_pilot",
     "describe_report",
@@ -117,6 +120,8 @@ __all__ = [
     "request_archive",
     "request_deletion",
     "retry_archive",
+    "retry_week",
+    "run_operations",
     "save_pilot",
     "section_of",
     "send_weekly",

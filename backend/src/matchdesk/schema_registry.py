@@ -30,5 +30,7 @@ GLOBAL_TABLES = frozenset(
         "job_queue",
         "alembic_version",
         "deletion_ledger",
+        # B10: the worker's scheduled operations; names and times only, no tenant data.
+        "scheduled_operations",
     }
 )

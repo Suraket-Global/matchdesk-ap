@@ -431,6 +431,12 @@ def register_b9_routes(app: FastAPI, engine: Engine) -> None:
             ]
         }
 
+    # B10 (outside QA item 8): the worker's scheduled operations, late or failing first.
+    @app.get("/api/v1/operator/operations")
+    def op_operations(ctx: Ctx) -> dict[str, Any]:
+        operator(ctx)
+        return {"items": reporting.describe_operations(engine)}
+
     @app.post("/api/v1/operator/deletion-requests/{request_id}/decision")
     def op_decide_deletion(
         request_id: uuid.UUID,

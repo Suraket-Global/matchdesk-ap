@@ -567,7 +567,7 @@ export function ExceptionsPage() {
           </p>
         )}
         {!measured ? (
-          <p className="muted">{stateWords[cov?.state ?? ""] ?? "Not measured yet."}</p>
+          <p className="muted">{cov?.measurement?.text ? `Not measured: ${cov.measurement.text}` : (stateWords[cov?.state ?? ""] ?? "Not measured yet.")}</p>
         ) : (
           <div className="coverage" role="note" aria-label="Receipt coverage">
             <div>

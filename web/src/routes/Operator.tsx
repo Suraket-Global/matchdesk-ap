@@ -3,7 +3,7 @@ import { Link, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Building2, Eye, Plus } from "lucide-react";
 import { ApiError, errorText, get, send } from "../api/client";
-import type { DeletionRequest, Me, OperatorTenant, Page, Pilot } from "../api/types";
+import type { DeletionRequest, Me, OperatorTenant, Page, Pilot, ScheduledOperation } from "../api/types";
 import { useSession } from "../app/session";
 import { Banner, Dialog, Empty, ErrorState, Field, Loading, PageHead, StatusChip, toast, usePageTitle } from "../components/ui";
 import { AMOUNT_INPUT, cad, numberError, plainNumber } from "../lib/decimal";
@@ -60,6 +60,7 @@ function TenantList() {
         {create.error && <span className="error-text">{errorText(create.error)}</span>}
       </form>
       <DeletionRequests />
+      <OperationsPanel />
       {list.isLoading && <Loading />}
       {list.error && <ErrorState error={list.error} retry={() => list.refetch()} />}
       {list.data && list.data.items.length === 0 && (
@@ -512,6 +513,41 @@ function DeletionRequests() {
         </div>
         {decide.error && <p className="error-text">{errorText(decide.error)}</p>}
       </Dialog>
+    </section>
+  );
+}
+
+const OP_STATE: Record<ScheduledOperation["state"], { status: string; word: string }> = {
+  failing: { status: "failed", word: "Failing" },
+  late: { status: "pending_approval", word: "Late" },
+  ok: { status: "succeeded", word: "On time" },
+};
+
+/** B10, S-18 "Operations": the worker's scheduled operations, each with its own last success, so one
+ * failing (the weekly email, say) is visible and no longer hides the others (outside QA item 8). */
+export function OperationsPanel() {
+  const q = useQuery({ queryKey: ["operator", "operations"], queryFn: () => get<{ items: ScheduledOperation[] }>("/api/v1/operator/operations"), refetchInterval: 60_000 });
+  const items = (q.data?.items ?? []).filter((o) => o && o.state in OP_STATE);
+  if (!items.length) return null;
+  const trouble = items.filter((i) => i.state !== "ok").length;
+  return (
+    <section className="panel" aria-labelledby="ops-h" style={{ marginBottom: 16 }}>
+      <div className="panel-head">
+        <h2 id="ops-h">Operations</h2>
+        <span className={`small ${trouble ? "error-text" : "muted"}`}>{trouble ? `${plural(trouble, "operation")} late or failing` : "All on time"}</span>
+      </div>
+      <ul className="panel-body plain-list ops-list">
+        {items.map((o) => (
+          <li key={o.name} data-testid={`op-${o.name}`}>
+            <StatusChip status={OP_STATE[o.state].status} word={OP_STATE[o.state].word} /> <strong>{o.label}</strong>
+            <span className="small muted">
+              {" "}
+              Last success {o.last_success_at ? when(o.last_success_at) : "never"}
+              {o.state === "failing" && o.last_error ? `; failing since ${when(o.last_failure_at)} (${o.last_error}, ${plural(o.consecutive_failures, "attempt")})` : ""}.
+            </span>
+          </li>
+        ))}
+      </ul>
     </section>
   );
 }

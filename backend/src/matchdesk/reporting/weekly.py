@@ -30,8 +30,8 @@ from matchdesk.exceptions.models import ExceptionRow, LineMatch
 from matchdesk.identity.models import Membership, Tenant, User
 from matchdesk.intake.models import InvoiceLineRow, InvoiceRow
 from matchdesk.qbo.models import Vendor
-from matchdesk.reporting.backtest import _current_matches, measurement_state, section_of
-from matchdesk.reporting.models import WeeklySummaryRun
+from matchdesk.reporting.backtest import _current_matches, measurement_state, measurement_words, section_of
+from matchdesk.reporting.models import WeeklySummaryDelivery, WeeklySummaryRun
 from matchdesk.tenancy import global_session, session
 
 PACIFIC = ZoneInfo("America/Vancouver")
@@ -133,7 +133,9 @@ def summary(s: Session, week_start: date) -> dict[str, Any]:
         "week_start": week_start.isoformat(),
         "week_end": week_end.isoformat(),
         # B8: whether the week's figures were measured, so an empty week never reads as a clean one.
-        "state": measurement_state(s, invoices, matches, item_lines),
+        "state": (state := measurement_state(s, invoices, matches, item_lines)),
+        # B10: the same rule as the email and the exports (backtest.measurement_words).
+        "measurement": measurement_words(state, "this week"),
         "suppliers": rows,
         "total": total,
     }
@@ -147,14 +149,23 @@ def email_text(tenant_name: str, fig: dict[str, Any], link: str) -> tuple[str, s
     span = f"{start.day} {start:%b} to {end.day} {end:%b %Y}"
     subject = f"MatchDesk weekly summary, {span}"
     rate = f"{t['pass_rate_pct']}%" if t["pass_rate_pct"] is not None else "not measured"
-    body = "\n".join(
+    words = fig.get("measurement") or measurement_words(str(fig.get("state") or "measured"))
+    figures = (
         [
-            f"Weekly summary for {tenant_name}, documents dated {span}.",
-            "",
             f"Documents: {t['documents']}",
             f"Lines checked: {t['lines']} (passed every check: {rate})",
             f"Flagged discrepancies: CAD {t['flagged_amount']}",
             f"Open exceptions: {t['open_count']}, CAD {t['open_value']}",
+        ]
+        if words["figures"]
+        # B10 (outside QA item 6): an unmeasured week says so, never "CAD 0.00" (the S-14 words).
+        else [f"{words['title']}.", str(words["text"])]
+    )
+    body = "\n".join(
+        [
+            f"Weekly summary for {tenant_name}, documents dated {span}.",
+            "",
+            *figures,
             "",
             f"See the details by supplier: {link}",
             "",
@@ -179,6 +190,9 @@ def recipients(s: Session) -> list[str]:
     )
 
 
+MAX_ATTEMPTS = 5  # per recipient, by the schedule; "Send now" may always retry [assumption]
+
+
 def send_weekly(
     engine: Any,
     tenant_id: uuid.UUID,
@@ -188,7 +202,11 @@ def send_weekly(
     settings: Settings,
     user_id: uuid.UUID | None = None,
 ) -> dict[str, Any] | None:
-    """Send the week's email once per trigger and week. Returns the run, or None when already sent."""
+    """Send the week's email once per trigger and week, recording delivery per recipient (B10,
+    outside QA item 5). The run and one ``pending`` delivery per controller are committed first; each
+    delivery becomes ``sent`` only after the mailer accepted it, or ``failed`` with the error class.
+    Calling again for the same week and trigger sends only to recipients still pending or failed.
+    Returns the run's delivery counts, or None when nothing was left to send."""
     week_start = week_of(week_start)
     with global_session(engine) as g:
         tenant = g.get(Tenant, tenant_id)
@@ -196,7 +214,7 @@ def send_weekly(
     with session(tenant_id, engine) as s:
         fig = summary(s, week_start)
         to = recipients(s)
-        inserted = s.execute(
+        run_id = s.execute(
             pg_insert(WeeklySummaryRun)
             .values(
                 tenant_id=tenant_id,
@@ -209,28 +227,129 @@ def send_weekly(
             .on_conflict_do_nothing(index_elements=["tenant_id", "week_start", "trigger"])
             .returning(WeeklySummaryRun.id)
         ).scalar()
-        if inserted is None:
-            return None
+        if run_id is not None:
+            for addr in to:
+                s.add(WeeklySummaryDelivery(tenant_id=tenant_id, run_id=run_id, recipient=addr))
+        else:
+            run_id = s.scalar(
+                select(WeeklySummaryRun.id).where(
+                    WeeklySummaryRun.week_start == week_start, WeeklySummaryRun.trigger == trigger
+                )
+            )
+        s.flush()
+        due = [
+            (d.id, d.recipient)
+            for d in s.scalars(
+                select(WeeklySummaryDelivery)
+                .where(
+                    WeeklySummaryDelivery.run_id == run_id,
+                    WeeklySummaryDelivery.state.in_(("pending", "failed")),
+                )
+                .order_by(WeeklySummaryDelivery.recipient)
+            )
+        ]
+    if not due:
+        return None
+    link = f"{settings.app_base_url}/reports/weekly?week={fig['week_start']}"
+    subject, body = email_text(name, fig, link)
+    delivered: list[str] = []
+    failed: list[str] = []
+    for delivery_id, addr in due:
+        try:
+            mailer.send(OutgoingMail(to=addr, subject=subject, body=body))
+        except Exception as exc:  # recorded per recipient; the others still get theirs
+            failed.append(type(exc).__name__)
+            _mark(engine, tenant_id, delivery_id, "failed", type(exc).__name__)
+            continue
+        delivered.append(addr)
+        _mark(engine, tenant_id, delivery_id, "sent", None)
+    with session(tenant_id, engine) as s:
+        counts = delivery_counts(s, run_id)
         write_audit(
             s,
             tenant_id,
             actor_type="user" if user_id else "job",
             actor_user_id=user_id,
-            action="weekly_summary.sent",
+            # The audit says what was delivered, after the mailer answered.
+            action="weekly_summary.sent" if delivered else "weekly_summary.failed",
             entity_type="weekly_summary",
-            entity_id=inserted,
-            after={"week_start": fig["week_start"], "recipients": len(to), "trigger": trigger},
+            entity_id=run_id,
+            after={
+                "week_start": fig["week_start"],
+                "trigger": trigger,
+                "delivered_now": len(delivered),
+                "failed_now": len(failed),
+                **counts,
+            },
         )
-    link = f"{settings.app_base_url}/reports/weekly?week={fig['week_start']}"
-    subject, body = email_text(name, fig, link)
-    for addr in to:
-        mailer.send(OutgoingMail(to=addr, subject=subject, body=body))
-    return {"id": str(inserted), "week_start": fig["week_start"], "recipients": len(to), "trigger": trigger}
+    return {
+        "id": str(run_id),
+        "week_start": fig["week_start"],
+        "trigger": trigger,
+        "recipients": counts["recipients"],
+        "delivered_now": len(delivered),
+        "failed_now": len(failed),
+        **counts,
+    }
+
+
+def _mark(engine: Any, tenant_id: uuid.UUID, delivery_id: uuid.UUID, state: str, error: str | None) -> None:
+    """Commit one recipient's result at once, so a crash later never loses or repeats it."""
+    now = datetime.now(UTC)
+    with session(tenant_id, engine) as s:
+        d = s.get(WeeklySummaryDelivery, delivery_id)
+        if d is None:
+            return
+        d.state, d.last_error, d.attempts, d.updated_at = state, error, d.attempts + 1, now
+        d.sent_at = now if state == "sent" else None
+
+
+def delivery_counts(s: Session, run_id: Any) -> dict[str, int]:
+    rows = s.execute(
+        select(WeeklySummaryDelivery.state, func.count())
+        .where(WeeklySummaryDelivery.run_id == run_id)
+        .group_by(WeeklySummaryDelivery.state)
+    ).all()
+    by = {str(k): int(v) for k, v in rows}
+    return {
+        "recipients": sum(by.values()),
+        "sent": by.get("sent", 0),
+        "failed": by.get("failed", 0),
+        "pending": by.get("pending", 0),
+    }
+
+
+def retry_week(
+    engine: Any,
+    tenant_id: uuid.UUID,
+    week_start: date,
+    mailer: Mailer,
+    settings: Settings,
+    user_id: uuid.UUID | None = None,
+) -> dict[str, Any] | None:
+    """ "Send now" on S-14: when a run of this week has recipients still pending or failed, send to
+    those only (whichever trigger made the run); otherwise None."""
+    week_start = week_of(week_start)
+    with session(tenant_id, engine) as s:
+        trigger = s.scalar(
+            select(WeeklySummaryRun.trigger)
+            .join(WeeklySummaryDelivery, WeeklySummaryDelivery.run_id == WeeklySummaryRun.id)
+            .where(
+                WeeklySummaryRun.week_start == week_start,
+                WeeklySummaryDelivery.state.in_(("pending", "failed")),
+            )
+            .order_by(WeeklySummaryRun.created_at)
+            .limit(1)
+        )
+    if trigger is None:
+        return None
+    return send_weekly(engine, tenant_id, week_start, trigger, mailer, settings, user_id)
 
 
 def due_weekly(engine: Any, now: datetime, mailer: Mailer, settings: Settings) -> int:
     """The scheduled job: on Monday from ``weekly_summary_hour`` Pacific, last week's email for every
-    account that has not had it. Safe to call every minute; returns the number sent."""
+    account that has not had it, and a retry for recipients whose delivery is pending or failed
+    (up to ``MAX_ATTEMPTS``). Safe to call every minute; returns the number of runs that delivered."""
     local = now.astimezone(PACIFIC)
     if local.weekday() != 0 or local.hour < settings.weekly_summary_hour:
         return 0
@@ -240,24 +359,65 @@ def due_weekly(engine: Any, now: datetime, mailer: Mailer, settings: Settings) -
     sent = 0
     for tid in tenants:
         with session(tid, engine) as s:
-            done = s.scalar(
-                select(func.count())
-                .select_from(WeeklySummaryRun)
-                .where(WeeklySummaryRun.week_start == week, WeeklySummaryRun.trigger == "scheduled")
+            run = s.scalar(
+                select(WeeklySummaryRun.id).where(
+                    WeeklySummaryRun.week_start == week, WeeklySummaryRun.trigger == "scheduled"
+                )
             )
-        if not done and send_weekly(engine, tid, week, "scheduled", mailer, settings):
+            owed = (
+                s.scalar(
+                    select(func.count())
+                    .select_from(WeeklySummaryDelivery)
+                    .where(
+                        WeeklySummaryDelivery.run_id == run,
+                        WeeklySummaryDelivery.state.in_(("pending", "failed")),
+                        WeeklySummaryDelivery.attempts < MAX_ATTEMPTS,
+                    )
+                )
+                if run is not None
+                else None
+            )
+        if run is not None and not owed:
+            continue
+        done = send_weekly(engine, tid, week, "scheduled", mailer, settings)
+        if done and done["delivered_now"]:
             sent += 1
     return sent
 
 
 def last_sent(s: Session) -> list[dict[str, Any]]:
+    """The last runs with their delivery state per recipient (S-14)."""
     rows = s.scalars(select(WeeklySummaryRun).order_by(WeeklySummaryRun.created_at.desc()).limit(10)).all()
-    return [
-        {
-            "week_start": r.week_start.isoformat(),
-            "trigger": r.trigger,
-            "recipients": r.recipients,
-            "sent_at": r.created_at.isoformat() if r.created_at else datetime.now(UTC).isoformat(),
-        }
-        for r in rows
-    ]
+    out: list[dict[str, Any]] = []
+    for r in rows:
+        deliveries = list(
+            s.scalars(
+                select(WeeklySummaryDelivery)
+                .where(WeeklySummaryDelivery.run_id == r.id)
+                .order_by(WeeklySummaryDelivery.recipient)
+            ).all()
+        )
+        sent_times = [d.sent_at for d in deliveries if d.sent_at is not None]
+        out.append(
+            {
+                "week_start": r.week_start.isoformat(),
+                "trigger": r.trigger,
+                "recipients": r.recipients,
+                "asked_at": r.created_at.isoformat() if r.created_at else None,
+                # When the last message of the run was accepted; None while nothing was delivered.
+                "sent_at": max(sent_times).isoformat() if sent_times else None,
+                "delivered": sum(1 for d in deliveries if d.state == "sent"),
+                "failed": sum(1 for d in deliveries if d.state == "failed"),
+                "pending": sum(1 for d in deliveries if d.state == "pending"),
+                "deliveries": [
+                    {
+                        "recipient": d.recipient,
+                        "state": d.state,
+                        "attempts": d.attempts,
+                        "error": d.last_error,
+                    }
+                    for d in deliveries
+                ],
+            }
+        )
+    return out

@@ -81,6 +81,6 @@ test("B8 an empty week is not shown as a clean week", async ({ page }) => {
   const { tag } = run();
   await signIn(page, `controller.${tag}@example.invalid`);
   await page.goto("/reports/weekly?week=2026-12-07");
-  await expect(page.getByText("Nothing checked for this week")).toBeVisible();
+  await expect(page.getByText("No invoices checked for this week")).toBeVisible();
   await expect(page.getByText("CAD 0.00")).toHaveCount(0);
 });

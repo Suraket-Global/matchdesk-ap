@@ -3,9 +3,9 @@ import { Link, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronLeft, ChevronRight, Mail } from "lucide-react";
 import { errorText, get, send } from "../api/client";
-import type { Weekly } from "../api/types";
+import type { Weekly, WeeklyRun } from "../api/types";
 import { useSession } from "../app/session";
-import { Dialog, Empty, ErrorState, Loading, PageHead, toast, usePageTitle } from "../components/ui";
+import { Banner, Dialog, Empty, ErrorState, Loading, PageHead, StatusChip, toast, usePageTitle } from "../components/ui";
 import { cad, money } from "../lib/decimal";
 import { day, plural, when } from "../lib/format";
 import { queueLink } from "../lib/queue";
@@ -37,16 +37,21 @@ export function WeeklyPage() {
   const q = useQuery({ queryKey: ["weekly", week], queryFn: () => get<Weekly>(`/api/v1/weekly-summary?week_start=${week}`) });
   const [confirm, setConfirm] = useState(false);
   const sendNow = useMutation({
-    mutationFn: () => send<{ recipients: number }>("POST", "/api/v1/weekly-summary/send", { week_start: week }),
+    mutationFn: () => send<{ recipients: number; delivered_now?: number; failed_now?: number; sent?: number; failed?: number }>("POST", "/api/v1/weekly-summary/send", { week_start: week }),
     onSuccess: (r) => {
       setConfirm(false);
       qc.invalidateQueries({ queryKey: ["weekly", week] });
-      toast(`Weekly summary emailed to ${plural(r.recipients, "controller")}.`);
+      const failed = r.failed_now ?? 0;
+      if (failed > 0) toast(`Weekly summary not delivered to ${plural(failed, "controller")}. Delivered to ${r.sent ?? 0} of ${r.recipients}.`, "error");
+      else toast(`Weekly summary delivered to ${plural(r.delivered_now ?? r.recipients, "controller")}.`, "success");
     },
   });
   useEffect(() => sendNow.reset(), [week]); // eslint-disable-line react-hooks/exhaustive-deps
   const go = (w: string) => setParams({ week: w });
   const w = q.data;
+  // B10: the server's one measurement rule decides whether figures can be read (same as the email).
+  const figures = w ? (w.measurement ? w.measurement.figures : !w.state || w.state === "measured" || w.state === "no_receiving_records" || w.state === "unavailable") : false;
+  const owed = (w?.sent ?? []).filter((x) => x.week_start === week && ((x.failed ?? 0) > 0 || (x.pending ?? 0) > 0));
   return (
     <>
       <PageHead
@@ -57,7 +62,7 @@ export function WeeklyPage() {
           can("send_weekly_summary") && (
             <button className="btn" onClick={() => setConfirm(true)} disabled={!w}>
               <Mail size={16} aria-hidden="true" />
-              Email this week now
+              {owed.length ? "Retry the failed recipients" : "Email this week now"}
             </button>
           )
         }
@@ -81,11 +86,11 @@ export function WeeklyPage() {
       </div>
       {q.isLoading && <Loading />}
       {q.error && <ErrorState error={q.error} retry={() => q.refetch()} />}
-      {w && w.state && w.state !== "measured" && w.state !== "no_receiving_records" && w.state !== "unavailable" && (
+      {w && !figures && (
         <div className="panel">
-          <Empty title={w.state === "awaiting_invoices" ? "Nothing checked for this week" : w.state === "processing" ? "This week is still being read and matched" : "Waiting for receiving evidence"}>
+          <Empty title={w.measurement?.title ?? (w.state === "awaiting_invoices" ? "No invoices checked for this week" : w.state === "processing" ? "This week is still being read and matched" : "Waiting for receiving evidence")}>
             <p>
-              {w.state === "awaiting_invoices"
+              {w.measurement?.text ? `${w.measurement.text}${w.state === "awaiting_invoices" ? " Choose another week, or upload its invoices on Intake." : ""}` : w.state === "awaiting_invoices"
                 ? "No invoice is dated in this week, so there are no figures to read: this is not a clean week. Choose another week, or upload its invoices on Intake."
                 : w.state === "processing"
                   ? "Figures appear when every document dated in this week is read and matched."
@@ -94,7 +99,9 @@ export function WeeklyPage() {
           </Empty>
         </div>
       )}
-      {w && (!w.state || w.state === "measured" || w.state === "no_receiving_records" || w.state === "unavailable") && (
+      {w && (
+        <>
+          {figures && (
         <>
           <div className="cards">
             <div>
@@ -176,6 +183,8 @@ export function WeeklyPage() {
               </table>
             </div>
           )}
+          </>
+          )}
           <section className="panel" aria-labelledby="sent-h" style={{ marginTop: 16 }}>
             <div className="panel-head">
               <h2 id="sent-h">Weekly email</h2>
@@ -185,11 +194,19 @@ export function WeeklyPage() {
                 Every Monday morning MatchDesk emails your controllers last week&apos;s totals and a link to this page. The email carries no supplier,
                 price, document or line.
               </p>
+              {owed.length > 0 && (
+                <Banner tone="error">
+                  <p>
+                    The email for this week was not delivered to {plural(owed.reduce((n, x) => n + (x.failed ?? 0) + (x.pending ?? 0), 0), "controller")}.{" "}
+                    {can("send_weekly_summary") ? "Email this week now retries only them." : "A controller can retry it."}
+                  </p>
+                </Banner>
+              )}
               {w.sent.length ? (
-                <ul className="plain-list">
+                <ul className="plain-list" data-testid="weekly-deliveries">
                   {w.sent.map((x) => (
                     <li key={`${x.week_start}-${x.trigger}`}>
-                      Week of {day(x.week_start)}: {x.trigger === "manual" ? "sent by hand" : "sent on schedule"} {when(x.sent_at)} to {plural(x.recipients, "controller")}
+                      <DeliveryLine run={x} />
                     </li>
                   ))}
                 </ul>
@@ -202,7 +219,7 @@ export function WeeklyPage() {
       )}
       <Dialog
         open={confirm}
-        title="Email this week's summary now?"
+        title={owed.length ? "Retry the weekly email for the recipients who did not get it?" : "Email this week's summary now?"}
         onClose={() => setConfirm(false)}
         footer={
           <>
@@ -221,6 +238,28 @@ export function WeeklyPage() {
         </p>
         {sendNow.error && <p className="error-text">{errorText(sendNow.error)}</p>}
       </Dialog>
+    </>
+  );
+}
+
+/** One run in words: who received it and who did not (B10, outside QA item 5). */
+export function DeliveryLine({ run }: { run: WeeklyRun }) {
+  const how = run.trigger === "manual" ? "sent by hand" : "sent on schedule";
+  const failed = run.failed ?? 0;
+  const pending = run.pending ?? 0;
+  const delivered = run.delivered ?? (run.sent_at ? run.recipients : 0);
+  const state = failed > 0 ? "failed" : pending > 0 ? "running" : "succeeded";
+  const word = failed > 0 ? "Not delivered" : pending > 0 ? "Sending" : "Delivered";
+  return (
+    <>
+      <StatusChip status={state} word={word} /> Week of {day(run.week_start)}, {how}: delivered to {delivered} of {plural(run.recipients, "controller")}
+      {run.sent_at ? `, last at ${when(run.sent_at)}` : ""}.
+      {failed > 0 && (
+        <span className="small error-text">
+          {" "}
+          Not delivered to {(run.deliveries ?? []).filter((d) => d.state === "failed").map((d) => d.recipient).join(", ")}.
+        </span>
+      )}
     </>
   );
 }

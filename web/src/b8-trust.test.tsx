@@ -216,7 +216,7 @@ describe("empty versus zero (B8)", () => {
         ? { body: { week_start: "2026-10-05", week_end: "2026-10-11", state: "awaiting_invoices", suppliers: [], total: { documents: 0, lines: 0, lines_matched: 0, pass_rate_pct: null, open_count: 0, open_value: "0.00", flagged_amount: "0.00" }, sent: [] } }
         : { body: {} };
     wrap(<WeeklyPage />, "/reports/weekly?week=2026-10-05");
-    expect(await screen.findByText("Nothing checked for this week")).toBeInTheDocument();
+    expect(await screen.findByText("No invoices checked for this week")).toBeInTheDocument(); // B10: the email's words
     expect(screen.queryByText("CAD 0.00")).not.toBeInTheDocument();
     cleanup();
     handler = (url) =>

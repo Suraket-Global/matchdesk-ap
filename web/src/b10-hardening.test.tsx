@@ -8,6 +8,8 @@ import { setLastInput } from "./api/client";
 import { SessionProvider } from "./app/session";
 import { AccountDataPanel } from "./routes/AccountData";
 import { ReviewPage } from "./routes/Review";
+import { WeeklyPage } from "./routes/Weekly";
+import { OperationsPanel } from "./routes/Operator";
 import { fireEvent } from "@testing-library/react";
 
 vi.mock("./components/PdfViewer", () => ({ default: () => <div>pdf</div> }));
@@ -216,5 +218,62 @@ describe("item 3: pasting numbers on S-07 never breaks the page", () => {
     await waitFor(() => expect(sent.some((x) => x.url.includes("/confirm-extraction"))).toBe(true));
     const patch = sent.find((x) => x.method === "PATCH")!.body as { lines: { qty: string; unit_price: string }[] };
     expect(patch.lines[0]).toMatchObject({ qty: "1000", unit_price: "1" });
+  });
+});
+
+const weekly = (extra: object = {}) => ({
+  week_start: "2026-10-05",
+  week_end: "2026-10-11",
+  state: "awaiting_invoices",
+  measurement: { state: "awaiting_invoices", figures: false, title: "No invoices checked for this week", text: "No invoice is dated in this week, so there are no figures to read: this is not a clean result." },
+  suppliers: [],
+  total: { documents: 0, lines: 0, lines_matched: 0, pass_rate_pct: null, open_count: 0, open_value: "0.00", flagged_amount: "0.00" },
+  sent: [],
+  ...extra,
+});
+
+describe("items 5 and 6: S-14 delivery state and the unmeasured week", () => {
+  it("shows the server's words for an empty week and no CAD 0.00", async () => {
+    handler = (url) => (url.includes("/weekly-summary") ? { body: weekly() } : undefined);
+    wrap(<WeeklyPage />, "/reports/weekly?week=2026-10-05", "/reports/weekly", "controller");
+    expect(await screen.findByText("No invoices checked for this week")).toBeInTheDocument();
+    expect(screen.queryByText("CAD 0.00")).toBeNull();
+  });
+
+  it("shows who did not receive the email and retries only them", async () => {
+    const run = { week_start: "2026-10-05", trigger: "scheduled", recipients: 2, asked_at: "2026-10-13T16:00:00Z", sent_at: "2026-10-13T16:00:05Z", delivered: 1, failed: 1, pending: 0, deliveries: [{ recipient: "a@example.invalid", state: "sent", attempts: 1, error: null }, { recipient: "b@example.invalid", state: "failed", attempts: 1, error: "ConnectionRefusedError" }] };
+    handler = (url, init) => {
+      if (url.includes("/weekly-summary/send") && init?.method === "POST") return { body: { recipients: 2, delivered_now: 1, failed_now: 0, sent: 2, failed: 0, trigger: "scheduled" } };
+      if (url.includes("/weekly-summary")) return { body: weekly({ state: "measured", measurement: { state: "measured", figures: true, title: null, text: null }, sent: [run] }) };
+      return undefined;
+    };
+    wrap(<WeeklyPage />, "/reports/weekly?week=2026-10-05", "/reports/weekly", "controller");
+    expect(await screen.findByTestId("weekly-deliveries")).toHaveTextContent("Not delivered");
+    expect(screen.getByTestId("weekly-deliveries")).toHaveTextContent("delivered to 1 of 2 controllers");
+    expect(screen.getByTestId("weekly-deliveries")).toHaveTextContent("Not delivered to b@example.invalid");
+    await userEvent.click(screen.getByRole("button", { name: "Retry the failed recipients" }));
+    await userEvent.click(screen.getByRole("button", { name: "Email now" }));
+    await waitFor(() => expect(sent.at(-1)).toMatchObject({ url: "/api/v1/weekly-summary/send", body: { week_start: "2026-10-05" } }));
+  });
+});
+
+describe("item 8: S-18 Operations", () => {
+  it("lists a failing operation first with its error and the last success of the others", async () => {
+    handler = (url) =>
+      url.includes("/operator/operations")
+        ? {
+            body: {
+              items: [
+                { name: "weekly_summary", label: "Weekly summary email", state: "failing", last_success_at: "2026-11-12T10:00:00Z", last_failure_at: "2026-11-13T10:00:00Z", last_error: "ConnectionRefusedError", consecutive_failures: 3 },
+                { name: "archive_expiry", label: "Archive expiry (24 hours)", state: "ok", last_success_at: "2026-11-13T10:00:00Z", last_failure_at: null, last_error: null, consecutive_failures: 0 },
+              ],
+            },
+          }
+        : undefined;
+    wrap(<OperationsPanel />);
+    expect(await screen.findByText("1 operation late or failing")).toBeInTheDocument();
+    expect(screen.getByTestId("op-weekly_summary")).toHaveTextContent("Failing");
+    expect(screen.getByTestId("op-weekly_summary")).toHaveTextContent("ConnectionRefusedError, 3 attempts");
+    expect(screen.getByTestId("op-archive_expiry")).toHaveTextContent("On time");
   });
 });

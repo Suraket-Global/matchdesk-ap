@@ -28,6 +28,10 @@ Handler = Callable[[Session, dict[str, Any]], None]
 
 @dataclass(frozen=True)
 class ClaimedJob:
+    """A claimed job. ``attempts`` is the claim's number: every claim increments it, and the final
+    update requires the same number and state ``running``, so the late result of a claim whose lease
+    expired and was taken by another worker changes nothing (B10, outside QA item 7; R-01)."""
+
     id: uuid.UUID
     task: str
     payload: dict[str, Any]
@@ -99,47 +103,59 @@ def run_claimed(job: ClaimedJob, handlers: dict[str, Handler], engine: Engine | 
     set_correlation_id(str(job.payload.get("correlation_id") or new_correlation_id()))
     if not tenant_id:
         log.warning("job_rejected_no_tenant", extra={"job_id": str(job.id), "task": job.task})
-        _finish(eng, job.id, "failed", "missing tenant_id")
-        return "failed"
+        return _finish(eng, job, "failed", "missing tenant_id")
     handler = handlers.get(job.task)
     if handler is None:
-        _finish(eng, job.id, "failed", "unknown task")
-        return "failed"
+        return _finish(eng, job, "failed", "unknown task")
     set_log_tenant(str(tenant_id))
     try:
         with session(tenant_id, eng) as s:
             handler(s, job.payload)
     except PermanentJobError as exc:
-        _finish(eng, job.id, "failed", type(exc).__name__)
-        return "failed"
+        return _finish(eng, job, "failed", type(exc).__name__)
     except Exception as exc:  # transient: retry with backoff, then fail
         log.exception("job_error", extra={"job_id": str(job.id), "task": job.task})
         if job.attempts > len(RETRY_DELAYS):
-            _finish(eng, job.id, "failed", type(exc).__name__)
-            return "failed"
+            return _finish(eng, job, "failed", type(exc).__name__)
         delay = RETRY_DELAYS[job.attempts - 1]
         with global_session(eng) as s:
-            s.execute(
+            moved = s.execute(
                 text(
                     "update job_queue set state = 'queued', run_after = :at, lease_expires_at = null, "
-                    "last_error = :e where id = :id"
+                    "last_error = :e where id = :id and attempts = :n and state = 'running' returning id"
                 ),
-                {"at": datetime.now(UTC) + delay, "e": type(exc).__name__, "id": str(job.id)},
-            )
+                {
+                    "at": datetime.now(UTC) + delay,
+                    "e": type(exc).__name__,
+                    "id": str(job.id),
+                    "n": job.attempts,
+                },
+            ).first()
+        if moved is None:
+            log.warning("job_claim_superseded", extra={"job_id": str(job.id), "attempt": job.attempts})
+            return "superseded"
         return "queued"
     finally:
         set_log_tenant(None)
-    _finish(eng, job.id, "succeeded", None)
-    return "succeeded"
+    return _finish(eng, job, "succeeded", None)
 
 
-def _finish(engine: Engine, job_id: uuid.UUID, state: str, error: str | None) -> None:
+def _finish(engine: Engine, job: ClaimedJob, state: str, error: str | None) -> str:
+    """Write the result only for the claim that is still current (same attempt, still running).
+    Returns the state written, or ``superseded`` when a newer claim owns the job."""
     with global_session(engine) as s:
-        s.execute(
-            text("update job_queue set state = :s, last_error = :e, lease_expires_at = null where id = :id"),
-            {"s": state, "e": error, "id": str(job_id)},
-        )
-    log.info("job_finished", extra={"job_id": str(job_id), "state": state})
+        written = s.execute(
+            text(
+                "update job_queue set state = :s, last_error = :e, lease_expires_at = null "
+                "where id = :id and attempts = :n and state = 'running' returning id"
+            ),
+            {"s": state, "e": error, "id": str(job.id), "n": job.attempts},
+        ).first()
+    if written is None:
+        log.warning("job_claim_superseded", extra={"job_id": str(job.id), "attempt": job.attempts})
+        return "superseded"
+    log.info("job_finished", extra={"job_id": str(job.id), "state": state})
+    return state
 
 
 def _json(value: dict[str, Any]) -> str:

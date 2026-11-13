@@ -155,6 +155,44 @@ class WeeklySummaryRun(TenantMixin, Base):
     figures: Mapped[dict] = mapped_column(JSONB, nullable=False)
 
 
+DELIVERY_STATES = ("pending", "sent", "failed")
+
+
+class WeeklySummaryDelivery(TenantMixin, Base):
+    """One weekly email to one recipient (B10, outside QA item 5). ``sent`` is written only after the
+    mailer accepted the message; a retry sends only to rows still ``pending`` or ``failed``."""
+
+    __tablename__ = "weekly_summary_deliveries"
+    __table_args__ = tenant_args(
+        tfk("run_id", "weekly_summary_runs"),
+        UniqueConstraint("tenant_id", "run_id", "recipient"),
+        CheckConstraint(enum_check("state", DELIVERY_STATES), name="state"),
+        CheckConstraint("(state = 'sent') = (sent_at is not null)", name="sent_has_time"),
+    )
+    run_id: Mapped[uuid.UUID] = mapped_column(UUIDT, nullable=False)
+    recipient: Mapped[str] = mapped_column(Text, nullable=False)
+    state: Mapped[str] = mapped_column(Text, nullable=False, server_default="pending")
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    last_error: Mapped[str | None] = mapped_column(Text)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ScheduledOperation(GlobalMixin, Base):
+    """The worker's record of one scheduled operation (B10, outside QA item 8): no tenant data, so
+    the operator console S-18 can show late or failing operations."""
+
+    __tablename__ = "scheduled_operations"
+    __table_args__ = (UniqueConstraint("name"),)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    last_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_failure_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(Text)
+    consecutive_failures: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    last_result: Mapped[int | None] = mapped_column(Integer)
+
+
 FINDING_OUTCOMES = ("controller_confirmed", "credit_recovered")
 
 

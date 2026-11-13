@@ -20,6 +20,7 @@ from matchdesk.reporting import (
     execute_due_deletions,
     expire_archives,
     make_archive_handler,
+    run_operations,
 )
 from matchdesk.schema_registry import load_all_models
 from matchdesk.tenancy import claim, get_engine, run_claimed
@@ -57,31 +58,27 @@ def run_once(engine: Any = None) -> str | None:
 SCHEDULE_EVERY_SECONDS = 60
 
 
-def scheduled(engine: Any, settings: Any, now: datetime | None = None) -> None:
+def scheduled(engine: Any, settings: Any, now: datetime | None = None) -> dict[str, int | None]:
     """Time-driven work: the Monday weekly summary (T-5.1.4) and the 7-day deletion of raw inbound
     email (schema.md 8; B7); since B9 the 7-day removal of receiving drafts never committed, the
     24-hour expiry of archive exports and the account deletions that are due. Each is idempotent, so
-    a restart or a second worker repeats nothing."""
+    a restart or a second worker repeats nothing. B10 (outside QA item 8): each runs with its own
+    error handling and records its last success, so one failure never blocks the others."""
     at = now or datetime.now(UTC)
-    try:
-        sent = due_weekly(engine, at, mailer_from_settings(settings), settings)
-        purged = purge_raw(engine, settings, at)
-        drafts = purge_drafts_everywhere(engine, at)
-        expired = expire_archives(engine, at)
-        deleted = len(execute_due_deletions(engine))
-        if sent or purged or drafts or expired or deleted:
-            log.info(
-                "scheduled",
-                extra={
-                    "weekly_sent": sent,
-                    "raw_purged": purged,
-                    "drafts_removed": drafts,
-                    "archives_expired": expired,
-                    "accounts_deleted": deleted,
-                },
-            )
-    except Exception as exc:  # never stop the job loop; the next minute tries again
-        log.error("scheduled_failed", extra={"reason": type(exc).__name__})
+    done = run_operations(
+        engine,
+        [
+            ("weekly_summary", lambda: due_weekly(engine, at, mailer_from_settings(settings), settings)),
+            ("raw_email_cleanup", lambda: purge_raw(engine, settings, at)),
+            ("receiving_draft_cleanup", lambda: purge_drafts_everywhere(engine, at)),
+            ("archive_expiry", lambda: expire_archives(engine, at)),
+            ("due_deletions", lambda: len(execute_due_deletions(engine))),
+        ],
+        at,
+    )
+    if any(done.values()) or None in done.values():
+        log.info("scheduled", extra={k: v for k, v in done.items()})
+    return done
 
 
 def main() -> None:

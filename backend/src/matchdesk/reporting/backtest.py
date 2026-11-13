@@ -242,6 +242,8 @@ def create_draft(
         )
     )
     report.totals = {
+        # B10: the measurement state at the cut-off, so the exports say when nothing was measured.
+        "state": measurement_state(s, invoices, matches, len(item)),
         "documents": len(invoices),
         "lines_evaluated": len(matches),
         "item_lines": len(item),
@@ -328,6 +330,7 @@ def live_coverage(s: Session, start: date, end: date) -> dict[str, Any]:
         "documents": len(invoices),
         "documents_in_review": sum(1 for i in invoices if i.verification_status == "failed"),
         "state": state,
+        "measurement": measurement_words(state, "these dates"),
         # B8: a figure is shown only when it was measured; zero is then a measured zero.
         **{k: (str(v) if v is not None and state in FIGURE_STATES else None) for k, v in cov.items()},
         "no_receiving_declaration": _declaration(s),
@@ -344,6 +347,37 @@ MEASUREMENT_STATES = (
 )
 # States whose figures are measured values (B9: with the declaration, 0 % coverage is a measured 0).
 FIGURE_STATES = ("measured", "no_receiving_records")
+
+# B10 (outside QA item 6): the one rule for every place that shows a period's figures (the weekly
+# email, S-14, the S-08 coverage strip and the report exports). Outside FIGURE_STATES there are no
+# figures to read, and the words say why instead of a CAD 0.00 that reads as a clean period.
+_UNMEASURED: dict[str, tuple[str, str]] = {
+    "awaiting_invoices": (
+        "No invoices checked for {period}",
+        "No invoice is dated in {period}, so there are no figures to read: this is not a clean result.",
+    ),
+    "processing": (
+        "{Period} is still being read and matched",
+        "Figures appear when every document dated in {period} is read and matched.",
+    ),
+    "awaiting_receiving": (
+        "Waiting for receiving evidence",
+        "Invoices dated in {period} are matched, but no receiving file has been imported, so no line can pass.",
+    ),
+    "unavailable": (
+        "No line could be measured for {period}",
+        "No invoice line dated in {period} could be compared with a purchase-order line.",
+    ),
+}
+
+
+def measurement_words(state: str, period: str = "this week") -> dict[str, Any]:
+    """Whether the figures can be read, and if not, a title and a sentence saying why."""
+    if state in FIGURE_STATES:
+        return {"state": state, "figures": True, "title": None, "text": None}
+    title, text = _UNMEASURED.get(state, _UNMEASURED["processing"])
+    fill = {"period": period, "Period": period[:1].upper() + period[1:]}
+    return {"state": state, "figures": False, "title": title.format(**fill), "text": text.format(**fill)}
 
 
 def measurement_state(
@@ -617,6 +651,9 @@ def export_csv(r: BacktestReport, findings: list[ReportFinding]) -> bytes:
     w = csv.writer(buf)
     if r.status != "approved":
         w.writerow([DRAFT_MARK])
+    unmeasured = _unmeasured_line(r)
+    if unmeasured:
+        w.writerow([unmeasured])
     w.writerow(
         [
             "period_start",
@@ -686,6 +723,15 @@ def export_csv(r: BacktestReport, findings: list[ReportFinding]) -> bytes:
     return buf.getvalue().encode()
 
 
+def _unmeasured_line(r: BacktestReport) -> str | None:
+    """B10: "Not measured: ..." when the report's figures were not measured at the cut-off."""
+    state = (r.totals or {}).get("state")
+    if not state:
+        return None
+    words = measurement_words(str(state), "this period")
+    return None if words["figures"] else f"Not measured: {words['title']}. {words['text']}"
+
+
 def _declaration_lines(r: BacktestReport) -> list[str]:
     d = (r.totals or {}).get("no_receiving_declaration")
     if not d:
@@ -704,9 +750,11 @@ def _inconsistent_lines(r: BacktestReport) -> list[str]:
 
 def export_pdf(r: BacktestReport, findings: list[ReportFinding]) -> bytes:
     sec = r.totals.get("sections", {})
+    unmeasured = _unmeasured_line(r)
     lines = [
         f"MatchDesk back-test report  {r.period_start} to {r.period_end}  version {r.version_no}  ({r.status})",
         f"Data cut-off: {r.data_cutoff_at.isoformat()}   History read from: {r.history_read_from or 'n/a'}",
+        *([unmeasured] if unmeasured else []),
         "",
         f"Qualifying total (refund criterion): {r.qualifying_amount}",
         f"Flagged discrepancies: {flagged_amount(r)} (findings {r.findings_amount} + not received"

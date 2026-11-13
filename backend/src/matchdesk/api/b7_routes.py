@@ -133,9 +133,13 @@ def register_b7_routes(app: FastAPI, settings: Settings, engine: Engine, mailer:
     @app.post("/api/v1/weekly-summary/send")
     def post_weekly(body: WeeklySend, p: Auth) -> dict[str, Any]:
         require(p, "send_weekly_summary")
-        run = reporting.send_weekly(
-            engine, p.tenant_id, body.week_start, "manual", mailer, settings, p.user_id
-        )
+        # B10: recipients whose delivery failed or is pending are retried first; otherwise a new
+        # manual run, once per week.
+        run = reporting.retry_week(engine, p.tenant_id, body.week_start, mailer, settings, p.user_id)
+        if run is None:
+            run = reporting.send_weekly(
+                engine, p.tenant_id, body.week_start, "manual", mailer, settings, p.user_id
+            )
         if run is None:
             raise HTTPException(409, "The summary for this week was already sent by hand")
         return run

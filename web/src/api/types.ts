@@ -568,6 +568,8 @@ export interface Coverage {
   coverage_class_a_pct: string | null;
   coverage_class_b_pct: string | null;
   no_receiving_declaration?: NoReceivingDeclaration | null;
+  /** B10: the server's measurement words for these dates. */
+  measurement?: Measurement;
 }
 
 // ---------------------------------------------------------------- B9
@@ -685,9 +687,42 @@ export interface Weekly {
   week_start: string;
   week_end: string;
   state?: MeasurementState;
+  /** B10: the one measurement rule shared with the email and the exports. */
+  measurement?: Measurement;
   suppliers: WeeklyRow[];
   total: Omit<WeeklyRow, "vendor_id" | "vendor_name">;
-  sent: { week_start: string; trigger: string; recipients: number; sent_at: string }[];
+  sent: WeeklyRun[];
+}
+
+export interface Measurement {
+  state: MeasurementState;
+  figures: boolean;
+  title: string | null;
+  text: string | null;
+}
+
+/** B10: one weekly email run and its delivery per recipient. */
+export interface WeeklyRun {
+  week_start: string;
+  trigger: string;
+  recipients: number;
+  asked_at?: string | null;
+  sent_at: string | null;
+  delivered?: number;
+  failed?: number;
+  pending?: number;
+  deliveries?: { recipient: string; state: "pending" | "sent" | "failed"; attempts: number; error: string | null }[];
+}
+
+/** B10: a scheduled operation of the worker on S-18. */
+export interface ScheduledOperation {
+  name: string;
+  label: string;
+  state: "ok" | "late" | "failing";
+  last_success_at: string | null;
+  last_failure_at: string | null;
+  last_error: string | null;
+  consecutive_failures: number;
 }
 
 export interface SupportGrant {
