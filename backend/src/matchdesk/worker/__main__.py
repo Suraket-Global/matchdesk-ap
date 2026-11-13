@@ -12,7 +12,7 @@ from matchdesk.core import configure_logging, get_logger, load_settings, mailer_
 from matchdesk.exceptions import MATCH_REQUEST_TASK, MATCH_RUN_TASK, execute_run, handle_match_request
 from matchdesk.extraction import extractor_from_settings
 from matchdesk.intake import PROCESS_DOCUMENT_TASK, make_handler, purge_raw
-from matchdesk.qbo import SYNC_TASK, make_sync_handler, reader_from_settings
+from matchdesk.qbo import SYNC_TASK, make_sync_handler, reader_for_tenant
 from matchdesk.receiving import purge_drafts_everywhere
 from matchdesk.reporting import (
     ARCHIVE_TASK,
@@ -35,14 +35,16 @@ load_all_models()
 
 def handlers(engine: Any) -> dict[str, Any]:
     # Extraction: MATCHDESK_EXTRACTOR selects the fake (tests), the local text-PDF reader, or a hosted
-    # provider (deferred: no account). QuickBooks: recorded synthetic responses or the unconfigured
-    # Intuit client (MATCHDESK_QBO_MODE).
+    # provider (deferred: no account). QuickBooks: per tenant (B11), recorded synthetic responses or
+    # the Intuit client over the tenant's connection (tenants.qbo_mode, else MATCHDESK_QBO_MODE).
     settings = load_settings()
     return {
         MATCH_RUN_TASK: execute_run,
         MATCH_REQUEST_TASK: handle_match_request,
         PROCESS_DOCUMENT_TASK: make_handler(engine, extractor_from_settings(settings)),
-        SYNC_TASK: make_sync_handler(engine, lambda: reader_from_settings(settings), settings.qbo_page_size),
+        SYNC_TASK: make_sync_handler(
+            engine, lambda tid: reader_for_tenant(engine, settings, tid), settings.qbo_page_size
+        ),
         ARCHIVE_TASK: make_archive_handler(),
     }
 

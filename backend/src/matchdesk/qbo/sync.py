@@ -449,7 +449,7 @@ def make_sync_handler(engine: Engine, reader_factory: Any, page_size: int) -> An
             engine,
             uuid.UUID(payload["tenant_id"]),
             uuid.UUID(payload["sync_run_id"]),
-            reader_factory(),
+            reader_factory(uuid.UUID(payload["tenant_id"])),  # the tenant's mode picks the reader (B11)
             page_size,
         )
 

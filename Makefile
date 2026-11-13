@@ -2,13 +2,28 @@
 BACKEND := backend
 VENV := $(BACKEND)/.venv/bin
 
-.PHONY: up down seed-demo demo-reset demo-email demo-po-change operator-code web web-build web-test web-e2e web-check test test-unit test-integration check reset-test-db
+.PHONY: up down sandbox-up seed-sandbox qbo-capture seed-demo demo-reset demo-email demo-po-change operator-code web web-build web-test web-e2e web-check test test-unit test-integration check reset-test-db
 
 up:
 	$(BACKEND)/scripts/dev_up.sh
 
 down:
 	$(BACKEND)/scripts/dev_down.sh
+
+# B11: restart the local stack with the web app on http://localhost:5173, the origin of the Intuit
+# redirect URI, so the session cookie set at sign-in is sent back when Intuit returns (cookies are
+# host-bound: localhost and 127.0.0.1 are different hosts). The demo works the same on this origin.
+sandbox-up:
+	$(BACKEND)/scripts/dev_down.sh
+	MATCHDESK_APP_BASE_URL=http://localhost:5173 $(BACKEND)/scripts/dev_up.sh
+
+# B11: a second synthetic tenant in Intuit mode (no connection; its controller connects on S-04).
+seed-sandbox:
+	cd $(BACKEND) && MATCHDESK_APP_BASE_URL=http://localhost:5173 .venv/bin/python scripts/seed_sandbox.py
+
+# B11, T-1.1.1: read-only capture of the connected sandbox company to backend/var/qbo-capture/.
+qbo-capture:
+	cd $(BACKEND) && .venv/bin/python scripts/qbo_sandbox_capture.py $(ARGS)
 
 # One invented tenant (controller, clerk, suppliers, POs, aliases) in matchdesk_dev; writes the files
 # to upload to play-files/ (docs/PLAY.md). ARGS="--preload" also uploads and processes them (B3).

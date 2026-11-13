@@ -63,7 +63,7 @@ from matchdesk.qbo import (
     QboNotConfiguredError,
     TokenEndpoint,
     processing_allowed,
-    token_endpoint_from_settings,
+    token_endpoint_for,
 )
 from matchdesk.qbo.models import PurchaseOrderRow
 from matchdesk.tenancy import get_engine, global_session, session
@@ -162,12 +162,15 @@ def create_app(mailer: Mailer | None = None, qbo_token_endpoint: TokenEndpoint |
         return response
 
     register_auth_routes(app, settings, engine(), out_mail)
-    qbo_endpoint: TokenEndpoint
-    try:
-        qbo_endpoint = qbo_token_endpoint or token_endpoint_from_settings(settings)
-    except QboNotConfiguredError:  # Intuit selected but unconfigured: connect answers 503
-        qbo_endpoint = _Unconfigured()
-    register_qbo_routes(app, settings, engine(), qbo_endpoint)
+    # B11: one token endpoint per QuickBooks mode, chosen per tenant (tenants.qbo_mode). A test's
+    # endpoint serves every mode, so no test reaches Intuit.
+    qbo_endpoints: dict[str, TokenEndpoint] = {}
+    for mode in ("recorded", "intuit"):
+        try:
+            qbo_endpoints[mode] = qbo_token_endpoint or token_endpoint_for(settings, mode)
+        except QboNotConfiguredError:  # Intuit unconfigured: connect answers 503
+            qbo_endpoints[mode] = _Unconfigured()
+    register_qbo_routes(app, settings, engine(), qbo_endpoints)
     register_receiving_routes(app, engine())
     register_invoice_routes(app, engine())
     register_exception_routes(app, engine())

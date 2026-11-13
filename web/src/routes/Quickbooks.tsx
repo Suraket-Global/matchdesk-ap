@@ -77,8 +77,12 @@ export function QuickbooksPage() {
       {!recorded && (
         <Banner tone="warn">
           <p>
-            <strong>Live QuickBooks.</strong> This server is set to read a real QuickBooks company, but reading from a real company is
-            not available yet. Connecting and reading are refused until it is; nothing is read or changed.
+            <strong>{c.intuit_environment === "sandbox" ? "Intuit sandbox." : "Live QuickBooks."}</strong>{" "}
+            {c.intuit_environment === "sandbox"
+              ? "This account connects to an Intuit sandbox company (Intuit's invented sample data). "
+              : "This account connects to a real QuickBooks company. "}
+            Connecting works; reading purchase orders from it is not available yet, so a read is refused and nothing is
+            copied. MatchDesk never creates or changes anything in QuickBooks.
           </p>
         </Banner>
       )}
@@ -95,7 +99,11 @@ export function QuickbooksPage() {
               <dt>Company</dt>
               <dd>{c.company_name ?? "None"}</dd>
               <dt>Source</dt>
-              <dd>{recorded ? "Demo data: recorded, invented responses. Nothing is read from Intuit." : "Intuit (live)"}</dd>
+              <dd>{recorded
+                  ? "Demo data: recorded, invented responses. Nothing is read from Intuit."
+                  : c.intuit_environment === "sandbox"
+                    ? "Intuit sandbox"
+                    : "Intuit (live)"}</dd>
               <dt>Last successful read</dt>
               <dd>{when(c.last_success_at) || "Not yet"}</dd>
               <dt>Last read</dt>

@@ -96,7 +96,9 @@ class Settings:
     smtp_username: str = ""
     smtp_password: str = ""
     mail_from: str = "MatchDesk <no-reply@matchdesk.invalid>"
-    # QuickBooks (B3): "recorded" serves synthetic JSON fixtures shaped as the API is assumed to answer
+    # QuickBooks (B3): the server-wide default mode; since B11 a tenant may override it
+    # (``tenants.qbo_mode``), so the recorded demo and an Intuit sandbox tenant run side by side.
+    # "recorded" serves synthetic JSON fixtures shaped as the API is assumed to answer
     # (shape unverified until T-1.1.1); "intuit" selects the real endpoints, which stay unconfigured
     # (no developer account). Endpoint defaults are Intuit's documented URLs, unverified until T-1.1.1.
     qbo_mode: str = "recorded"
@@ -109,6 +111,11 @@ class Settings:
     qbo_revoke_url: str = "https://developer.api.intuit.com/v2/oauth2/tokens/revoke"
     qbo_scopes: str = "com.intuit.quickbooks.accounting"
     qbo_page_size: int = 100
+    # B11: the Accounting API host for tenants in "intuit" mode. Default: Intuit's sandbox host (a
+    # production host is a separate decision). ``minorversion`` sent with every read [assumption]:
+    # Intuit's 2025 notice that 75 is the lowest version served; confirmed or corrected by T-1.1.1.
+    qbo_api_base_url: str = "https://sandbox-quickbooks.api.intuit.com"
+    qbo_minor_version: str = "75"
     # Extraction (B3): "fake" (tests), "local" (text PDFs, no network, no model), "provider" (a hosted
     # model; deferred: needs an account, so it refuses to start without a key).
     extractor: str = "local"
@@ -197,6 +204,8 @@ def load_settings() -> Settings:
         qbo_revoke_url=env("MATCHDESK_QBO_REVOKE_URL", Settings.qbo_revoke_url),
         qbo_scopes=env("MATCHDESK_QBO_SCOPES", Settings.qbo_scopes),
         qbo_page_size=int(env("MATCHDESK_QBO_PAGE_SIZE", "100")),
+        qbo_api_base_url=env("MATCHDESK_QBO_API_BASE_URL", Settings.qbo_api_base_url).rstrip("/"),
+        qbo_minor_version=env("MATCHDESK_QBO_MINOR_VERSION", Settings.qbo_minor_version),
         extractor=env("MATCHDESK_EXTRACTOR", Settings.extractor),
         extraction_provider=env("MATCHDESK_EXTRACTION_PROVIDER", ""),
         extraction_api_key=env("MATCHDESK_EXTRACTION_API_KEY", ""),

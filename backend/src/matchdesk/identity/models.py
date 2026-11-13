@@ -33,6 +33,7 @@ class Tenant(GlobalMixin, Base):
     __table_args__ = (
         CheckConstraint(enum_check("status", ("pilot", "active", "ended")), name="status"),
         CheckConstraint("waiver_limit >= 0 and waiver_period_cap >= waiver_limit", name="waiver_limits"),
+        CheckConstraint("qbo_mode is null or qbo_mode in ('recorded', 'intuit')", name="qbo_mode"),
     )
     name: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default="pilot")
@@ -43,6 +44,9 @@ class Tenant(GlobalMixin, Base):
     waiver_period_cap: Mapped[Decimal] = mapped_column(MONEY, nullable=False, server_default="500.00")
     # Local part of the account's intake address (``<local>@<intake domain>``); unique (B7, T-3.3.4).
     intake_address_local: Mapped[str | None] = mapped_column(Text, unique=True)
+    # QuickBooks mode of this account (B11, migration 0023): null follows ``MATCHDESK_QBO_MODE``;
+    # "intuit" connects this account to Intuit (the sandbox locally) beside the recorded demo.
+    qbo_mode: Mapped[str | None] = mapped_column(Text)
 
 
 class User(GlobalMixin, Base):

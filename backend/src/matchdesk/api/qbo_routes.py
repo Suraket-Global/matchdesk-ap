@@ -31,6 +31,7 @@ from matchdesk.core import ConflictError, NotFoundError, Settings
 from matchdesk.identity import load_session
 from matchdesk.qbo import (
     QboNotConfiguredError,
+    QboTransientError,
     TokenEndpoint,
     complete_callback,
     describe_connection,
@@ -39,6 +40,7 @@ from matchdesk.qbo import (
     get_connection,
     request_sync,
     start_authorization,
+    tenant_qbo_mode,
 )
 from matchdesk.qbo.models import PoLineRow, PurchaseOrderRow, SyncRun, Vendor
 from matchdesk.receiving import counting_receipt_totals
@@ -52,18 +54,25 @@ class SyncRequest(BaseModel):
     po_references: list[str] | None = Field(default=None, max_length=500)
 
 
-def register_qbo_routes(app: FastAPI, settings: Settings, engine: Engine, endpoint: TokenEndpoint) -> None:
+def register_qbo_routes(
+    app: FastAPI, settings: Settings, engine: Engine, endpoints: dict[str, TokenEndpoint]
+) -> None:
+    sandbox = "sandbox" in settings.qbo_api_base_url
+
     @app.get("/api/v1/qbo/connection")
     def get_qbo_connection(p: Auth) -> dict[str, Any]:
         require(p, "read")
         with session(p.tenant_id, engine) as s:
             # B4: the screen labels recorded-response mode and never sends anyone to Intuit in it.
             # B8: the header and S-04 show the server's last read (success or failure), not a guess.
+            # B11: the mode is this tenant's (tenants.qbo_mode, else the server setting).
+            mode = tenant_qbo_mode(s, settings, p.tenant_id)
             last = s.scalars(select(SyncRun).order_by(SyncRun.created_at.desc()).limit(1)).first()
             return {
                 **describe_connection(get_connection(s)),
-                "mode": settings.qbo_mode,
-                "source": "demo_data" if settings.qbo_mode != "intuit" else "intuit",
+                "mode": mode,
+                "source": "demo_data" if mode != "intuit" else "intuit",
+                "intuit_environment": ("sandbox" if sandbox else "production") if mode == "intuit" else None,
                 "last_sync": describe_sync(last) if last else None,
             }
 
@@ -89,8 +98,9 @@ def register_qbo_routes(app: FastAPI, settings: Settings, engine: Engine, endpoi
             return RedirectResponse(f"{target}?result=refused", status_code=303)
         try:
             with session(p.tenant_id, engine) as s:
+                endpoint = endpoints[tenant_qbo_mode(s, settings, p.tenant_id)]
                 complete_callback(s, settings, endpoint, p.tenant_id, ctx.session_id, state, code, realmId)  # type: ignore[union-attr]
-        except (NotFoundError, ConflictError, PermissionError):
+        except (NotFoundError, ConflictError, PermissionError, QboNotConfiguredError, QboTransientError):
             return RedirectResponse(f"{target}?result=refused", status_code=303)
         return RedirectResponse(f"{target}?result=connected", status_code=303)
 
@@ -98,6 +108,7 @@ def register_qbo_routes(app: FastAPI, settings: Settings, engine: Engine, endpoi
     def delete_connection(p: Auth) -> dict[str, Any]:
         require(p, "connect_qbo")
         with session(p.tenant_id, engine) as s:
+            endpoint = endpoints[tenant_qbo_mode(s, settings, p.tenant_id)]
             return describe_connection(disconnect(s, settings, endpoint, p.tenant_id, p.user_id))
 
     @app.post("/api/v1/qbo/sync-runs", status_code=202)

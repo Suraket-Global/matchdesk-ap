@@ -28,6 +28,8 @@ export interface QboConnection {
   mode?: string;
   /** B8: "demo_data" in recorded-response mode; the header and S-04 say so. */
   source?: "demo_data" | "intuit";
+  /** B11: for an account in Intuit mode, which Intuit environment the server reads. */
+  intuit_environment?: "sandbox" | "production" | null;
   last_sync?: { state: string; finished_at: string | null; error_code: string | null; started_at: string | null } | null;
 }
 

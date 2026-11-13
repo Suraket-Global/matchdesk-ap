@@ -9,8 +9,10 @@ calls. Two readers exist:
   Intuit's public reference). **Shape unverified until T-1.1.1.** Paging imitates the
   API's ``STARTPOSITION`` / ``MAXRESULTS`` (1-based start).
 
-``IntuitQboReader`` is the real client's place: selected by ``MATCHDESK_QBO_MODE=intuit``,
-it refuses every call until the fact sheet exists and the app has keys.
+``IntuitQboReader`` is the real client's place: selected per tenant (``tenants.qbo_mode``, else
+``MATCHDESK_QBO_MODE``). Since B11 it holds the GET-only ``IntuitApi`` of the tenant's connection,
+but ``page()`` still refuses: the mapping is written from the responses T-1.1.1 records, not from
+assumptions (B11 phase B).
 
 There is no item-receipt entity in the Accounting API (SRC-16); no reader returns receipts.
 """
@@ -22,9 +24,12 @@ from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from matchdesk.core import Settings
+
+if TYPE_CHECKING:
+    from matchdesk.qbo.intuit_http import IntuitApi
 
 ENTITIES = ("Vendor", "Item", "PurchaseOrder", "Bill", "VendorCredit")
 
@@ -111,14 +116,15 @@ class RecordedQboReader(FakeQboReader):
 
 
 class IntuitQboReader:
-    """Placeholder for the real ``httpx`` client, written after T-1.1.1 confirms the responses."""
+    """The live reader over ``IntuitApi`` (GET only). ``page()`` is written after T-1.1.1 records the
+    real responses; until then it refuses, so nothing is mapped from an assumed shape."""
 
-    def __init__(self, settings: Settings, access_token: str | None = None) -> None:
+    def __init__(self, settings: Settings, api: IntuitApi | None = None) -> None:
         self.settings = settings
-        self.access_token = access_token
+        self.api = api
 
     def page(self, entity: str, start: int, size: int, query: PageQuery) -> list[dict[str, Any]]:
-        raise QboNotConfiguredError("Intuit client not configured: T-1.1.1 is blocked (no developer account)")
+        raise QboNotConfiguredError("live QuickBooks reader not built yet: T-1.1.1 runs first (B11 phase B)")
 
 
 DEFAULT_FIXTURES = Path(__file__).resolve().parents[3] / "fixtures" / "qbo" / "recorded"

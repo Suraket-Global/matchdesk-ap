@@ -12,7 +12,10 @@ from matchdesk.qbo.client import (
     RecordedQboReader,
     reader_from_settings,
 )
+from matchdesk.qbo.intuit_http import ApiAnswer, HttpAnswer, IntuitApi, QboAuthError, limit_headers
+from matchdesk.qbo.live import reader_for_tenant
 from matchdesk.qbo.oauth import (
+    REFRESH_BEFORE_EXPIRY,
     FakeIntuitTokenEndpoint,
     IntuitTokenEndpoint,
     RefreshExpiredError,
@@ -24,7 +27,11 @@ from matchdesk.qbo.oauth import (
     get_connection,
     processing_allowed,
     start_authorization,
+    stored_tokens,
+    tenant_qbo_mode,
+    token_endpoint_for,
     token_endpoint_from_settings,
+    token_source,
 )
 from matchdesk.qbo.sync import (
     MATCH_REQUEST_TASK,
@@ -39,12 +46,17 @@ __all__ = [
     "DEFAULT_FIXTURES",
     "ENTITIES",
     "MATCH_REQUEST_TASK",
+    "REFRESH_BEFORE_EXPIRY",
     "SYNC_TASK",
+    "ApiAnswer",
     "FakeIntuitTokenEndpoint",
     "FakeQboReader",
+    "HttpAnswer",
+    "IntuitApi",
     "IntuitQboReader",
     "IntuitTokenEndpoint",
     "PageQuery",
+    "QboAuthError",
     "QboNotConfiguredError",
     "QboReader",
     "QboTransientError",
@@ -58,10 +70,16 @@ __all__ = [
     "disconnect",
     "execute_sync",
     "get_connection",
+    "limit_headers",
     "make_sync_handler",
     "processing_allowed",
+    "reader_for_tenant",
     "reader_from_settings",
     "request_sync",
     "start_authorization",
+    "stored_tokens",
+    "tenant_qbo_mode",
+    "token_endpoint_for",
     "token_endpoint_from_settings",
+    "token_source",
 ]

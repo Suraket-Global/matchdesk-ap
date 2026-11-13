@@ -18,3 +18,7 @@ os.environ["MATCHDESK_TOKEN_KEY_ID"] = "t1"
 os.environ["MATCHDESK_APP_BASE_URL"] = "https://app.matchdesk.test"
 os.environ["MATCHDESK_EXTRACTOR"] = "fake"
 os.environ["MATCHDESK_QBO_MODE"] = "recorded"
+# B11: tests never see the Intuit app credentials in backend/.env and never reach Intuit.
+os.environ["MATCHDESK_QBO_CLIENT_ID"] = ""
+os.environ["MATCHDESK_QBO_CLIENT_SECRET"] = ""
+os.environ["MATCHDESK_QBO_REDIRECT_URI"] = ""
