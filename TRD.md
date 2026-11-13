@@ -580,7 +580,9 @@ The B6 TODO list is done. Where the built version differs from it, that is said 
 5. **Done.** Contract tests replay the recorded sandbox answers through the real client (`tests/unit/test_b11_live_qbo.py`, `tests/integration/test_b11_live_qbo.py`). A manual sandbox sync is recorded in verification-report-fixing.md, B11.
 6. **Done.** The mode is set per account (`tenants.qbo_mode`): S-04 says "Intuit sandbox", names the company from CompanyInfo and shows the requested scope. `docs/PLAY.md` section 12 and `AGENTS.md` are updated.
 
-**Still open:** a Canadian company (currency and tax), vendor credits, bills made from a PO, and production keys (Intuit's app assessment, execution-plan.md section 3).
+**Since B13 (2026-11-14):** a Canadian sandbox company was read (qbo-fact-sheet.md section 6): line amounts before tax with `GlobalTaxCalculation: TaxExcluded` and the tax in `TxnTaxDetail`; the sync keeps documents in the account's currency only and leaves out a document marked `TaxInclusive`, counted in the sync run (`skipped_tax_inclusive`) and named on S-04.
+
+**Still open:** vendor credits, bills made from a PO with line links, and production keys (Intuit's app assessment, execution-plan.md section 3).
 
 ## 12. API contracts
 

@@ -211,7 +211,11 @@ def _one_page(s: Session, tenant_id: uuid.UUID, run: SyncRun, reader: QboReader,
         "Bill": _bills,
         "VendorCredit": _bills,
     }[entity]
-    kept = _same_currency(s, tenant_id, rows, cursor, entity) if entity in CURRENCY_ENTITIES else rows
+    kept = (
+        _before_tax(_same_currency(s, tenant_id, rows, cursor, entity), cursor, entity)
+        if entity in CURRENCY_ENTITIES
+        else rows
+    )
     handler(s, tenant_id, kept, now, cursor, entity)
     counts = dict(run.counts or {})
     counts[entity] = int(counts.get(entity, 0)) + len(kept)
@@ -251,6 +255,30 @@ def _same_currency(
     if skipped:
         cursor["skipped_currency"] = skipped
         cursor["home_currency"] = home
+    return kept
+
+
+TAX_INCLUSIVE = "TaxInclusive"
+
+
+def _before_tax(rows: list[dict[str, Any]], cursor: dict, entity: str) -> list[dict[str, Any]]:
+    """B13: MatchDesk compares unit prices and line amounts before tax. The Canadian sandbox company
+    (T-1.1.1, 2026-11-13) sends ``GlobalTaxCalculation: TaxExcluded`` on every purchase order and
+    bill, with line ``Amount`` = ``Qty`` x ``UnitPrice`` before tax and the tax only in
+    ``TxnTaxDetail`` and ``TotalAmt``; the US company sends no such field. A row whose amounts
+    include tax (``TaxInclusive``, not observed) would compare a taxed price with an untaxed one and
+    raise false findings, so it is not stored and is counted in ``cursor["skipped_tax_inclusive"]``
+    (S-04 says so); its PO is then not found and its lines never pass [default the founder may
+    revisit]. ``TaxExcluded``, ``NotApplicable`` and a missing field are kept."""
+    kept: list[dict[str, Any]] = []
+    skipped = dict(cursor.get("skipped_tax_inclusive") or {})
+    for r in rows:
+        if str(r.get("GlobalTaxCalculation") or "") == TAX_INCLUSIVE:
+            skipped[entity] = int(skipped.get(entity, 0)) + 1
+            continue
+        kept.append(r)
+    if skipped:
+        cursor["skipped_tax_inclusive"] = skipped
     return kept
 
 
@@ -547,6 +575,10 @@ def describe_sync(run: SyncRun) -> dict[str, Any]:
     ]
     return {
         "skipped_currency": skipped,
+        "skipped_tax_inclusive": [
+            {"entity": k, "count": int(n)}
+            for k, n in sorted((cursor.get("skipped_tax_inclusive") or {}).items())
+        ],
         "home_currency": cursor.get("home_currency"),
         "id": str(run.id),
         "mode": run.mode,

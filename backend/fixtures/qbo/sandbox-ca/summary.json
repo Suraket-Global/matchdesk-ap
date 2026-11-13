@@ -1,0 +1,212 @@
+{
+  "captured_at": "20261113T193120Z",
+  "page_size": 100,
+  "entities": {
+    "Vendor": {
+      "count": 36,
+      "rows": 36,
+      "fields": [
+        "Active",
+        "Balance",
+        "BillAddr",
+        "CompanyName",
+        "CurrencyRef",
+        "DisplayName",
+        "FamilyName",
+        "GivenName",
+        "Id",
+        "MetaData",
+        "MiddleName",
+        "Mobile",
+        "PrimaryEmailAddr",
+        "PrimaryPhone",
+        "PrintOnCheckName",
+        "SyncToken",
+        "T4AEligible",
+        "T5018Eligible",
+        "TaxIdentifier",
+        "V4IDPseudonym",
+        "Vendor1099",
+        "domain",
+        "sparse"
+      ],
+      "line_fields": [],
+      "line_detail_types": [],
+      "line_detail_fields": [],
+      "line_linked_txn_types": [],
+      "line_linked_txn_fields": [],
+      "linked_txn_types": [],
+      "po_status_values": []
+    },
+    "Item": {
+      "count": 26,
+      "rows": 26,
+      "fields": [
+        "Active",
+        "AssetAccountRef",
+        "Description",
+        "ExpenseAccountRef",
+        "FullyQualifiedName",
+        "Id",
+        "IncomeAccountRef",
+        "InvStartDate",
+        "Level",
+        "MetaData",
+        "Name",
+        "ParentRef",
+        "PurchaseCost",
+        "PurchaseDesc",
+        "PurchaseTaxCodeRef",
+        "PurchaseTaxIncluded",
+        "QtyOnHand",
+        "SalesTaxCodeRef",
+        "SalesTaxIncluded",
+        "Sku",
+        "SubItem",
+        "SyncToken",
+        "Taxable",
+        "TrackQtyOnHand",
+        "Type",
+        "UnitPrice",
+        "domain",
+        "sparse"
+      ],
+      "line_fields": [],
+      "line_detail_types": [],
+      "line_detail_fields": [],
+      "line_linked_txn_types": [],
+      "line_linked_txn_fields": [],
+      "linked_txn_types": [],
+      "po_status_values": []
+    },
+    "PurchaseOrder": {
+      "count": 5,
+      "rows": 5,
+      "fields": [
+        "APAccountRef",
+        "CurrencyRef",
+        "CustomField",
+        "DocNumber",
+        "EmailStatus",
+        "ExchangeRate",
+        "GlobalTaxCalculation",
+        "Id",
+        "Line",
+        "LinkedTxn",
+        "MetaData",
+        "POEmail",
+        "POStatus",
+        "ShipAddr",
+        "SyncToken",
+        "TotalAmt",
+        "TxnDate",
+        "TxnTaxDetail",
+        "VendorRef",
+        "domain",
+        "sparse"
+      ],
+      "line_fields": [
+        "Amount",
+        "CustomExtensions",
+        "Description",
+        "DetailType",
+        "Id",
+        "ItemBasedExpenseLineDetail",
+        "LineNum"
+      ],
+      "line_detail_types": [
+        "ItemBasedExpenseLineDetail"
+      ],
+      "line_detail_fields": [
+        "ItemBasedExpenseLineDetail.BillableStatus",
+        "ItemBasedExpenseLineDetail.CustomerRef",
+        "ItemBasedExpenseLineDetail.ItemRef",
+        "ItemBasedExpenseLineDetail.Qty",
+        "ItemBasedExpenseLineDetail.TaxCodeRef",
+        "ItemBasedExpenseLineDetail.UnitPrice"
+      ],
+      "line_linked_txn_types": [],
+      "line_linked_txn_fields": [],
+      "linked_txn_types": [
+        "Bill"
+      ],
+      "po_status_values": [
+        "Closed",
+        "Open"
+      ]
+    },
+    "Bill": {
+      "count": 4,
+      "rows": 4,
+      "fields": [
+        "APAccountRef",
+        "Balance",
+        "CurrencyRef",
+        "DueDate",
+        "ExchangeRate",
+        "GlobalTaxCalculation",
+        "HomeBalance",
+        "Id",
+        "Line",
+        "LinkedTxn",
+        "MetaData",
+        "SyncToken",
+        "TotalAmt",
+        "TxnDate",
+        "TxnTaxDetail",
+        "VendorAddr",
+        "VendorRef",
+        "domain",
+        "sparse"
+      ],
+      "line_fields": [
+        "AccountBasedExpenseLineDetail",
+        "Amount",
+        "CustomExtensions",
+        "Description",
+        "DetailType",
+        "Id",
+        "ItemBasedExpenseLineDetail",
+        "LineNum",
+        "LinkedTxn"
+      ],
+      "line_detail_types": [
+        "AccountBasedExpenseLineDetail",
+        "ItemBasedExpenseLineDetail"
+      ],
+      "line_detail_fields": [
+        "AccountBasedExpenseLineDetail.AccountRef",
+        "AccountBasedExpenseLineDetail.BillableStatus",
+        "AccountBasedExpenseLineDetail.TaxCodeRef",
+        "ItemBasedExpenseLineDetail.BillableStatus",
+        "ItemBasedExpenseLineDetail.CustomerRef",
+        "ItemBasedExpenseLineDetail.ItemRef",
+        "ItemBasedExpenseLineDetail.Qty",
+        "ItemBasedExpenseLineDetail.TaxCodeRef",
+        "ItemBasedExpenseLineDetail.UnitPrice"
+      ],
+      "line_linked_txn_types": [],
+      "line_linked_txn_fields": [],
+      "linked_txn_types": [
+        "BillPaymentCheck"
+      ],
+      "po_status_values": []
+    },
+    "VendorCredit": {
+      "count": 0,
+      "rows": 0,
+      "fields": [],
+      "line_fields": [],
+      "line_detail_types": [],
+      "line_detail_fields": [],
+      "line_linked_txn_types": [],
+      "line_linked_txn_fields": [],
+      "linked_txn_types": [],
+      "po_status_values": []
+    }
+  },
+  "statuses": {
+    "200": 11
+  },
+  "limit_headers_seen": []
+}

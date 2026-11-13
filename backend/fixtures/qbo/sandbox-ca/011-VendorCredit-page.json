@@ -1,0 +1,15 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/v3/company/{realmId}/query",
+    "query": "select * from VendorCredit startposition 1 maxresults 100"
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "date": "Fri, 13 Nov 2026 19:31:20 GMT",
+    "intuit_tid": "REQUEST-ID-REMOVED",
+    "x-request-id": "REQUEST-ID-REMOVED"
+  },
+  "body": {"QueryResponse":{},"time":"2026-11-13T11:31:20.771-08:00"}
+}

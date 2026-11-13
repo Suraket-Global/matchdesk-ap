@@ -10,7 +10,7 @@ From the `matchdesk-ap` folder, in a terminal:
 
 ```
 make up            # PostgreSQL, Redis, Mailpit and MinIO must already be running
-make demo-reset    # empties the local demo database and loads the demo company (asks nothing)
+make demo-reset    # rebuilds the demo company only; the sandbox accounts and their connections stay (asks nothing)
 make web           # the web app on http://127.0.0.1:5173 (leave this running)
 ```
 
@@ -158,15 +158,26 @@ MatchDesk only reads: every QuickBooks call is a GET, except Intuit's token exch
 2. **After approval (S-13).** If a report for October was approved before a deletion, it does not change. **Refresh draft** (now offered, because the period changed) gives a new version whose section 6 lists the document under "Deleted after approval of version N", with the reason; the PDF says so too.
 3. **Usage (S-16).** As the controller, **Users and access**, panel **Usage**: billable units by month (one per invoice or credit note, in the month it was first read), the figures the operator sees on S-18, without a price. A deleted document stays counted: it was read.
 4. **Resize the match view (S-09).** In a window at least 1280 px wide, open any match view. Drag the thin handles between the document, the comparison and the actions, or Tab to a handle and use the arrow keys (Shift for a larger step, Home and End for the limits). Reload the tab: the widths stay. A double click on a handle (or Enter) puts all three back. Narrower windows keep the stacked layout without handles.
-5. **Canada sandbox.** `make seed-sandbox ARGS="--name 'Sandbox Distributor CA (Intuit sandbox)' --currency CAD"` creates a second sandbox account in CAD beside the US one; the steps to connect and capture the Canadian company are in [qbo-fact-sheet.md section 6](qbo-fact-sheet.md#6-canada-company-to-capture). The Intuit consent is the lead's.
+5. **Canada sandbox.** `make seed-sandbox ARGS="--name 'Sandbox Distributor CA (Intuit sandbox)' --currency CAD"` creates a second sandbox account in CAD beside the US one. It is connected to "Sandbox Company CA b867" since B13; section 14 reads it.
+
+## 14. The Canadian sandbox company (B13)
+
+The account "Sandbox Distributor CA (Intuit sandbox)" (currency CAD) is connected to Intuit's Canadian sample company "Sandbox Company CA b867". MatchDesk only reads it.
+
+1. `make sandbox-up` and `make web`, then open http://localhost:5173/login and sign in as `controller.sandbox-ca@example.invalid` (the link is in Mailpit, http://127.0.0.1:8025).
+2. **Settings > QuickBooks** says Connected, "Sandbox Company CA b867". **Read now** with From 2026-04-01 and To 2026-09-30. It ends with "1 Bill, 27 Item, 37 Vendor, 0 VendorCredit, 2 PurchaseOrder" and "3 documents in HKD skipped: this account is in CAD": the company also buys in Hong Kong dollars, and those purchase orders are left out because they are not in the account's currency.
+3. Open PO 1003 or 1004. The prices are before tax (PO 1003: 75 × 3.50 = 262.50; QuickBooks adds 13 % HST to the total only). MatchDesk compares invoice prices before tax too. A QuickBooks document whose amounts include tax would be left out and named on S-04.
+4. `make demo-reset` leaves this account, its connection and what it read alone.
 
 ## Not built yet (each needs an outside account; the screens say so)
 
-- **Production Intuit keys and Intuit's app assessment.** The demo reads recorded, invented responses; the sandbox accounts of section 12 read Intuit's sandbox. A real company needs production keys and Intuit's app assessment (`execution-plan.md` section 3). A Canadian company (CAD, GST/HST) is ready to connect but has not been read yet ([qbo-fact-sheet.md section 6](qbo-fact-sheet.md#6-canada-company-to-capture)).
+- **Production Intuit keys and Intuit's app assessment.** The demo reads recorded, invented responses; the sandbox accounts of section 12 read Intuit's sandbox. A real company needs production keys and Intuit's app assessment (`execution-plan.md` section 3). A Canadian sandbox company (CAD, 13 % HST) has been read (section 14; [qbo-fact-sheet.md section 6](qbo-fact-sheet.md#6-canada-company-captured)).
 - **Hosted extractor.** Documents are read by the local text-PDF reader. Selecting a field does not highlight its place on the page, because only a hosted extraction provider records regions, and that needs a provider account and no-training terms.
 - **Hosted email provider.** Email intake works with the local signed webhook (`make demo-email`). A real inbound address needs an email provider account; `MATCHDESK_INBOUND_PROVIDER` set to a provider refuses until then.
 - **Deployment to the owner's VPS.** Everything runs on this machine only; nothing is deployed.
 
 ## Start again
 
-`make demo-reset` empties the local demo database and loads the demo company again. It only works on the local database `matchdesk_dev` and refuses in production.
+`make demo-reset` removes the demo company and everything it owns and loads it again (B13). Every other account stays as it is, including the two sandbox accounts with their QuickBooks connections, so you do not connect to Intuit again. It only works on the local database `matchdesk_dev` and refuses in production.
+
+`make dev-db-wipe` empties the whole local database instead (what `make demo-reset` did until B12): every account goes, the sandbox accounts must be created with `make seed-sandbox` and connected again on S-04. Use it only when the database itself is broken.

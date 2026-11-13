@@ -1,0 +1,15 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/v3/company/{realmId}/companyinfo/{realmId}",
+    "query": null
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "date": "Fri, 13 Nov 2026 19:31:05 GMT",
+    "intuit_tid": "REQUEST-ID-REMOVED",
+    "x-request-id": "REQUEST-ID-REMOVED"
+  },
+  "body": {"CompanyInfo":{"CompanyName":"Sandbox Company CA b867","LegalName":"Sandbox Company CA b867","CompanyAddr":{"Id":"1","Line1":"5100 Spectrum Way","City":"Cooksville","Country":"CAN","CountrySubDivisionCode":"ON","PostalCode":"L4W 5S2"},"CustomerCommunicationAddr":{"Id":"1","Line1":"5100 Spectrum Way","City":"Cooksville","Country":"CAN","CountrySubDivisionCode":"ON","PostalCode":"L4W 5S2"},"LegalAddr":{"Id":"1","Line1":"5100 Spectrum Way","City":"Cooksville","Country":"CAN","CountrySubDivisionCode":"ON","PostalCode":"L4W 5S2"},"CustomerCommunicationEmailAddr":{"Address":"removed@example.invalid"},"PrimaryPhone":{"FreeFormNumber":"(905)555-1234"},"CompanyStartDate":"2026-11-13","FiscalYearStartMonth":"January","Country":"CA","Email":{"Address":"removed@example.invalid"},"WebAddr":{},"SupportedLanguages":"en","DefaultTimeZone":"America/Los_Angeles","NameValue":[{"Name":"NonTracking","Value":"true"},{"Name":"IsQbdtMigrated","Value":"false"},{"Name":"IndustryType","Value":"Party planning services"},{"Name":"CompanyType","Value":"Sole Proprietor"},{"Name":"IndustryCode","Value":"812990"},{"Name":"SubscriptionStatus","Value":"SUBSCRIBED"},{"Name":"OfferingSku","Value":"QuickBooks Online Plus"},{"Name":"PayrollFeature","Value":"false"},{"Name":"AccountantFeature","Value":"false"},{"Name":"ItemCategoriesFeature","Value":"true"},{"Name":"AssignedTime","Value":"2026-11-13T10:00:25-08:00"}],"domain":"QBO","sparse":false,"Id":"1","SyncToken":"11","MetaData":{"CreateTime":"2026-11-13T10:00:25-08:00","LastUpdatedTime":"2026-11-13T10:23:57-08:00"}},"time":"2026-11-13T11:31:05.159-08:00"}
+}

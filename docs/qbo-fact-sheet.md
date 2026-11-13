@@ -61,12 +61,12 @@ Observed on **2026-11-13** in an Intuit sandbox company, through MatchDesk's own
 | Vendor credits as in the recorded fixtures | **Unverified:** the sandbox has none |
 | Query paging with `STARTPOSITION` / `MAXRESULTS` | **Holds**, with `orderby Id` added |
 | No item-receipt entity in the API | **Holds** |
-| Canadian company: CAD, GST/HST tax codes | **Unverified.** The sandbox is US (USD, tax code `NON`). CompanyInfo carries no currency field, so no home currency is read. Since the lead review, the sync reads `CurrencyRef` on every purchase order, bill and vendor credit. A document in another currency than the account's is not stored, and S-04 names it ("3 documents in USD skipped: this account is in CAD"). A PO naming a skipped bill has unknown history. A row with no `CurrencyRef` is taken to be in the account's currency [assumption]: every observed PO and bill had one. The sandbox account is seeded in USD |
+| Canadian company: CAD, GST/HST tax codes | **Observed 2026-11-13/14** in "Sandbox Company CA b867" (section 6; fixtures in `backend/fixtures/qbo/sandbox-ca/`). Multicurrency is on: purchase orders and bills carry `CurrencyRef` (CAD and HKD seen, none in USD) and `ExchangeRate` (1 for CAD). Every purchase order and bill carries `GlobalTaxCalculation: TaxExcluded` and `TxnTaxDetail` (`TotalTax`, `TaxLine` with `TaxRateRef`, `TaxPercent`, `NetAmountTaxable`); CAD documents show 13 % (Ontario HST), HKD documents 0 %. Line `Amount` = `Qty` × `UnitPrice` **before tax**; the tax is only in `TxnTaxDetail` and `TotalAmt` (PO 1003: lines 262.50, tax 34.13, total 296.63). Line `TaxCodeRef` is an id (`5`, `2`), not `NON` as in the US company. MatchDesk compares prices before tax, so these amounts are used as read; a document marked `TaxInclusive` (not observed) is not stored and S-04 names it [default the founder may revisit]. The US company sends no `GlobalTaxCalculation`, `TxnTaxDetail` or `ExchangeRate` |
 | A PO closed by something other than a bill | **Observed:** PO 1003's `LinkedTxn` names a `Purchase` (an expense), which MatchDesk does not read. **Default (founder may revisit):** a PO whose `LinkedTxn` names any transaction type other than a bill, or a bill MatchDesk does not hold, has unknown history. Every line on it is `history_incomplete` and never passes, and S-10 gives the reason ("QuickBooks links this purchase order to Purchase 115, which MatchDesk does not read") |
 
 ## 5. What the owner could add by hand in the sandbox (no MatchDesk writes)
 
-1. A **Canada** sandbox company (developer portal, Sandbox, add company, Canada), to observe CAD amounts and GST/HST tax codes.
+1. ~~A **Canada** sandbox company~~: done in B13 (section 6). Still open there: a vendor credit, a document with tax included, PST/QST rates.
 2. A purchase order with three lines, two of them the same item, then a bill made from it with **Add to bill** for part of the quantity, and a second partial bill. This shows whether a bill made from a PO carries a line-level `LinkedTxn`.
 3. A bill with a **Bill no.** (the supplier's invoice number).
 4. A **vendor credit** with item lines for a vendor that has a purchase order.
@@ -75,19 +75,23 @@ Observed on **2026-11-13** in an Intuit sandbox company, through MatchDesk's own
 
 After any of these, run `make qbo-capture ARGS="--fixtures fixtures/qbo/sandbox"` and update this sheet.
 
-## 6. Canada company: to capture
+## 6. Canada company: captured
 
-Not read yet. MatchDesk is ready for it (B12, 2026-11-13); the Intuit consent is the lead's step. Nothing in this section has run against a Canadian company, so every Canadian statement above stays **unverified** until these steps are done and this sheet is updated.
+**Done 2026-11-13/14 (B13).** The lead created "Sandbox Company CA b867" (Canada, QuickBooks Online Plus, Ontario address) and connected it to "Sandbox Distributor CA (Intuit sandbox)" through the real OAuth flow. Then, through the product's own read-only paths only:
 
-1. **Add the company (lead, at developer.intuit.com).** Dashboard, the MatchDesk app, **Sandbox**, **Add a sandbox company**, country **Canada**, edition Plus or Advanced. MatchDesk writes nothing to it.
-2. **Start the stack:** `make sandbox-up` (the app on http://localhost:5173, the redirect URI's origin), then `make web`.
-3. **Create the Canadian account:** `make seed-sandbox ARGS="--name 'Sandbox Distributor CA (Intuit sandbox)' --currency CAD"`. It creates the account in Intuit mode, currency CAD, not connected, with `controller.sandbox-ca@example.invalid` and `clerk.sandbox-ca@example.invalid`. The US account "Sandbox Distributor (Intuit sandbox)" and the demo account are untouched. Running it again changes nothing.
-4. **Connect (lead):** open http://localhost:5173/login (not 127.0.0.1), sign in as `controller.sandbox-ca@example.invalid` (the link is in Mailpit, http://127.0.0.1:8025), **Settings > QuickBooks > Connect to QuickBooks**, **Continue to Intuit**, and choose the **Canada** sandbox company, not the US one. One QuickBooks company belongs to one MatchDesk account: choosing the US company here is refused, because it is already connected to the US account.
-5. **Read:** **Read now** for a range that holds the company's purchase orders. Note the counts on S-04, in particular any "documents in USD skipped" (expected: none, the account is in CAD).
-6. **Capture:** `make qbo-capture ARGS="--tenant 'Sandbox Distributor CA (Intuit sandbox)'"`. The raw answers stay in `backend/var/qbo-capture/<time>/` (gitignored); `sanitised/` has the realm, request IDs, Intuit user IDs and e-mail addresses removed, and the leak gate refuses to write a file that still holds one. Only add `--fixtures fixtures/qbo/sandbox-ca` after reading the sanitised files.
-7. **Record here,** each with what was observed:
-   - `CurrencyRef` on purchase orders, bills and vendor credits (expected `CAD`);
-   - the tax codes on bill and PO lines (GST, HST, PST, QST, exempt, zero-rated) and whether `TxnTaxDetail` and `GlobalTaxCalculation` appear;
-   - whether line `Amount` and `UnitPrice` exclude tax (MatchDesk compares unit prices before tax);
-   - whether a Canadian company offers the same entities and query paging as the US one.
-8. **Then:** replace the "Canadian company" row of section 4 with what was observed, and add a regression test for any shape that differs from the US one.
+- `make qbo-capture ARGS="--tenant 'Sandbox Distributor CA (Intuit sandbox)'"`: 11 reads, all 200. Counts: Vendor 36, Item 26, PurchaseOrder 5, Bill 4, VendorCredit **0**. The sanitised answers were read before they were copied to `backend/fixtures/qbo/sandbox-ca/` (realm, request IDs and e-mail addresses removed; the realm ID was checked absent).
+- **Read now** on S-04 for 2026-04-01 to 2026-09-30 (`request_sync`, the worker's `execute_sync`, `IntuitQboReader`): succeeded with 2 PurchaseOrder, 1 Bill, 27 Item, 37 Vendor, 0 VendorCredit, and "3 documents in HKD skipped: this account is in CAD". Nothing in USD was skipped; the currency guard left out only the three HKD purchase orders, and their bills were not asked for (bills are read for the vendors of the stored purchase orders).
+
+What the Canadian company showed, beyond the "Canadian company" row of section 4:
+
+| Item | Observed |
+|---|---|
+| Purchase orders | 1001, 1002, 1005 in HKD (exchange rate about 0.135); 1003 and 1004 in CAD, both `Closed`, both naming Bill 97 in their own `LinkedTxn`. PO 1004 line 2 (25 × 4.00) was never billed although the PO is closed |
+| Bills | No `DocNumber` on any bill (as in the US company). Bill 97 (CAD, 508.51 = 450.00 + 58.51 HST) holds lines from two purchase orders; its lines carry an empty `LinkedTxn`, so the link is on the PO header only, as in the US. The sync attributed each line by item to PO 1003 line 1 and PO 1004 line 1. Bill 98 is account-based (no item) and from a vendor with no purchase order. Bills 19 and 20 (HKD) are linked to `BillPaymentCheck` payments |
+| Items | `PurchaseTaxCodeRef`, `PurchaseTaxIncluded`, `SalesTaxIncluded`, `Sku` present on items |
+| Vendors | Canadian fields `T4AEligible`, `T5018Eligible`, `TaxIdentifier`; `CurrencyRef` per vendor |
+| Not seen | Vendor credits, a `TaxInclusive` document, PST/QST or GST-only rates, units of measure |
+
+Regression tests over the recorded answers: `backend/tests/integration/test_b13_canada.py`.
+
+To read the company again: `make sandbox-up`, sign in as `controller.sandbox-ca@example.invalid` on http://localhost:5173, **Settings > QuickBooks > Read now**; `make qbo-capture ARGS="--tenant 'Sandbox Distributor CA (Intuit sandbox)'"` records it again. Since B13 `make demo-reset` keeps both sandbox accounts and their connections.

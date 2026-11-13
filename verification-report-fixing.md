@@ -1092,3 +1092,42 @@ Source: the B12 brief (`_coordination/B12-GUIDE.md`, outside this repository). B
 - Only account-bound items remain: production Intuit keys and Intuit's app assessment, the hosted extractor, a hosted email provider, deployment to the owner's VPS.
 - The Canadian sandbox company is not connected or read: fact sheet section 6 lists the lead's steps. `make demo-reset` empties `matchdesk_dev`, so the US sandbox account was created again and must be connected again on S-04.
 - Deletion of a receiving file is not part of this item (a receiving import is voided, as before).
+
+## B13 2026-11-14
+
+Source: the coordinator's B13 brief (outside this repository). Branch `feat/b13-canada` from `main` cb65fb4. No migration. Read-only QuickBooks calls only, made by the product's own paths (`make qbo-capture`, S-04 **Read now**); no hand-typed query. No secret, token, realm ID or real e-mail address is printed or committed; the realm IDs of both connections were checked absent from the committed fixtures.
+
+### B13.1 The Canadian sandbox company (fact sheet section 6, steps 5 to 8)
+
+| # | Step | Observed or built | Test |
+|---|---|---|---|
+| 1 | Capture | `make qbo-capture ARGS="--tenant 'Sandbox Distributor CA (Intuit sandbox)'"`: 11 reads, all 200 (Vendor 36, Item 26, PurchaseOrder 5, Bill 4, VendorCredit 0). Sanitised answers read, then copied to `backend/fixtures/qbo/sandbox-ca/` | `test_recorded_canadian_shapes` |
+| 2 | Real read on S-04 | 2026-04-01 to 2026-09-30, through `request_sync` and the worker: succeeded, 2 PurchaseOrder, 1 Bill, 27 Item, 37 Vendor, 0 VendorCredit; "3 documents in HKD skipped: this account is in CAD". **Nothing in USD was skipped**; the guard left out only the HKD purchase orders | `test_canadian_company_is_read_before_tax_and_only_hkd_is_skipped` (same counts over the recorded answers with Intuit's filters) |
+| 3 | Currency and tax | `CurrencyRef` CAD and HKD, `ExchangeRate`; `GlobalTaxCalculation: TaxExcluded` on every PO and bill; `TxnTaxDetail` 13 % on CAD documents; line `Amount` = `Qty` × `UnitPrice` before tax, tax only in `TotalAmt`; `TaxCodeRef` ids `5` and `2`. Stored PO prices are before tax (PO 1003 line 1: 3.50, 262.50) and bill lines sum to 450.00 of a 508.51 total | same tests |
+| 4 | Shape that differs from the US company | One bill named by two purchase orders, lines attributed by item to each (worked unchanged). New guard: a PO, bill or vendor credit marked `TaxInclusive` (not observed) is not stored, counted as `skipped_tax_inclusive` on the sync run and named on S-04, so a taxed price is never compared with an untaxed one [default the founder may revisit] | `test_a_tax_inclusive_document_is_not_stored_and_is_named`, `web/src/b13-canada.test.ts` |
+| 5 | Fact sheet | Section 4 "Canadian company" row replaced with what was observed; section 6 records the capture; section 5 item 1 closed | review |
+
+### B13.2 `make demo-reset` keeps the sandbox accounts
+
+Until B12, `make demo-reset` dropped the whole schema of `matchdesk_dev`, so the sandbox accounts lost their connections (found after B12). Now `backend/scripts/demo_reset.sh` runs `scripts/demo_tenant_reset.py`, which deletes the rows of the tenant "Demo Distributor Ltd (synthetic)" only, in dependency order, in one transaction as the owner with `app.purge` (the rule `purge_tenant()` uses for insert-only rows), then seeds it again. It refuses production, any database other than `matchdesk_dev` or `matchdesk_test`, any other tenant name and an account in Intuit mode. Users and stored files stay, as before. The full wipe is kept as `make dev-db-wipe` (`scripts/dev_db_wipe.sh`).
+
+| Check | Result |
+|---|---|
+| `test_demo_reset_keeps_a_sandbox_account_and_its_connection` | a seeded, preloaded demo tenant is removed to 0 rows; an Intuit-mode account keeps every row, its connection and the same sealed tokens; the demo seeds again |
+| `test_demo_reset_refuses_an_intuit_account_and_other_names`, `test_demo_reset_script_wipes_no_database` | passed |
+| `make demo-reset` on `matchdesk_dev` | "removed 'Demo Distributor Ltd (synthetic)' (53 rows); other accounts untouched"; both sandbox connections still `connected` with unchanged token digests (compared, not printed) |
+
+### B13.3 Commands and results (from `matchdesk-ap/`)
+
+| Command | Result |
+|---|---|
+| `make test` | 429 passed |
+| `make check` | passed |
+| `make web-check` (typecheck, lint, Vitest, build) | passed; Vitest 167 passed |
+| `make web-e2e` (own stack, dev stack stopped) | 18 passed; `matchdesk_dev` unchanged by the run |
+
+### B13.4 Left
+
+- Not seen in the Canadian company: vendor credits, a `TaxInclusive` document, PST, QST or GST-only rates, units of measure.
+- Bill 97 shows that QuickBooks closes a PO with an unbilled line (PO 1004 line 2); MatchDesk reads the PO lines as ordered and does not treat "Closed" as received.
+- Production keys and Intuit's app assessment, the hosted extractor, a hosted email provider and deployment stay account-bound.

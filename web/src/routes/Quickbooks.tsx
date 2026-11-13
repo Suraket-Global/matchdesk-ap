@@ -229,11 +229,19 @@ export function QuickbooksPage() {
 
 /** B11-1: documents left out because their currency is not the account's ("3 documents in USD
  * skipped: this account is in CAD"); null when nothing was skipped. */
-export function skippedText(run: { skipped_currency?: unknown; home_currency?: unknown } | null | undefined): string | null {
+export function skippedText(
+  run: { skipped_currency?: unknown; home_currency?: unknown; skipped_tax_inclusive?: unknown } | null | undefined,
+): string | null {
   const rows = (run?.skipped_currency ?? []) as { currency: string; count: number }[];
-  if (!rows.length) return null;
-  const byCurrency = new Map<string, number>();
-  for (const r of rows) byCurrency.set(r.currency, (byCurrency.get(r.currency) ?? 0) + r.count);
-  const parts = [...byCurrency].map(([cur, n]) => `${n} ${n === 1 ? "document" : "documents"} in ${cur}`);
-  return `${parts.join(", ")} skipped: this account is in ${String(run?.home_currency ?? "another currency")}`;
+  const out: string[] = [];
+  if (rows.length) {
+    const byCurrency = new Map<string, number>();
+    for (const r of rows) byCurrency.set(r.currency, (byCurrency.get(r.currency) ?? 0) + r.count);
+    const parts = [...byCurrency].map(([cur, n]) => `${n} ${n === 1 ? "document" : "documents"} in ${cur}`);
+    out.push(`${parts.join(", ")} skipped: this account is in ${String(run?.home_currency ?? "another currency")}`);
+  }
+  // B13: amounts that include tax are not compared with prices before tax.
+  const taxed = ((run?.skipped_tax_inclusive ?? []) as { count: number }[]).reduce((n, r) => n + r.count, 0);
+  if (taxed) out.push(`${taxed} ${taxed === 1 ? "document" : "documents"} with tax included in the amounts skipped: MatchDesk compares prices before tax`);
+  return out.length ? out.join(". ") : null;
 }

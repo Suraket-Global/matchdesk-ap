@@ -37,6 +37,8 @@ export interface QboConnection {
     started_at: string | null;
     skipped_currency?: { entity: string; currency: string; count: number }[];
     home_currency?: string | null;
+    /** B13: documents not stored because their amounts include tax. */
+    skipped_tax_inclusive?: { entity: string; count: number }[];
   } | null;
 }
 
@@ -46,6 +48,7 @@ export interface SyncRun {
   /** B11-1: documents not stored because their currency is not the account's. */
   skipped_currency?: { entity: string; currency: string; count: number }[];
   home_currency?: string | null;
+  skipped_tax_inclusive?: { entity: string; count: number }[];
   [k: string]: unknown;
 }
 

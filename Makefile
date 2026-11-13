@@ -2,7 +2,7 @@
 BACKEND := backend
 VENV := $(BACKEND)/.venv/bin
 
-.PHONY: up down sandbox-up seed-sandbox qbo-capture seed-demo demo-reset demo-email demo-po-change operator-code web web-build web-test web-e2e web-check test test-unit test-integration check reset-test-db
+.PHONY: up down sandbox-up seed-sandbox qbo-capture seed-demo demo-reset dev-db-wipe demo-email demo-po-change operator-code web web-build web-test web-e2e web-check test test-unit test-integration check reset-test-db
 
 up:
 	$(BACKEND)/scripts/dev_up.sh
@@ -31,9 +31,15 @@ qbo-capture:
 seed-demo:
 	cd $(BACKEND) && .venv/bin/python scripts/seed_demo.py $(ARGS)
 
-# Empty matchdesk_dev, restart the API and worker, and seed again (local synthetic data only).
+# B13: remove the demo tenant only, restart the API and worker, and seed it again (local synthetic
+# data only). Other accounts, such as the Intuit sandbox accounts and their connections, are kept.
 demo-reset:
 	$(BACKEND)/scripts/demo_reset.sh
+
+# Empty the whole matchdesk_dev database, every account included (the sandbox accounts must then be
+# connected to Intuit again), restart and seed the demo. Was demo-reset until B12.
+dev-db-wipe:
+	$(BACKEND)/scripts/dev_db_wipe.sh
 
 # B7: two synthetic signed emails to the local intake webhook (one accepted, one held).
 demo-email:
