@@ -22,6 +22,7 @@ from matchdesk.core import ConflictError, dec, round_cents
 from matchdesk.intake.models import UsageEvent
 from matchdesk.reporting.models import BacktestReport, PilotEngagement
 from matchdesk.reporting.refund import DEFAULT_THRESHOLD
+from matchdesk.tenancy import advisory_lock
 
 EDITABLE = (
     "price",
@@ -120,7 +121,10 @@ def set_governing(
     s: Session, tenant_id: uuid.UUID, report: BacktestReport, user_id: uuid.UUID
 ) -> PilotEngagement:
     """Make an approved version the governing one and evaluate the refund on it, once."""
+    advisory_lock(s, f"pilot:governing:{tenant_id}")  # B14 (m1): two presses, one decision
     pilot = get_pilot(s, tenant_id)
+    if pilot is not None:
+        s.refresh(pilot)
     if pilot is None:
         raise ConflictError("there is no pilot record for this account yet")
     if pilot.governing_report_id is not None:

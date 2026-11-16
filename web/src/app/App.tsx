@@ -32,7 +32,7 @@ import {
   WifiOff,
   type LucideIcon,
 } from "lucide-react";
-import { Dialog, Loading, PageErrorBoundary, ToastHost } from "../components/ui";
+import { Dialog, Loading, PageErrorBoundary, ToastHost, toast } from "../components/ui";
 import { when } from "../lib/format";
 import { LoginPage, VerifyPage } from "../routes/Login";
 import { InvitePage } from "../routes/Invite";
@@ -314,11 +314,39 @@ function Shell({ children }: { children: ReactNode }) {
 }
 
 /** While an operator reads an account under a support grant: read only, until when, and the way out. */
-function SupportBanner() {
+export function SupportBanner({ checkEveryMs = 15_000 }: { checkEveryMs?: number }) {
   const { me, signedIn } = useSession();
   const navigate = useNavigate();
   const qc = useQueryClient();
   const [busy, setBusy] = useState(false);
+  const inSupport = !!me?.support;
+  const account = me?.support?.tenant_name ?? "the account";
+  // B14 (acceptance m13): when the controller ends the access (or it runs out), the frame and this
+  // banner must not stay over "Not found" pages. The session is asked again at intervals and when
+  // the tab is looked at; once the access is gone the operator is taken back to the console.
+  useEffect(() => {
+    if (!inSupport) return;
+    let stopped = false;
+    const check = async () => {
+      try {
+        const fresh = await get<NonNullable<typeof me>>("/api/v1/me");
+        if (stopped || fresh.support) return;
+        signedIn(fresh);
+        toast(`Support access to ${account} has ended. You are back in the operator console.`, "info");
+        navigate("/operator/tenants", { replace: true });
+      } catch {
+        /* a failed check changes nothing; the next one asks again */
+      }
+    };
+    const timer = window.setInterval(check, checkEveryMs);
+    const onShow = () => document.visibilityState === "visible" && void check();
+    document.addEventListener("visibilitychange", onShow);
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onShow);
+    };
+  }, [inSupport, account, checkEveryMs, navigate, signedIn]);
   if (!me?.support) return null;
   return (
     <div className="support-banner" role="status">

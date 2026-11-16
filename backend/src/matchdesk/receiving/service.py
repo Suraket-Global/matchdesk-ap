@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import Engine, select, text
 from sqlalchemy.orm import Session
@@ -78,11 +79,17 @@ class ValidatedRow:
     receiver_ref: str | None
 
 
+PACIFIC = ZoneInfo("America/Vancouver")  # the buyer's time (CLAUDE.md: Lower Mainland)
+
+
 @dataclass
 class Validation:
     total: int = 0
     valid: list[ValidatedRow] = field(default_factory=list)
     rejected: list[dict[str, Any]] = field(default_factory=list)
+    # B14 (acceptance m4): valid rows a person should look at before importing (a negative quantity
+    # is a return; a date after today is probably a typing error). Never a rejection.
+    warnings: list[dict[str, Any]] = field(default_factory=list)
 
 
 def create_import(
@@ -397,6 +404,7 @@ def _datetime(value: str) -> datetime | None:
 
 def validate(s: Session, imp: ReceivingImportRow) -> Validation:
     """Map and check every row; nothing is written. No row is ever rejected for its date."""
+    today = datetime.now(PACIFIC).date()  # the account's day (Lower Mainland), not the UTC day
     if not imp.column_map:
         raise ConflictError("save a column mapping first")
     from matchdesk.intake.models import DocumentRow
@@ -483,6 +491,10 @@ def validate(s: Session, imp: ReceivingImportRow) -> Validation:
             if why is not None:
                 reject(why.value)
                 continue
+        if qty < 0:
+            out.warnings.append({"row": n, "reason": "negative_quantity", "value": raw_qty[:60]})
+        if received > today:
+            out.warnings.append({"row": n, "reason": "future_date", "value": raw_date[:60]})
         out.valid.append(ValidatedRow(n, po.id, pl.id, qty, uom, received, cell(row, "receiver_ref") or None))
     return out
 
@@ -497,6 +509,7 @@ def preview(s: Session, imp: ReceivingImportRow) -> dict[str, Any]:
         "rows_valid": len(v.valid),
         "rows_rejected": len(v.rejected),
         "rejected_rows": v.rejected,
+        "warning_rows": v.warnings,
     }
 
 

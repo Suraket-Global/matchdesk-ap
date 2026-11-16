@@ -8,11 +8,19 @@ const DATETIME = new Intl.DateTimeFormat("en-GB", {
 });
 const TIME = new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit" });
 
-/** "2026-10-03" -> "3 Oct 2026" without shifting the day by time zone. */
+/** "2026-10-03" -> "3 Oct 2026" without shifting the day by time zone. A moment in time
+ * ("2026-12-17T03:10:00+00:00") is shown as the day it is where the reader is, the same day `when`
+ * shows, so two places never name different days for one moment (B14, acceptance m3). */
 export function day(iso: string | null | undefined): string {
   if (!iso) return "";
+  if (iso.length > 10 && iso[10] === "T") return DATE.format(new Date(iso));
   const [y, m, d] = iso.slice(0, 10).split("-").map((p) => Number(p));
   return DATE.format(new Date(y, m - 1, d));
+}
+
+/** Today's date where the reader is, as yyyy-mm-dd (never the UTC date: B14, acceptance m3). */
+export function today(now: Date = new Date()): string {
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
 }
 
 export function when(iso: string | null | undefined): string {

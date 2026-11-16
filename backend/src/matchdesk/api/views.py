@@ -46,6 +46,14 @@ def qty(value: Decimal | None) -> str | None:
     return text
 
 
+def _plain(value: Any, cents: bool = False) -> str:
+    """A stored tolerance as a person writes it: no trailing zeros; an amount keeps its cents."""
+    if value is None or value == "":
+        return "0"
+    d = Decimal(str(value))
+    return (price_text(d) if cents else qty(d)) or "0"
+
+
 def price_text(value: Decimal | None) -> str | None:
     """A unit price with its cents kept (4.2000 -> 4.20, 0.0750 -> 0.075), never through a float."""
     text = qty(value)
@@ -157,8 +165,9 @@ def calculation(
             text += f"; {price_text(diff)} × {qty(qty_po)} = {round_cents(diff * qty_po)}"
         parts.append(text + ".")
     parts.append(
-        f"Quantity tolerance {tol.get('qty_tolerance')}; price tolerance {tol.get('price_tol_abs')} "
-        f"or {tol.get('price_tol_pct')}%."
+        # B14 (acceptance m8): as a person writes them (0, 0.02, 0.5%), not as stored (0.0000).
+        f"Quantity tolerance {_plain(tol.get('qty_tolerance'))}; price tolerance "
+        f"{_plain(tol.get('price_tol_abs'), cents=True)} or {_plain(tol.get('price_tol_pct'))}%."
     )
     return " ".join(parts)
 

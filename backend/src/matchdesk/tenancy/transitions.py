@@ -8,9 +8,11 @@ rows; it is logged and dropped, so a newer state is never overwritten by an olde
 from __future__ import annotations
 
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 
-from sqlalchemy import text
+from sqlalchemy import Engine, text
 from sqlalchemy.orm import Session
 
 from matchdesk.core import get_logger
@@ -86,3 +88,17 @@ def advisory_lock(s: Session, key: str) -> None:
     rule reads a total and then writes against it: the waiver period cap per person (M2) and back-test
     drafts per period (m5)."""
     s.execute(text("select pg_advisory_xact_lock(hashtextextended(:k, 0))"), {"k": key})
+
+
+@contextmanager
+def held_lock(engine: Engine, key: str) -> Iterator[None]:
+    """A session-level advisory lock on a text key, held on its own connection for the whole block
+    (B14, acceptance m1). For work that spans several transactions and must not run twice at once:
+    sending the weekly summary by hand. Released on exit, or by the server if the connection dies."""
+    with engine.connect() as c:
+        c.execute(text("select pg_advisory_lock(hashtextextended(:k, 0))"), {"k": key})
+        try:
+            yield
+        finally:
+            c.execute(text("select pg_advisory_unlock(hashtextextended(:k, 0))"), {"k": key})
+            c.commit()

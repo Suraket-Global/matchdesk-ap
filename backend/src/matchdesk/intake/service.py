@@ -300,8 +300,10 @@ def complete(
         s.flush()
         if isinstance(extracted.output.get("page_count"), int):
             doc.page_count = extracted.output["page_count"]
-        materialise(s, tenant_id, doc, run.id, extracted.output, passed)
-        new_state = "succeeded" if passed else "needs_review"
+        rows = materialise(s, tenant_id, doc, run.id, extracted.output, passed)
+        # B14 (acceptance m6): ready only when every document in the file can enter matching.
+        ready = passed and all(r.verification_status != "failed" for r in rows)
+        new_state = "succeeded" if ready else "needs_review"
         transition(s, "documents", doc.id, doc.state_version, new_state, lease_expires_at=None)
         return new_state
 

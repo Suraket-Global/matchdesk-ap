@@ -176,4 +176,6 @@ def test_batch_status_lists_files_and_unknown_vendor_goes_to_review(app_engine, 
     assert any(e["type"] == "extraction_unverified" for e in body["exceptions"])
     batches = client.get("/api/v1/intake/batches", headers=w.headers).json()["items"]
     detail = client.get(f"/api/v1/intake/batches/{batches[0]['id']}", headers=w.headers).json()
-    assert detail["totals"]["file_count"] == 1 and detail["files"][0]["displayed_state"] == "ready"
+    assert (
+        detail["totals"]["file_count"] == 1 and detail["files"][0]["displayed_state"] == "needs review"
+    )  # B14 (m6): not "ready"

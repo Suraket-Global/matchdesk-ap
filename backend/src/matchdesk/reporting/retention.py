@@ -20,6 +20,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import io
+import json
 import uuid
 import zipfile
 from datetime import UTC, datetime, timedelta
@@ -33,7 +34,9 @@ from matchdesk.audit import write_audit
 from matchdesk.audit.models import AuditEvent
 from matchdesk.core import ConflictError, ForbiddenError, get_correlation_id, get_logger, new_correlation_id
 from matchdesk.exceptions.models import ExceptionRow
+from matchdesk.identity.models import Membership, User
 from matchdesk.intake.models import DocumentRow, InvoiceLineRow, InvoiceRow
+from matchdesk.qbo.models import Item, PoLineRow, PurchaseOrderRow, Vendor
 from matchdesk.receiving.models import ReceiptLineRow, ReceivingImportRow
 from matchdesk.reporting.models import (
     ArchiveExport,
@@ -42,7 +45,7 @@ from matchdesk.reporting.models import (
     FindingOutcomeRow,
     ReportFinding,
 )
-from matchdesk.tenancy import enqueue, global_session, operator_session, session
+from matchdesk.tenancy import advisory_lock, enqueue, global_session, operator_session, session
 
 log = get_logger("matchdesk.reporting.retention")
 
@@ -59,6 +62,7 @@ XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 def request_archive(s: Session, tenant_id: uuid.UUID, user_id: uuid.UUID) -> ArchiveExport:
     """Queue one archive (controller). A second request while one is being built returns that one."""
+    advisory_lock(s, f"archive_request:{tenant_id}")  # B14 (m1): two presses, one archive
     running = s.scalar(select(ArchiveExport).where(ArchiveExport.status.in_(("queued", "running"))).limit(1))
     if running is not None:
         return running
@@ -85,8 +89,18 @@ def _csv(rows: list[dict[str, Any]], columns: list[str]) -> bytes:
     w = csv.DictWriter(buf, fieldnames=columns, extrasaction="ignore")
     w.writeheader()
     for r in rows:
-        w.writerow({k: ("" if r.get(k) is None else str(r.get(k))) for k in columns})
+        w.writerow({k: _text(r.get(k)) for k in columns})
     return buf.getvalue().encode()
+
+
+def _text(value: Any) -> str:
+    """One CSV cell. A structured value (an audit event's before and after) is written as JSON, the
+    form other programs read, never as Python text (B14, acceptance m12)."""
+    if value is None:
+        return ""
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, sort_keys=True, default=str)
+    return str(value)
 
 
 def _plain(obj: Any, columns: list[str]) -> dict[str, Any]:
@@ -228,6 +242,27 @@ TABLES: dict[str, tuple[type, list[str]]] = {
             "created_at",
         ],
     ),
+    # B14 (acceptance m12): the names behind the ids the other files use.
+    "suppliers.csv": (Vendor, ["id", "name", "active"]),
+    "items.csv": (Item, ["id", "sku", "name"]),
+    "purchase_orders.csv": (
+        PurchaseOrderRow,
+        ["id", "po_number", "vendor_id", "txn_date", "qbo_status", "total"],
+    ),
+    "purchase_order_lines.csv": (
+        PoLineRow,
+        [
+            "id",
+            "purchase_order_id",
+            "line_no",
+            "item_id",
+            "description",
+            "qty_ordered",
+            "uom",
+            "unit_price",
+            "removed_at",
+        ],
+    ),
     "audit_events.csv": (
         AuditEvent,
         [
@@ -333,6 +368,19 @@ def build_archive(
             found: list[Any] = list(s.scalars(select(model)).all())
             rows = [_plain(r, cols) for r in found]
             z.writestr(name, _csv(rows, cols))
+        # B14 (acceptance m12): who the user ids are (name and role; nothing else of a person).
+        members = s.execute(
+            select(Membership.user_id, Membership.role, Membership.status, User.display_name).join(
+                User, User.id == Membership.user_id
+            )
+        ).all()
+        z.writestr(
+            "users.csv",
+            _csv(
+                [{"id": uid, "name": name, "role": role, "status": st} for uid, role, st, name in members],
+                ["id", "name", "role", "status"],
+            ),
+        )
         completeness = (
             f"Complete: {files} of {expected} original files are included.\n"
             if not missing
@@ -342,7 +390,10 @@ def build_archive(
         z.writestr(
             "README.txt",
             "MatchDesk archive of one account. documents.csv indexes the original files under documents/; "
-            "each other CSV holds one kind of record. Amounts are exact decimals; dates are ISO 8601.\n"
+            "each other CSV holds one kind of record. Amounts are exact decimals; dates are ISO 8601. "
+            "Ids are explained by suppliers.csv (vendor_id), purchase_orders.csv and purchase_order_lines.csv "
+            "(purchase_order_id, po_line_id), items.csv (item_id) and users.csv (every user id, with the "
+            "person's name and role). The before and after columns of audit_events.csv are JSON.\n"
             + completeness,
         )
     data = buf.getvalue()
@@ -523,6 +574,7 @@ def request_deletion(
     """Record the controller's request. Decision (B10, outside QA item 1): deletion may proceed
     without a complete archive, but only when the controller explicitly acknowledges it; the
     acknowledgement and the archive state at that moment are stored and shown to the operator."""
+    advisory_lock(s, f"deletion_request:{tenant_id}")  # B14 (m1): two presses, one request
     found = open_deletion(s)
     if found is not None:
         raise ConflictError("a deletion request for this account is already open")

@@ -246,7 +246,8 @@ def decide_held(
 ) -> InboundMessage:
     """``release`` (attachments into a batch) or ``discard`` a held message."""
     with session(tenant_id, engine) as s:
-        msg = s.get(InboundMessage, message_id)
+        # B14 (m1): locked, so a second decision waits and is then told it was already decided.
+        msg = s.get(InboundMessage, message_id, with_for_update=True)
         if msg is None:
             raise LookupError("message")
         if msg.status != "held":

@@ -392,6 +392,8 @@ export interface ReceivingImport {
   rows_rejected: number | null;
   late_lines_waiting?: number;
   rejected_rows: { row: number; reason: string; [k: string]: unknown }[] | null;
+  /** B14 (m4): valid rows to check before importing (negative quantity, date after today). */
+  warning_rows?: { row: number; reason: string; value?: unknown }[];
   committed_at: string | null;
   voided_at: string | null;
   void_reason: string | null;

@@ -71,13 +71,22 @@ function consequence(code: string, amount: string | null, needsApproval: boolean
   }
 }
 
+/** The last cell of the ledger strip: what the calculation comes to now (B14, acceptance m8). */
+export function ledgerTotal(exc: ExceptionItem): { label: string; value: string; open: boolean } {
+  const variance = exc.variance_amount ?? exc.reported_amount;
+  if (exc.status === "resolved" && exc.resolution_code === "resolved_by_credit") return { label: "Credited", value: cad(variance), open: false };
+  if (exc.status === "waived") return { label: "Waived", value: cad(variance), open: false };
+  if (exc.status === "resolved") return { label: "Resolved", value: cad(variance), open: false };
+  if (zeroCounted(exc)) return { label: "Adds nothing", value: "CAD 0.00", open: false };
+  return { label: "Exposure", value: cad(exc.reported_amount ?? exc.variance_amount), open: true };
+}
+
 /** The calculation of one exception as a ledger line, each figure from the stored match result, the
  * received figure linked to the exact receiving row (B8; FF-1003 is the acceptance example). */
 function Ledger({ line, exc, here }: { line: InvoiceLine; exc: ExceptionItem; here: string }) {
   const m = line.match!;
   const po = line.purchase_order;
   const unit = po?.uom ?? line.uom ?? "";
-  const amount = exc.reported_amount ?? exc.variance_amount;
   const counting = (line.receipts ?? []).filter((r) => r.counts);
   const rowLink = (r: (typeof counting)[number]) => `/receiving/imports/${r.receiving_import_id}?row=${r.source_row}&from=${encodeURIComponent(here)}`;
   const received = m.qty_received_cum || "0";
@@ -127,16 +136,28 @@ function Ledger({ line, exc, here }: { line: InvoiceLine; exc: ExceptionItem; he
           {c.note && <span className="n">{c.note}</span>}
         </div>
       ))}
-      <div className={`l-cell total ${zeroCounted(exc) ? "" : "bad"}`}>
+      <div className={`l-cell total ${ledgerTotal(exc).open ? "bad" : ""}`}>
         <span className="op" aria-hidden="true">
           =
         </span>
-        <span className="k">{zeroCounted(exc) ? "Adds nothing" : "Exposure"}</span>
-        <span className="v num">{zeroCounted(exc) ? "CAD 0.00" : cad(amount)}</span>
+        {/* B14 (m8): after a credit the strip says what became of the amount, not "Exposure CAD 0.00". */}
+        <span className="k">{ledgerTotal(exc).label}</span>
+        <span className="v num">{ledgerTotal(exc).value}</span>
         <span className="n">{typeWord(exc.type)}</span>
       </div>
     </section>
   );
+}
+
+/** What to say when the exception changed under the person (409). Only a resolution is called one:
+ * an exception that was assigned, or re-matched, is still open (B14, acceptance m2). */
+export function staleMessage(cur: Pick<ExceptionItem, "status" | "resolution_code"> | undefined): string {
+  if (!cur || cur.status === "open")
+    return "This exception changed a moment ago (it was assigned or matched again) and is still open. The latest version is loaded: choose again to resolve it. Your note is kept below.";
+  if (cur.status === "pending_approval") return "Someone sent this exception to the controller for approval a moment ago. Your note is kept below if you want to add it.";
+  if (cur.status === "auto_closed") return "A re-match closed this exception a moment ago: the rules no longer raise it.";
+  const how = cur.status === "waived" ? "waived" : "resolved";
+  return `Someone ${how} this exception a moment ago${cur.resolution_code && cur.status !== "waived" ? ` as "${RESOLUTION_CODES[cur.resolution_code] ?? cur.resolution_code}"` : ""}. Your note is kept below if you want to add it.`;
 }
 
 function crumbFor(path: string): string {
@@ -241,10 +262,7 @@ export function MatchViewPage() {
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
         const cur = err.current as ExceptionItem | undefined;
-        setMsg({
-          tone: "warn",
-          text: `Someone resolved this exception a moment ago${cur?.resolution_code ? ` as "${RESOLUTION_CODES[cur.resolution_code] ?? cur.resolution_code}"` : ""}. Your note is kept below if you want to add it.`,
-        });
+        setMsg({ tone: "warn", text: staleMessage(cur) });
         q.refetch();
       } else setMsg({ tone: "error", text: errorText(err) });
     } finally {

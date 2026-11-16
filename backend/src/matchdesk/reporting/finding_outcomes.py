@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 
 from matchdesk.audit import write_audit
 from matchdesk.core import ZERO, ConflictError, ForbiddenError, dec, round_cents
+from matchdesk.exceptions.models import ExceptionRow
 from matchdesk.intake.models import DocumentRow, InvoiceRow
 from matchdesk.reporting.models import FindingOutcomeRow, PilotEngagement, ReportFinding
 
@@ -125,6 +126,14 @@ def record_outcome(
             doc = s.get(InvoiceRow, credit_document_id)
             if doc is None or doc.doc_type != "credit_note":
                 raise ValueError("the credit document must be a credit note of this account")
+            # B14 (acceptance m7): a credit recovers an overcharge of the supplier who issued it.
+            flagged_invoice = s.scalar(
+                select(InvoiceRow)
+                .join(ExceptionRow, ExceptionRow.invoice_id == InvoiceRow.id)
+                .where(ExceptionRow.id == finding.exception_id)
+            )
+            if flagged_invoice is not None and doc.vendor_id != flagged_invoice.vendor_id:
+                raise ValueError("the credit note is from another supplier than the flagged document")
             credit_document_id = doc.document_id  # the stored file (documents), not the invoice row
             if s.get(DocumentRow, credit_document_id) is None:
                 raise ValueError("the credit note's file is missing")

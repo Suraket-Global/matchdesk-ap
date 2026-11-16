@@ -4,7 +4,8 @@ import { errorText, get, getAll, send } from "../api/client";
 import type { InvoiceDetail, InvoiceSummary, PurchaseOrder } from "../api/types";
 import { useSession } from "../app/session";
 import { Banner, ErrorState, Loading, PageHead, toast, usePageTitle } from "../components/ui";
-import { money, price, qty } from "../lib/decimal";
+import { cad, price, qty } from "../lib/decimal";
+import { qboHistory, unsigned } from "../lib/po";
 import { day, plural, when } from "../lib/format";
 
 /** S-10: everything that happened on one purchase order. */
@@ -54,6 +55,8 @@ export function PurchaseOrderPage() {
       if (d.doc_type !== kind) continue;
       for (const l of d.lines) if (l.purchase_order?.line_id === lineId && l.qty) vals.push(l.qty);
     }
+    // B14 (m8): QuickBooks bills and credits with no document count here as they do on S-09.
+    for (const h of qboHistory(details.data ?? [], lineId)) if (h.doc_type === kind && h.qty) vals.push(unsigned(h.qty));
     return addQty(vals);
   };
   for (const ln of po.lines ?? []) {
@@ -64,13 +67,19 @@ export function PurchaseOrderPage() {
           for (const r of l.receipts ?? []) if (!timeline.some((t) => t.text.includes(`row ${r.source_row}`) && t.date === r.received_date))
             timeline.push({ date: r.received_date, text: `Receipt ${qty(r.qty)} ${ln.uom ?? ""}, ${r.source_file} row ${r.source_row}${r.counts ? "" : " (not counted)"}`, link: `/receiving/imports/${r.receiving_import_id}` });
   }
+  for (const ln of po.lines ?? [])
+    for (const h of qboHistory(details.data ?? [], ln.id))
+      timeline.push({
+        date: h.doc_date ?? "",
+        text: `QuickBooks ${h.doc_type === "credit_note" ? "vendor credit" : "bill"} ${h.doc_number ?? ""}, no document: ${qty(unsigned(h.qty))} ${ln.uom ?? ""} on line ${ln.line_no ?? ""}`,
+      });
   timeline.sort((a, b) => a.date.localeCompare(b.date));
   return (
     <>
       <PageHead
         title={`PO ${po.po_number}`}
         crumbs={<Link to="/invoices">Invoices</Link>}
-        lede={`${po.vendor_name ?? ""} · ${day(po.txn_date)} · ${po.qbo_status ?? "status not read"} · total ${money(po.total)}`}
+        lede={`${po.vendor_name ?? ""} · ${day(po.txn_date)} · ${po.qbo_status ?? "status not read"} · total in QuickBooks ${po.total ? cad(po.total) : "not read"}${po.total ? " (as QuickBooks states it, which can include tax; the lines below are before tax)" : ""}`}
         actions={
           can("start_sync") && (
             <button className="btn" onClick={() => reread.mutate()} disabled={reread.isPending}>

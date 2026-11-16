@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 from matchdesk.audit import write_audit
 from matchdesk.core import ConflictError, NotFoundError
 from matchdesk.identity.models import SessionRow, SupportGrant, Tenant, User
-from matchdesk.tenancy import global_session, operator_session, session
+from matchdesk.tenancy import advisory_lock, global_session, operator_session, session
 
 MAX_HOURS = 168
 
@@ -75,6 +75,19 @@ def request_grant(
         if g.get(Tenant, tenant_id) is None:
             raise NotFoundError("tenant")
     with operator_session(engine) as s:
+        # B14 (acceptance m1): the same request still waiting is answered, not made a second time.
+        advisory_lock(s, f"support_request:{tenant_id}:{operator_id}")
+        waiting = s.scalar(
+            select(SupportGrant).where(
+                SupportGrant.tenant_id == tenant_id,
+                SupportGrant.requested_by == operator_id,
+                SupportGrant.status == "requested",
+                SupportGrant.reason == reason.strip(),
+                SupportGrant.hours_requested == hours,
+            )
+        )
+        if waiting is not None:
+            return describe_grant(waiting)
         grant = SupportGrant(
             tenant_id=tenant_id, requested_by=operator_id, reason=reason.strip(), hours_requested=hours
         )

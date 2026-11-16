@@ -45,7 +45,7 @@ from matchdesk.identity.models import (
 )
 from matchdesk.identity.secrets_box import seal, unseal
 from matchdesk.identity.support import active_grant, leave_support
-from matchdesk.tenancy import global_session, invitation_lookup_session, session, user_session
+from matchdesk.tenancy import advisory_lock, global_session, invitation_lookup_session, session, user_session
 
 LINK_TTL = timedelta(minutes=10)
 INVITE_TTL = timedelta(days=7)
@@ -590,6 +590,7 @@ def _invite(
     with session(tenant_id, engine) as s:
         tenant = s.get(Tenant, tenant_id)
         assert tenant is not None
+        advisory_lock(s, f"invitation:{tenant_id}:{address.lower()}")  # two presses, one invitation
         if existing_user is not None and s.scalar(
             select(Membership.id).where(Membership.user_id == existing_user)
         ):

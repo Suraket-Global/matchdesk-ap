@@ -8,17 +8,62 @@ import { usePeriod } from "../app/period";
 import { useSession } from "../app/session";
 import { Banner, Dialog, Empty, ErrorState, Field, Loading, PageHead, StatusChip, toast, usePageTitle } from "../components/ui";
 import { EVIDENCE_CLASSES } from "../lib/words";
-import { day, monthName, monthRange, plural, safePath, when } from "../lib/format";
+import { day, monthName, monthRange, plural, safePath, today, when } from "../lib/format";
 
 const REJECT_WORDS: Record<string, string> = {
   po_not_found: "Unknown PO number",
   po_line_not_found: "Unknown PO line or item",
+  po_ambiguous: "More than one purchase order has this number",
+  po_line_ambiguous: "More than one PO line fits this row",
   qty_unreadable: "Quantity not a number",
+  qty_zero: "Quantity is zero",
+  uom_differs_from_po: "Unit differs from the purchase order's unit",
   date_unreadable: "Unreadable date",
   uom_unknown: "Unknown unit",
   entered_after_bill: "Entered after the bill",
   entered_by_ap_staff: "Entered by accounts-payable staff",
 };
+
+/** Valid rows worth a look before importing (B14, acceptance m4). They are imported as they are. */
+export const WARNING_WORDS: Record<string, string> = {
+  negative_quantity: "Negative quantity: counted as a return, it lowers what was received",
+  future_date: "Dated after today",
+};
+export { REJECT_WORDS };
+
+/** S-05: the valid rows a person should check, with the reason in words. */
+export function WarningRows({ rows }: { rows: { row: number; reason: string; value?: unknown }[] }) {
+  if (!rows.length) return null;
+  return (
+    <div className="warning-rows" role="region" aria-label="Rows to check before importing">
+      <p className="small" style={{ margin: "12px 0 6px" }}>
+        <strong>{plural(rows.length, "valid row")} to check before importing.</strong> They are imported as they are; correct the file first if one is a typing error.
+      </p>
+      <div className="table-wrap">
+        <table className="compact">
+          <thead>
+            <tr>
+              <th scope="col" className="num">
+                Row
+              </th>
+              <th scope="col">Check</th>
+              <th scope="col">Value</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => (
+              <tr key={i}>
+                <td className="num">{r.row}</td>
+                <td>{WARNING_WORDS[r.reason] ?? r.reason.replace(/_/g, " ")}</td>
+                <td>{String(r.value ?? "")}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
 
 const TARGETS: { key: string; label: string; required?: boolean; guess: RegExp }[] = [
   { key: "po_number", label: "PO number", required: true, guess: /^(po|po ?(number|no|#)|purchase ?order)/i },
@@ -266,7 +311,7 @@ export function ReceivingImportPage() {
   const [validation, setValidation] = useState<ReceivingImport | null>(null);
   const [complete, setComplete] = useState(true);
   const [covStart, setCovStart] = useState(defaultStart());
-  const [covEnd, setCovEnd] = useState(new Date().toISOString().slice(0, 10));
+  const [covEnd, setCovEnd] = useState(today());
   const [keptBy, setKeptBy] = useState("");
   const [voidOpen, setVoidOpen] = useState(false);
   const [voidReason, setVoidReason] = useState("");
@@ -516,6 +561,7 @@ export function ReceivingImportPage() {
                   </p>
                 )}
               </div>
+              {v && <WarningRows rows={v.warning_rows ?? imp.warning_rows ?? []} />}
               {v && (v.rejected_rows?.length ?? 0) > 0 && (
                 <>
                   <div className="table-wrap" style={{ marginTop: 8 }}>
@@ -535,7 +581,7 @@ export function ReceivingImportPage() {
                         {v.rejected_rows!.map((r) => (
                           <tr key={r.row}>
                             <td className="num">{r.row}</td>
-                            <td>{REJECT_WORDS[r.reason] ?? r.reason}</td>
+                            <td>{REJECT_WORDS[r.reason] ?? r.reason.replace(/_/g, " ")}</td>
                             <td>{String(r.value ?? "")}</td>
                             <td className="orig-row">{originalRow(imp, r.row)}</td>
                             <td>{r.reason === "po_line_not_found" ? <Link to="/aliases">Add an alias</Link> : <span className="muted">Correct the file</span>}</td>

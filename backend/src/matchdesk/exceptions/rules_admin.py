@@ -34,7 +34,7 @@ from matchdesk.matching import (
     normalise_code,
 )
 from matchdesk.qbo.models import Item
-from matchdesk.tenancy import lock_for_update
+from matchdesk.tenancy import advisory_lock, lock_for_update
 
 TOLERANCE_FIELDS = ("qty_tolerance", "price_tol_abs", "price_tol_pct", "charge_allowance")
 
@@ -287,6 +287,9 @@ def set_tolerance(
     unknown = set(values) - set(TOLERANCE_FIELDS)
     if unknown:
         raise ValueError("unknown tolerance fields: " + ", ".join(sorted(unknown)))
+    # B14 (acceptance m1): one save at a time per rule; a second identical save (a double press)
+    # then finds nothing to change and writes no second version.
+    advisory_lock(s, f"tolerance:{tenant_id}:{vendor_id or 'default'}")
     now = datetime.now(UTC)
     q = select(ToleranceRule).where(ToleranceRule.valid_to.is_(None))
     q = (
@@ -300,7 +303,10 @@ def set_tolerance(
         if current
         else {f: getattr(Tolerance(), f) for f in TOLERANCE_FIELDS}
     )
+    before_values = dict(base)
     base.update({k: dec(str(v)) for k, v in values.items()})
+    if current is not None and all(dec(base[f]) == dec(before_values[f]) for f in TOLERANCE_FIELDS):
+        return current, None
     if current is not None:
         current.valid_to = now
         s.flush()

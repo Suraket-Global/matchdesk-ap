@@ -26,8 +26,43 @@ const STATUS_WORDS: Record<string, string> = {
 
 const byAmount = (a: Finding, b: Finding) => compareDecimal(b.amount, a.amount) || a.id.localeCompare(b.id);
 
-function pct(v: string | null | undefined): string {
+/** A percentage, or "Not measured" where there is none: never a bare "%" (B14, acceptance m6). */
+export function pct(v: string | null | undefined): string {
+  if (v === null || v === undefined || v === "") return "Not measured";
   return `${money(v).replace(/\.00$/, "")}%`;
+}
+
+export interface DeletedAfterApproval {
+  doc_number: string | null;
+  vendor_name?: string | null;
+  reason: string | null;
+  approved_versions: number[];
+  removed_at?: string | null;
+}
+
+/** S-13 (B12, shown since B14, acceptance m5): documents an approved version of this period
+ * included and a person deleted since. The delete dialog promises this list. */
+export function DeletedAfterApprovalList({ docs }: { docs: DeletedAfterApproval[] }) {
+  if (!docs.length) return null;
+  return (
+    <div className="banner warn" role="note" aria-label="Deleted after approval" data-testid="deleted-after-approval">
+      <div>
+        <p>
+          <strong>Deleted after approval.</strong> {docs.length === 1 ? "This document was" : "These documents were"} in an approved version of this period and deleted
+          since. The approved version keeps {docs.length === 1 ? "it" : "them"}; this version does not count {docs.length === 1 ? "it" : "them"}.
+        </p>
+        <ul style={{ margin: 0, paddingLeft: 18 }}>
+          {docs.map((d, i) => (
+            <li key={i}>
+              {d.doc_number ?? "No number"}
+              {d.vendor_name ? ` (${d.vendor_name})` : ""}, in approved version {d.approved_versions.join(", ")}
+              {d.removed_at ? `, deleted ${day(d.removed_at)}` : ""}: <q>{d.reason ?? "no reason given"}</q>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  );
 }
 
 function reportStatus(r: Report): string {
@@ -248,7 +283,8 @@ export function ReportPage() {
     queryFn: () => get<Refund>(`/api/v1/reports/backtest/${reportId}/refund-evaluation`),
     enabled: r?.status === "approved",
   });
-  const outcomes = useOutcomes(reportId, !!r && pilot.data?.governing?.report_id === r.id);
+  // B14 (acceptance m6): the same read as section 8, so the top count and section 8 never disagree.
+  const outcomes = useOutcomes(reportId, !!r && (r.status === "approved" || r.status === "superseded"));
   const [approveOpen, setApproveOpen] = useState(false);
   const [reviewed, setReviewed] = useState(false);
   const [exporting, setExporting] = useState<string | null>(null);
@@ -310,8 +346,9 @@ export function ReportPage() {
   }
   const newer = (list.data?.items ?? []).find((o) => o.period_start === r.period_start && o.version_no > r.version_no);
   const isGoverning = pilot.data?.governing?.report_id === r.id;
-  const counts = isGoverning ? outcomes.data?.totals : undefined;
+  const counts = outcomes.data?.is_governing ? outcomes.data.totals : undefined;
   const declaration = (r.totals.no_receiving_declaration ?? null) as { declared_by_name: string | null; declared_at: string } | null;
+  const deletedAfter = (r.totals.deleted_after_approval ?? []) as DeletedAfterApproval[];
   const inconsistent = (r.totals.inconsistent_documents ?? []) as { invoice_id: string; doc_number: string | null; vendor_name: string | null; note: string | null }[];
   const ALL_STATUSES = "open,pending_approval,resolved,waived";
   const blocking = r.blocking ?? [];
@@ -594,6 +631,7 @@ export function ReportPage() {
       </section>
       <section>
         <h2>6. Documents with self-inconsistent totals and duplicates</h2>
+        <DeletedAfterApprovalList docs={deletedAfter} />
         {!("inconsistent_documents" in r.totals) ? null : inconsistent.length > 0 ? (
           <ul className="plain-list panel panel-body" aria-label="Confirmed although they do not add up">
             {inconsistent.map((d) => (
@@ -620,7 +658,7 @@ export function ReportPage() {
           <p className="workings" style={{ display: "block" }}>
             <span className="sentence">
               Qualifying discrepancies in this version: {cad(refund.data.qualifying_total)}. Threshold {cad(refund.data.threshold)}.{" "}
-              {refund.data.refund_due ? "Refund applies." : "No refund."} Unverified because no receiving evidence: {cad(refund.data.unverified_total)}.
+              {refund.data.refund_due ? "Refund applies." : "No refund."} Unverified (could not be checked): {cad(refund.data.unverified_total)}.
             </span>
           </p>
         )}
@@ -659,7 +697,7 @@ export function ReportPage() {
         )}
         <p>
           Approve version {r.version_no} of the {monthName(r.period_start.slice(0, 7))} back-test. Flagged discrepancies {cadCents(flagged)} (findings{" "}
-          {cad(r.findings_amount)} + not received {cad(r.not_received_amount)}). Unverified because no receiving evidence: {cad(r.unverified_amount)} on{" "}
+          {cad(r.findings_amount)} + not received {cad(r.not_received_amount)}). Unverified (could not be checked): {cad(r.unverified_amount)} on{" "}
           {plural(S.unverified?.count ?? 0, "item")}. {plural(stillOpen.length, "item")} still open in the exception queue{" "}
           {stillOpen.length === 1 ? "is" : "are"} reported in those sections with {stillOpen.length === 1 ? "its" : "their"} queue status; undecided items (section 5):{" "}
           {open.length}. Approved figures cannot be changed; later corrections create a new version.

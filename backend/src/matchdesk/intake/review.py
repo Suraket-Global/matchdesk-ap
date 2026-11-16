@@ -348,6 +348,9 @@ def remove_line(
     ln = s.get(InvoiceLineRow, line_id)
     if ln is None or ln.invoice_id != inv.id or ln.removed_at is not None:
         raise ValueError("no such line on this document")
+    if not (reason or "").strip():
+        # B14 (acceptance m11): the history promises who, when and why; an empty reason was taken.
+        raise ValueError("say why the line is removed: the reason is kept in the document's history")
     now = datetime.now(UTC)
     before = {f: _plain(getattr(ln, f)) for f in EDITABLE_LINE} | {"line_no": ln.line_no}
     ln.removed_at, ln.removed_by = now, user_id

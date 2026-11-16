@@ -556,7 +556,7 @@ function SupportAccessPanel() {
       >
         <p>
           {pick?.decision === "grant"
-            ? `MatchDesk support will be able to read this account's documents, exceptions and reports for ${hoursWord(pick.g.hours_requested)}, until about ${when(new Date(Date.now() + pick.g.hours_requested * 3_600_000).toISOString())}. It cannot change anything, and you can end it at any time.`
+            ? `MatchDesk support will be able to read this account's documents, exceptions, reports and audit log (which it can also download) for ${hoursWord(pick.g.hours_requested)}, until about ${when(new Date(Date.now() + pick.g.hours_requested * 3_600_000).toISOString())}. It cannot change anything, and you can end it at any time.`
             : pick?.decision === "decline"
               ? "MatchDesk support will not be able to read this account. They can ask again."
               : "MatchDesk support loses access at once."}

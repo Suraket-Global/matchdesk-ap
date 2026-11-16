@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 import uuid
 from datetime import datetime
 from typing import Any
@@ -77,7 +78,11 @@ def _filtered(
 
 def _csv_cell(value: Any) -> str:
     """Formula-injection guard, as in the report CSV: a leading = + - @ is neutralised."""
-    text = "" if value is None else str(value)
+    # B14 (acceptance m12): before and after are written as JSON, never as Python text.
+    if isinstance(value, (dict, list)):
+        text = json.dumps(value, sort_keys=True, default=str)
+    else:
+        text = "" if value is None else str(value)
     return "'" + text if text[:1] in ("=", "+", "-", "@", "\t", "\r") else text
 
 

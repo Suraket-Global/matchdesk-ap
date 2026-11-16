@@ -154,7 +154,7 @@ describe("S-07 remove a line and the inconsistent note (B9)", () => {
     };
     wrap(<ReviewPage />, "/invoices/inv1/review", "/invoices/:invoiceId/review", "clerk");
     await userEvent.click(await screen.findByRole("button", { name: "Remove line 2" }));
-    await userEvent.type(screen.getByLabelText("Reason"), "Printed twice");
+    await userEvent.type(screen.getByLabelText("Reason (required)"), "Printed twice");
     const dialogButtons = screen.getAllByRole("button", { name: "Remove line 2" });
     await userEvent.click(dialogButtons[dialogButtons.length - 1]);
     await waitFor(() => expect(sent.some((s) => s.url.endsWith("/lines/l2/removal"))).toBe(true));

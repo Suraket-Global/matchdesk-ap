@@ -31,7 +31,7 @@ from matchdesk.exceptions import (
 from matchdesk.intake.models import DocumentRow
 from matchdesk.qbo.models import PoLineRow, PurchaseOrderRow
 from matchdesk.receiving.models import ReceiptLineRow, ReceiptRow, ReceivingImportRow
-from matchdesk.tenancy import session
+from matchdesk.tenancy import lock_for_update, session
 
 RECEIVING_MAX_BYTES = 20 * 1024 * 1024
 
@@ -160,6 +160,9 @@ def register_receiving_routes(app: FastAPI, engine: Engine) -> None:
         require(p, "upload_and_receiving")
         with session(p.tenant_id, engine) as s:
             imp = _load(s, import_id)
+            # B14 (acceptance m1): a second commit of the same import waits here, then finds it
+            # committed and changes nothing, instead of importing the rows twice and failing.
+            lock_for_update(s, imp)
             candidate_lines = [pl.id for pl in s.scalars(select(PoLineRow))]
             open_lines = po_lines_with_open_exceptions(s, candidate_lines)
             imp, touched = receiving.commit(s, imp, p.user_id, open_lines)
@@ -250,6 +253,8 @@ def register_receiving_routes(app: FastAPI, engine: Engine) -> None:
             body["file_name"] = _file_names(s, [imp]).get(imp.document_id)
             if imp.state == "draft":
                 body["preview"] = receiving.file_preview(s, imp)
+                if imp.column_map:  # B14 (m4): the rows to look at, also after a reload
+                    body["warning_rows"] = receiving.validate(s, imp).warnings
             body["created_at"] = imp.created_at.isoformat()
             po_numbers = dict(
                 s.execute(

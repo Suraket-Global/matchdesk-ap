@@ -23,7 +23,7 @@ from matchdesk.tenancy.jobs import (
 )
 from matchdesk.tenancy.permissions import PERMISSIONS, can, permissions_for
 from matchdesk.tenancy.secrets_box import SealError, seal, unseal
-from matchdesk.tenancy.transitions import advisory_lock, lock_for_update, transition
+from matchdesk.tenancy.transitions import advisory_lock, held_lock, lock_for_update, transition
 from matchdesk.tenancy.types import MONEY, PRICE, QTY, UUIDT, enum_check
 
 __all__ = [
@@ -46,6 +46,7 @@ __all__ = [
     "enum_check",
     "get_engine",
     "global_session",
+    "held_lock",
     "invitation_lookup_session",
     "lock_for_update",
     "operator_session",

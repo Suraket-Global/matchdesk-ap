@@ -21,6 +21,12 @@ export function useOutcomes(reportId: string | undefined, enabled: boolean) {
   });
 }
 
+/** The credit notes that can recover this finding: those of the same supplier only (B14, acceptance
+ * m7: another supplier's credit note was offered and accepted). */
+export function creditNotesFor(items: InvoiceSummary[], supplier: string | null | undefined): InvoiceSummary[] {
+  return items.filter((i) => i.doc_type === "credit_note" && !!supplier && i.vendor_name === supplier);
+}
+
 export function OutcomesSection({ report, flagged }: { report: Report; flagged: Finding[] }) {
   const { can } = useSession();
   const q = useOutcomes(report.id, report.status === "approved" || report.status === "superseded");
@@ -185,7 +191,7 @@ function RecordDialog({
     },
   });
   const sn = finding.snapshot as Record<string, string | number | null>;
-  const creditNotes = (credits.data?.items ?? []).filter((i) => i.doc_type === "credit_note");
+  const creditNotes = creditNotesFor(credits.data?.items ?? [], sn.vendor_name as string | null);
   return (
     <Dialog
       open

@@ -222,6 +222,9 @@ function TenantDetail() {
     const src: Partial<Pilot> = q.data.pilot ?? {};
     setForm(Object.fromEntries(Object.keys(EMPTY_FORM).map((k) => [k, String((src as Record<string, unknown>)[k] ?? (EMPTY_FORM as Record<string, string>)[k] ?? "")])));
   }, [q.data]);
+  // B14 (acceptance m6): a number that cannot be read is named beside its field and never sent;
+  // before, "1,5x" went to the server and came back as "Request is not valid".
+  const badNumber = numberError(form.price, AMOUNT_INPUT) ?? (p?.governing_report_id ? null : numberError(form.refund_threshold, AMOUNT_INPUT));
   const save = useMutation({
     mutationFn: () => {
       const body = Object.fromEntries(
@@ -318,7 +321,7 @@ function TenantDetail() {
             className="panel-body"
             onSubmit={(e) => {
               e.preventDefault();
-              save.mutate();
+              if (!badNumber) save.mutate();
             }}
           >
             <div className="form-grid">
@@ -398,7 +401,12 @@ function TenantDetail() {
                 {msg}
               </p>
             )}
-            <button className="btn primary" type="submit" disabled={save.isPending}>
+            {badNumber && (
+              <p className="error-text" role="alert" data-testid="pilot-number-error">
+                Correct the amount marked above before saving: {badNumber}
+              </p>
+            )}
+            <button className="btn primary" type="submit" disabled={save.isPending || !!badNumber}>
               {p ? "Save pilot record" : "Create pilot record"}
             </button>
           </form>

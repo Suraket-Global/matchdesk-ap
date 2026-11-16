@@ -71,7 +71,12 @@ export function ExceptionsPage() {
   const coverage = useQuery({ queryKey: ["coverage", dates.start, dates.end], queryFn: () => get<Coverage>(`/api/v1/coverage?${period}`), refetchInterval: 15_000 });
   const absent = (sub: string) => `/api/v1/exceptions?limit=1&type=receipt_absent&status=open,pending_approval,resolved&sub_reason=${sub}&${period}`;
   const notReceived = useQuery({ queryKey: ["exceptions", "absent", "nr", period], queryFn: () => get<ExceptionPage>(absent("not_received")) });
-  const unverified = useQuery({ queryKey: ["exceptions", "absent", "uv", period], queryFn: () => get<ExceptionPage>(absent("no_evidence,supplier_slip_only")) });
+  // B14 (acceptance m6): "Unverified" here is the report's figure: everything that could not be
+  // checked, not only the lines with no receiving evidence, so the two screens name one amount.
+  const unverified = useQuery({
+    queryKey: ["exceptions", "unverified", period],
+    queryFn: () => get<ExceptionPage>(`/api/v1/exceptions?limit=1&value_class=unverified&status=open,resolved&${period}`),
+  });
 
   const rows = useMemo(() => (list.data?.pages ?? []).flatMap((p) => p.items), [list.data]);
   const first = list.data?.pages[0];
@@ -586,7 +591,7 @@ export function ExceptionsPage() {
             <div>
               <span className="k">Unverified </span>
               <span className={`v ${unverified.data?.total_count ? "warn" : ""}`}>{cad(unverified.data?.total_value ?? "0")}</span>
-              <span className="s"> {plural(unverified.data?.total_count ?? 0, "line")} with no receiving evidence</span>
+              <span className="s"> {plural(unverified.data?.total_count ?? 0, "item")} that could not be checked: no receiving evidence, extraction not confirmed, or no purchase-order line</span>
             </div>
             <div>
               <span className="k">Complete warehouse log </span>
@@ -752,16 +757,28 @@ function BulkAssign({ chosen, members, me, onDone }: { chosen: ExceptionItem[]; 
   );
 }
 
-/** A value filter (CAD). Applied on leaving the field as a plain decimal ("1,000" -> "1000"); a value
+/** A value filter (CAD). Applied on Enter or on leaving the field (B14, acceptance m10: Enter did
+ * nothing) as a plain decimal ("1,000" -> "1000"); a value
  * that cannot be read stays in the field with the reason beside it and is not applied (B10, item 3). */
-function ValueFilter({ id, placeholder, value, onValue }: { id: string; placeholder: string; value: string; onValue: (v: string) => void }) {
+export function ValueFilter({ id, placeholder, value, onValue }: { id: string; placeholder: string; value: string; onValue: (v: string) => void }) {
   const [text, setText] = useState(value);
   useEffect(() => setText(value), [value]);
   const bad = numberError(text, AMOUNT_INPUT);
+  const apply = () => {
+    const p = parseNumberInput(text, AMOUNT_INPUT);
+    if (p.ok && p.value !== value) onValue(p.value);
+  };
   return (
     <>
       <input
         id={id}
+        enterKeyHint="go"
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            apply();
+          }
+        }}
         inputMode="decimal"
         size={8}
         placeholder={placeholder}
@@ -769,10 +786,7 @@ function ValueFilter({ id, placeholder, value, onValue }: { id: string; placehol
         aria-invalid={bad ? true : undefined}
         aria-describedby={bad ? `${id}-err` : undefined}
         onChange={(e) => setText(e.target.value)}
-        onBlur={() => {
-          const p = parseNumberInput(text, AMOUNT_INPUT);
-          if (p.ok && p.value !== value) onValue(p.value);
-        }}
+        onBlur={apply}
       />
       {bad && (
         <span className="error-text small" id={`${id}-err`}>

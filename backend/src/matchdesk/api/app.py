@@ -214,6 +214,26 @@ def create_app(
     async def conflict(_r: Request, e: ConflictError) -> JSONResponse:
         return problem(409, str(e) or "Conflict")
 
+    @app.exception_handler(IntegrityError)
+    async def raced(r: Request, e: IntegrityError) -> JSONResponse:
+        # B14 (acceptance m1): two requests wrote the same thing at the same moment and the
+        # database kept one. The other is told so, as a conflict, never as a server error.
+        log.warning(
+            "write_conflict", extra={"path": r.url.path, "method": r.method, "reason": type(e.orig).__name__}
+        )
+        return problem(409, "This was changed by another request at the same moment. Reload and try again.")
+
+    @app.exception_handler(Exception)
+    async def unexpected(r: Request, e: Exception) -> JSONResponse:
+        # B14 (acceptance m1): an unexpected error is logged with its request line and traceback
+        # (never the body), so a 500 can be diagnosed from the log.
+        log.error(
+            "unhandled_error",
+            extra={"path": r.url.path, "method": r.method, "reason": type(e).__name__},
+            exc_info=e,
+        )
+        return problem(500, "Something went wrong on our side")
+
     @app.get("/healthz")
     def healthz() -> dict[str, str]:
         return {"status": "ok"}

@@ -12,6 +12,7 @@ import contextvars
 import json
 import logging
 import sys
+import traceback
 import uuid
 from datetime import UTC, datetime
 
@@ -74,6 +75,14 @@ class JsonFormatter(logging.Formatter):
         for key, value in record.__dict__.items():
             if key in ALLOWED_FIELDS and key != "event":
                 payload[key] = value if isinstance(value, (int, bool)) else str(value)
+        if record.exc_info and record.exc_info[2] is not None:
+            # B14 (acceptance m1): where an unexpected error came from, as file, line and function
+            # only. The message of the exception is left out: it can quote a value from a request.
+            payload["error_class"] = getattr(record.exc_info[0], "__name__", "Exception")
+            payload["traceback"] = [
+                f"{f.filename.rsplit('/matchdesk/', 1)[-1]}:{f.lineno} {f.name}"
+                for f in traceback.extract_tb(record.exc_info[2])[-12:]
+            ]
         return json.dumps(payload, sort_keys=True)
 
 

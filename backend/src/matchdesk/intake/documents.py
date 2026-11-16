@@ -149,7 +149,10 @@ def materialise(
             tax_total=_d(part.get("tax_total")),
             total=_d(part.get("total")),
             currency=part.get("currency"),
-            verification_status="passed" if passed else "failed",
+            # B14 (acceptance m6): a supplier name that matches no QuickBooks vendor cannot be
+            # matched, so the document waits for a person like one with no supplier name at all;
+            # before, it was shown as "Ready" while the queue held it as not confirmed.
+            verification_status="passed" if passed and vendor_id is not None else "failed",
             extraction_run_id=run_id,
             field_sources={f: {"source": "read"} for f in HEADER_FIELDS if part.get(f) is not None},
             version=1,

@@ -20,7 +20,7 @@ from matchdesk.core import ConflictError, Mailer, NotFoundError, Settings, get_l
 from matchdesk.identity.models import SupportGrant, Tenant
 from matchdesk.intake.models import InboundMessage, IntakeSender, UploadBatch, UsageEvent
 from matchdesk.reporting.models import BacktestReport, PilotEngagement
-from matchdesk.tenancy import global_session, operator_session, session
+from matchdesk.tenancy import global_session, held_lock, operator_session, session
 
 INBOUND_PATH = "/api/v1/inbound/email"
 log = get_logger("matchdesk.api.operator")
@@ -145,11 +145,14 @@ def register_b7_routes(app: FastAPI, settings: Settings, engine: Engine, mailer:
         require(p, "send_weekly_summary")
         # B10: recipients whose delivery failed or is pending are retried first; otherwise a new
         # manual run, once per week.
-        run = reporting.retry_week(engine, p.tenant_id, body.week_start, mailer, settings, p.user_id)
-        if run is None:
-            run = reporting.send_weekly(
-                engine, p.tenant_id, body.week_start, "manual", mailer, settings, p.user_id
-            )
+        # B14 (acceptance m1): one send at a time per account and week, so two presses never send
+        # the same email twice; the second finds nothing left to send.
+        with held_lock(engine, f"weekly_send:{p.tenant_id}:{reporting.week_of(body.week_start)}"):
+            run = reporting.retry_week(engine, p.tenant_id, body.week_start, mailer, settings, p.user_id)
+            if run is None:
+                run = reporting.send_weekly(
+                    engine, p.tenant_id, body.week_start, "manual", mailer, settings, p.user_id
+                )
         if run is None:
             raise HTTPException(409, "The summary for this week was already sent by hand")
         return run

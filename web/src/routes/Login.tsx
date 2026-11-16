@@ -152,9 +152,13 @@ function VerifyLink({ hash }: { hash: string }) {
     token ? "ready" : "expired",
   );
   const [code, setCode] = useState("");
+  // B14 (acceptance m6): a wrong one-time code says so; before, the form just stayed as it was.
+  const [codeRefused, setCodeRefused] = useState(false);
   const { signedIn } = useSession();
   const navigate = useNavigate();
   async function signIn() {
+    const sentCode = code.trim();
+    setCodeRefused(false);
     setState("pending");
     try {
       const me = await send<Me>("POST", "/api/v1/auth/sessions", { token, totp_code: code || undefined });
@@ -166,6 +170,7 @@ function VerifyLink({ hash }: { hash: string }) {
     } catch (err) {
       const s = err instanceof ApiError ? err.status : 0;
       setState(s === 409 ? "other" : s === 401 ? "totp" : s === 429 ? "limited" : "expired");
+      if (s === 401 && sentCode) setCodeRefused(true);
     }
   }
   return (
@@ -177,7 +182,12 @@ function VerifyLink({ hash }: { hash: string }) {
           {state === "totp" && (
             <div className="field">
               <label htmlFor="totp">One-time code from your authenticator app</label>
-              <input id="totp" inputMode="numeric" autoComplete="one-time-code" value={code} onChange={(e) => setCode(e.target.value)} />
+              <input id="totp" inputMode="numeric" autoComplete="one-time-code" value={code} aria-invalid={codeRefused} aria-describedby={codeRefused ? "totp-error" : undefined} onChange={(e) => setCode(e.target.value)} />
+              {codeRefused && (
+                <span className="error-text" id="totp-error" role="alert">
+                  That code was not accepted. Enter the current 6-digit code from your authenticator app.
+                </span>
+              )}
             </div>
           )}
           <button className="btn primary" onClick={signIn} disabled={state === "pending"} style={{ width: "100%" }}>

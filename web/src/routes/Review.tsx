@@ -636,15 +636,16 @@ export function ReviewPage() {
             <button className="btn" data-safe onClick={() => setRemoving(null)}>
               Keep the line
             </button>
-            <button className="btn danger" disabled={busy} onClick={() => void removeLine()}>
+            <button className="btn danger" disabled={busy || !removeReason.trim()} title={!removeReason.trim() ? "Say why first" : undefined} onClick={() => void removeLine()}>
               Remove line {removing?.line_no}
             </button>
           </>
         }
       >
         <div className="field">
-          <label htmlFor="remove-reason">Reason</label>
-          <input id="remove-reason" value={removeReason} maxLength={1000} onChange={(e) => setRemoveReason(e.target.value)} placeholder="For example: printed twice" />
+          <label htmlFor="remove-reason">Reason (required)</label>
+          <input id="remove-reason" required value={removeReason} maxLength={1000} onChange={(e) => setRemoveReason(e.target.value)} placeholder="For example: printed twice" aria-describedby="remove-reason-hint" />
+          <span className="hint" id="remove-reason-hint">Kept in the history with your name.</span>
         </div>
         {dirty && <p className="muted small">Your other changes are saved first.</p>}
       </Dialog>

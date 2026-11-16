@@ -26,6 +26,7 @@ def fake_pdf(i: int, *, consistent: bool = True, encrypted: bool = False) -> byt
     total = "4.20" if consistent else "9.99"
     body = {
         "n": i,
+        "vendor_name": "Fictional Supplier T",  # the tenant's vendor: an unknown supplier needs review (B14)
         "lines": [{"qty": "1", "unit_price": "4.20", "amount": "4.20"}],
         "tax_total": "0",
         "total": total,
