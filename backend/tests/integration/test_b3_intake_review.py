@@ -89,8 +89,10 @@ def test_failed_gates_never_match_then_correction_conflict_and_confirmation(app_
     assert body["review"]["document_state"] == "needs_review"
     assert body["review"]["verification"]["lines_plus_tax_equals_total"] is False
     # False-pass guard: even with a counting receipt, a document that failed the gates is not matched.
+    # B14: the upload itself already requested this run (a document that needs review is an
+    # exception at once), so asking again answers 200 with the current run.
     r = client.post("/api/v1/match-runs", json={"invoice_ids": [str(inv)]}, headers=w.headers)
-    assert r.status_code == 202
+    assert r.status_code == 200
     while run_once(app_engine):
         pass
     body = client.get(f"/api/v1/invoices/{inv}", headers=w.headers).json()

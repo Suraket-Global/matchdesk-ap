@@ -158,12 +158,10 @@ def create_alias(
         entity_id=alias.id,
         after={"status": alias.status, "factor": str(factor)},
     )
-    run = (
-        None
-        if converts
-        else request_runs(
-            s, tenant_id, invoices_for_alias_code(s, vendor_id, norm, None), "alias_change", alias.id
-        )
+    # B14 (acceptance C1): an alias waiting for approval is an input too (its lines stay
+    # exceptions), so it re-matches like any other; before, those results stayed out of date.
+    run = request_runs(
+        s, tenant_id, invoices_for_alias_code(s, vendor_id, norm, None), "alias_change", alias.id
     )
     return alias, approval, run
 

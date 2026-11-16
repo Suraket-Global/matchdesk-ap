@@ -125,6 +125,10 @@ def register_invoice_routes(app: FastAPI, engine: Engine) -> None:
                 raise StaleVersion(exc.current) from None
             except ValueError as exc:
                 raise HTTPException(422, str(exc)) from None
+            if not body.draft:
+                # B14 (acceptance C1): a saved correction changes what the supplier's other
+                # results were computed from; re-match whatever it made out of date.
+                request_runs(s, p.tenant_id, [], "document_ready", inv.document_id)
             return describe_fields(s, inv)
 
     @app.post("/api/v1/invoices/{invoice_id}/confirm-extraction")

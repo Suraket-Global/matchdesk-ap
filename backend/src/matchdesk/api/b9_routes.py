@@ -166,6 +166,8 @@ def register_b9_routes(app: FastAPI, engine: Engine) -> None:
             except ValueError as exc:
                 raise HTTPException(422, str(exc)) from None
             retire_line_result(s, line_id)
+            # B14 (acceptance C1): the supplier's other results were computed with this line.
+            request_runs(s, p.tenant_id, [], "document_ready", inv.document_id)
             return {**describe_fields(s, inv), "gates": gates}
 
     # ------------------------------------------------------------------ S-05 saved mappings

@@ -9,7 +9,13 @@ from datetime import UTC, datetime
 from typing import Any
 
 from matchdesk.core import configure_logging, get_logger, load_settings, mailer_from_settings
-from matchdesk.exceptions import MATCH_REQUEST_TASK, MATCH_RUN_TASK, execute_run, handle_match_request
+from matchdesk.exceptions import (
+    MATCH_REQUEST_TASK,
+    MATCH_RUN_TASK,
+    execute_run,
+    handle_match_request,
+    rematch_everywhere,
+)
 from matchdesk.extraction import extractor_from_settings
 from matchdesk.intake import PROCESS_DOCUMENT_TASK, make_handler, purge_raw
 from matchdesk.qbo import SYNC_TASK, make_sync_handler, reader_for_tenant
@@ -64,7 +70,7 @@ def scheduled(engine: Any, settings: Any, now: datetime | None = None) -> dict[s
     """Time-driven work: the Monday weekly summary (T-5.1.4) and the 7-day deletion of raw inbound
     email (schema.md 8; B7); since B9 the 7-day removal of receiving drafts never committed, the
     24-hour expiry of archive exports and the account deletions that are due. Each is idempotent, so
-    a restart or a second worker repeats nothing. B10 (outside QA item 8): each runs with its own
+    a restart or a second worker repeats nothing. B14: a re-match of any result found out of date. B10 (outside QA item 8): each runs with its own
     error handling and records its last success, so one failure never blocks the others."""
     at = now or datetime.now(UTC)
     done = run_operations(
@@ -75,6 +81,9 @@ def scheduled(engine: Any, settings: Any, now: datetime | None = None) -> dict[s
             ("receiving_draft_cleanup", lambda: purge_drafts_everywhere(engine, at)),
             ("archive_expiry", lambda: expire_archives(engine, at)),
             ("due_deletions", lambda: len(execute_due_deletions(engine))),
+            # B14 (acceptance C1): the safety net. Every action already re-matches what it makes out
+            # of date; a result found out of date here is logged as a warning, then re-matched.
+            ("out_of_date_rematch", lambda: rematch_everywhere(engine)),
         ],
         at,
     )

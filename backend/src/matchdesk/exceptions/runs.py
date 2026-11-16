@@ -10,6 +10,15 @@ equals ``evaluate()`` on the current inputs once the run has executed.
 Ordering (B1-011): ``execute_run`` takes a per-tenant advisory transaction lock
 before reading inputs, so two runs never evaluate and store concurrently; the
 run that stores last read its inputs last.
+
+One supplier per run (B14, acceptance C1): a run's fingerprint covers the whole
+history of the suppliers in its scope, and read-time staleness compares that one
+fingerprint. A run over several suppliers therefore went out of date for all of
+them when one supplier alone was re-matched, with nothing queued for the others.
+``request_run`` now splits every request by supplier (``partition``); a document
+with no identified supplier is a scope of its own. ``rematch_out_of_date`` asks
+for a run wherever the stored results no longer equal the current inputs; every
+trigger calls it, and the worker's minute tick calls it as a safety net.
 """
 
 from __future__ import annotations
@@ -25,7 +34,7 @@ from matchdesk.core import ConflictError, get_correlation_id, get_logger, new_co
 from matchdesk.exceptions.inputs import build_match_input
 from matchdesk.exceptions.models import LineMatch, MatchRun, RulesetVersion
 from matchdesk.exceptions.store import store_result
-from matchdesk.intake.models import InvoiceLineRow
+from matchdesk.intake.models import InvoiceLineRow, InvoiceRow, live_invoice
 from matchdesk.matching import evaluate, input_fingerprint
 from matchdesk.qbo import processing_allowed
 from matchdesk.tenancy import PermanentJobError, enqueue, transition
@@ -47,7 +56,9 @@ def _lock_tenant_runs(s: Session, tenant_id: uuid.UUID) -> None:
 
 
 def is_current_for_scope(s: Session, run: MatchRun, invoice_ids: list[str]) -> bool:
-    """True when every invoice line in scope has its current result from ``run``."""
+    """True when every current result of the invoice lines in scope was stored by ``run``. A line
+    the rules give no result (a file identical to another, a document with no lines) is not counted
+    against it: asking again with the same inputs would store the same, so nothing is out of date."""
     line_ids = s.scalars(
         select(InvoiceLineRow.id).where(
             InvoiceLineRow.invoice_id.in_([uuid.UUID(i) for i in invoice_ids]),
@@ -56,12 +67,35 @@ def is_current_for_scope(s: Session, run: MatchRun, invoice_ids: list[str]) -> b
     ).all()
     if not line_ids:
         return run.state == "succeeded"
-    current = s.execute(
-        select(LineMatch.invoice_line_id, LineMatch.match_run_id).where(
+    current = s.scalars(
+        select(LineMatch.match_run_id).where(
             LineMatch.invoice_line_id.in_(line_ids), LineMatch.is_current.is_(True)
         )
     ).all()
-    return len(current) == len(line_ids) and all(r[1] == run.id for r in current)
+    return run.state == "succeeded" and all(r == run.id for r in current)
+
+
+def partition(s: Session, invoice_ids: list[uuid.UUID]) -> list[list[uuid.UUID]]:
+    """The scopes a request is split into (B14): for each supplier named by these documents, every
+    live document of that supplier (its whole history is the input, so a narrower scope would leave
+    its other results out of date); a document with no identified supplier stands alone. Nothing the
+    rules read crosses a supplier, so the union of the parts' results equals the result of the whole."""
+    ids = sorted({uuid.UUID(str(i)) for i in invoice_ids})
+    if not ids:
+        return []
+    asked = s.execute(
+        select(InvoiceRow.id, InvoiceRow.vendor_id).where(InvoiceRow.id.in_(ids), live_invoice())
+    ).all()
+    vendors = sorted({v for _i, v in asked if v is not None})
+    parts: dict[str, list[uuid.UUID]] = {f"none:{i}": [i] for i, v in asked if v is None}
+    if vendors:
+        for inv_id, vendor_id in s.execute(
+            select(InvoiceRow.id, InvoiceRow.vendor_id).where(
+                InvoiceRow.vendor_id.in_(vendors), live_invoice()
+            )
+        ).all():
+            parts.setdefault(str(vendor_id), []).append(inv_id)
+    return [sorted(v) for _k, v in sorted(parts.items())]
 
 
 def request_run(
@@ -73,14 +107,31 @@ def request_run(
     ruleset_code: str = "v1",
     currency: str = "CAD",
 ) -> tuple[MatchRun, bool]:
-    """Create a queued run and enqueue its job in the same transaction. Returns (run, created).
-
-    No lock is taken here, so a request never waits for a running evaluation; a race can at
-    worst create one extra run, which re-reads the inputs when it executes. After a QuickBooks
-    disconnect no run is created (Intuit terms s. 12.2; self-check 6.4; IT-11).
-    """
+    """Request a run for each supplier in the scope; returns (the first supplier's run, whether any
+    run was created). After a QuickBooks disconnect no run is created (Intuit terms s. 12.2;
+    self-check 6.4; IT-11)."""
     if not processing_allowed(s):
         raise ConflictError("QuickBooks was disconnected: matching on its records has stopped")
+    parts = partition(s, invoice_ids) or [sorted({uuid.UUID(str(i)) for i in invoice_ids})]
+    out = [_request_one(s, tenant_id, part, trigger, trigger_ref, ruleset_code, currency) for part in parts]
+    return out[0][0], any(created for _run, created in out)
+
+
+def _request_one(
+    s: Session,
+    tenant_id: uuid.UUID,
+    invoice_ids: list[uuid.UUID],
+    trigger: str,
+    trigger_ref: uuid.UUID | None,
+    ruleset_code: str,
+    currency: str,
+) -> tuple[MatchRun, bool]:
+    """Create a queued run for one supplier's documents and enqueue its job in the same
+    transaction. Returns (run, created).
+
+    No lock is taken here, so a request never waits for a running evaluation; a race can at
+    worst create one extra run, which re-reads the inputs when it executes.
+    """
     inp = build_match_input(s, invoice_ids, currency, ruleset_code)
     scope_ids = sorted(inp.test_document_ids | {str(i) for i in invoice_ids})
     fp = input_fingerprint(inp)
@@ -109,6 +160,37 @@ def request_run(
     s.flush()
     enqueue(s, TASK, tenant_id, {"match_run_id": str(run.id)}, corr)
     return run, True
+
+
+def rematch_out_of_date(
+    s: Session,
+    tenant_id: uuid.UUID,
+    trigger: str = "manual",
+    trigger_ref: uuid.UUID | None = None,
+) -> int:
+    """Request a run for every supplier whose stored results no longer equal its current inputs
+    (B14, acceptance C1); returns how many runs were created. A supplier whose results are current,
+    or whose inputs are already queued, gets none, so calling this after any action, or once a
+    minute, costs reads only. Never-matched documents are left to their own trigger: a supplier
+    with no current result at all is skipped."""
+    if not processing_allowed(s):
+        return 0
+    has_result = set(
+        s.scalars(
+            select(InvoiceLineRow.invoice_id)
+            .join(LineMatch, LineMatch.invoice_line_id == InvoiceLineRow.id)
+            .where(LineMatch.is_current.is_(True), InvoiceLineRow.removed_at.is_(None))
+            .distinct()
+        ).all()
+    )
+    live = s.scalars(select(InvoiceRow.id).where(live_invoice())).all()
+    created = 0
+    for part in partition(s, list(live)):
+        if not has_result.intersection(part):
+            continue
+        _run, made = _request_one(s, tenant_id, part, trigger, trigger_ref, "v1", "CAD")
+        created += int(made)
+    return created
 
 
 def execute_run(s: Session, payload: dict[str, Any], ruleset_code: str = "v1", currency: str = "CAD") -> None:

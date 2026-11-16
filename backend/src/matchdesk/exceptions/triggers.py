@@ -15,14 +15,18 @@ import uuid
 from collections.abc import Iterable
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import Engine, select, text
 from sqlalchemy.orm import Session
 
+from matchdesk.core import get_logger
 from matchdesk.exceptions.models import MatchRun
-from matchdesk.exceptions.runs import request_run
+from matchdesk.exceptions.runs import rematch_out_of_date, request_run
 from matchdesk.intake.models import InvoiceRow, live_invoice
 from matchdesk.qbo import processing_allowed
 from matchdesk.qbo.models import PoLineRow, PurchaseOrderRow
+from matchdesk.tenancy import global_session, session
+
+log = get_logger("matchdesk.match_triggers")
 
 TASK = "match_request"
 
@@ -71,10 +75,14 @@ def request_runs(
     trigger: str,
     trigger_ref: uuid.UUID | None = None,
 ) -> MatchRun | None:
+    """Request a run for these documents (one per supplier), then for every other supplier whose
+    stored results no longer equal its current inputs (B14, acceptance C1), so no action can leave a
+    result out of date with nothing queued. Returns the first run of the documents asked for."""
     ids = sorted({uuid.UUID(str(i)) for i in invoice_ids})
-    if not ids:
-        return None
-    run, _created = request_run(s, tenant_id, ids, trigger=trigger, trigger_ref=trigger_ref)
+    run = None
+    if ids:
+        run, _created = request_run(s, tenant_id, ids, trigger=trigger, trigger_ref=trigger_ref)
+    rematch_out_of_date(s, tenant_id, trigger, trigger_ref)
     return run
 
 
@@ -90,4 +98,23 @@ def handle_match_request(s: Session, payload: dict[str, Any]) -> None:
     ref = payload.get("trigger_ref")
     if not processing_allowed(s):
         return  # disconnected: no match run on QuickBooks-derived rows (self-check 6.4)
+    # A payload with no documents (B14: a correction in review, a receiving change, the minute tick)
+    # still re-matches whatever is out of date.
     request_runs(s, tenant_id, ids, payload.get("trigger", "manual"), uuid.UUID(ref) if ref else None)
+
+
+def rematch_everywhere(engine: Engine) -> int:
+    """The worker's minute tick (B14, acceptance C1): ``rematch_out_of_date`` for every account, one
+    tenant transaction each; returns the runs created. Every action re-matches what it makes out of
+    date in its own transaction, so a run created here means a trigger was missed (or results were
+    stored before B14 by a run over several suppliers): it is logged as a warning, not hidden."""
+    with global_session(engine) as g:
+        tenant_ids = [r[0] for r in g.execute(text("select id from tenants order by id")).all()]
+    total = 0
+    for tid in tenant_ids:
+        with session(tid, engine) as s:
+            made = rematch_out_of_date(s, tid)
+        if made:
+            log.warning("out_of_date_results_rematched", extra={"tenant_id": str(tid), "count": made})
+        total += made
+    return total

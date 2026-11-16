@@ -23,7 +23,7 @@ from dataclasses import dataclass, field, replace
 from datetime import date, timedelta
 from decimal import Decimal
 
-from matchdesk.core import ZERO, dec, round_cents, round_price
+from matchdesk.core import ZERO, dec, round_cents, round_price, round_qty
 from matchdesk.matching.fingerprint import assert_no_floats
 from matchdesk.matching.normalise import (
     document_order_key,
@@ -84,6 +84,11 @@ _FINDING_ORDER = {
     ExceptionType.QTY_OVER_ORDERED: 2,
     ExceptionType.PRICE_VARIANCE: 3,
 }
+# Exceptions on one line that are about the same units: none received, more than received, more than
+# ordered. A credit the controller decided against one of them covers those units for all (B14).
+_SAME_UNITS = frozenset(
+    {ExceptionType.RECEIPT_ABSENT, ExceptionType.QTY_OVER_RECEIVED, ExceptionType.QTY_OVER_ORDERED}
+)
 _UNVERIFIED_ORDER = {
     ExceptionType.EXTRACTION_UNVERIFIED: 0,
     ExceptionType.NO_PO: 1,
@@ -208,6 +213,8 @@ class _State:
     exceptions: list[ExceptionResult] = field(default_factory=list)
     lines: dict[str, LineResult] = field(default_factory=dict)
     line_amounts: dict[str, Decimal] = field(default_factory=dict)
+    # Amount per line that a credit decided by the controller covers (B14, acceptance C2).
+    credited_by_decision: dict[str, Decimal] = field(default_factory=lambda: defaultdict(lambda: ZERO))
 
 
 # --------------------------------------------------------------------------- evaluate
@@ -1095,7 +1102,13 @@ def _flag_possibly_credited(
     until the controller decides (MH-09). A "credited" decision nets that exception with that credit,
     once: the credit is then used up and flags no other exception, so one credit is never netted
     twice. A "not credited" decision keeps the exception a finding and that credit never flags it
-    again. A decision applies only while the credit still fits the exception's amount."""
+    again. A decision applies only while the credit still fits the exception's amount.
+
+    B14 (acceptance C2): the credited amount is taken off every other exception on the same line that
+    is about the same units (``_SAME_UNITS``). Invoiced 40 above received (168.00) and 20 above
+    ordered (84.00) are the same units; a credit decided for the 168.00 leaves 60 billed against 80
+    ordered, so the second closes with it and never becomes a finding of its own. Where the other
+    amount is larger, only the part the credit did not cover remains."""
     by_id = {c.id: c for c in credits}
     decided = {d.key: d for d in sorted(decisions, key=lambda d: d.key)}
     used: set[str] = set()
@@ -1107,13 +1120,47 @@ def _flag_possibly_credited(
         if credit is None or not _could_be_credited_by(exc, credit, invoices.get(exc.document_id)):
             continue
         used.add(credit.id)
+        label = f"Credited in QuickBooks ({credit.doc_number or 'vendor credit'}), decided by the controller"
         st.exceptions[idx] = replace(
             exc,
             status=ExceptionStatus.RESOLVED,
             resolution_code=ResolutionCode.RESOLVED_BY_CREDIT,
             related_qbo_bill_ids=(credit.id,),
-            label=f"Credited in QuickBooks ({credit.doc_number or 'vendor credit'}), decided by the controller",
+            label=label,
         )
+        credited = exc.variance_amount or ZERO
+        st.credited_by_decision[exc.line_id or ""] += credited
+        if exc.line_id is None or exc.type not in _SAME_UNITS:
+            continue
+        for j, other in enumerate(st.exceptions):
+            if (
+                j == idx
+                or other.line_id != exc.line_id
+                or other.type not in _SAME_UNITS
+                or other.status != ExceptionStatus.OPEN
+                or other.variance_amount is None
+            ):
+                continue
+            left = other.variance_amount - credited
+            if left <= 0:
+                st.exceptions[j] = replace(
+                    other,
+                    status=ExceptionStatus.RESOLVED,
+                    resolution_code=ResolutionCode.RESOLVED_BY_CREDIT,
+                    related_qbo_bill_ids=(credit.id,),
+                    label=f"{label} (the same units)",
+                )
+            else:
+                share = left / other.variance_amount
+                st.exceptions[j] = replace(
+                    other,
+                    variance_amount=left,
+                    variance_qty=None
+                    if other.variance_qty is None
+                    else round_qty(other.variance_qty * share),
+                    related_qbo_bill_ids=(credit.id,),
+                    label=f"{label}: {round_cents(credited)} of the same units taken off",
+                )
     for credit in credits:
         if credit.id in used:
             continue
@@ -1142,7 +1189,9 @@ def _assign_reported_amounts(st: _State, docs: list[Document]) -> list[Exception
     for line_id in sorted(by_line):
         excs = by_line[line_id]
         line_amount = st.line_amounts.get(line_id, ZERO)
-        counted = ZERO
+        # B14 (acceptance C2): money a decided credit returned on this line is no longer open to
+        # any other exception on it.
+        counted = min(line_amount, st.credited_by_decision.get(line_id, ZERO))
         finding_like = sorted(
             (e for e in excs if e.value_class in (ValueClass.FINDING_CANDIDATE, ValueClass.OPEN_UNDECIDED)),
             key=lambda e: _FINDING_ORDER.get(e.type, 9),

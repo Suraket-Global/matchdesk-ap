@@ -643,6 +643,10 @@ def register_exception_routes(app: FastAPI, engine: Engine) -> None:
                 run = request_runs(
                     s, p.tenant_id, invoices_on_po_lines(s, lines), "late_receipt_approval", d.subject_id
                 )
+            else:
+                # B14 (acceptance C1): any other decision (a conversion returned, say) re-matches
+                # whatever it made out of date; where nothing changed, nothing is queued.
+                request_runs(s, p.tenant_id, [], "manual", a.id)
             return {**_approval_body(a), "effect": d.effect, "match_run_id": str(run.id) if run else None}
 
     @app.get("/api/v1/aliases")

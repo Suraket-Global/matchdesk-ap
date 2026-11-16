@@ -73,6 +73,9 @@ def _load(s: Session, import_id: uuid.UUID) -> ReceivingImportRow:
 def _rematch(
     s: Session, tenant_id: uuid.UUID, po_line_ids: list[uuid.UUID], import_id: uuid.UUID
 ) -> str | None:
+    """Re-match the invoices on these PO lines and whatever else the change made out of date (B14:
+    a class A log declared complete changes coverage for every supplier). Nothing while QuickBooks
+    is disconnected."""
     run = request_runs(s, tenant_id, invoices_on_po_lines(s, po_line_ids), "receiving_import", import_id)
     return str(run.id) if run else None
 
@@ -162,7 +165,7 @@ def register_receiving_routes(app: FastAPI, engine: Engine) -> None:
             imp, touched = receiving.commit(s, imp, p.user_id, open_lines)
             late = receiving.late_line_count(s, imp.id)
             approval = request_late_receipt_approval(s, p.tenant_id, imp.id, p.user_id, late)
-            run_id = _rematch(s, p.tenant_id, touched, imp.id) if touched else None
+            run_id = _rematch(s, p.tenant_id, touched, imp.id)
             return {
                 **receiving.describe_import(imp),
                 "late_lines": late,
@@ -179,7 +182,7 @@ def register_receiving_routes(app: FastAPI, engine: Engine) -> None:
                 lines = receiving.void(s, imp, p.user_id, body.reason)
             except ValueError as exc:
                 raise HTTPException(422, str(exc)) from None
-            run_id = _rematch(s, p.tenant_id, lines, imp.id) if lines else None
+            run_id = _rematch(s, p.tenant_id, lines, imp.id)
             return {**receiving.describe_import(imp), "match_run_id": run_id}
 
     @app.get("/api/v1/receiving/imports")

@@ -145,15 +145,30 @@ def build_match_input(
         if doc_states.get(i.document_id) != "duplicate_file"
     )
 
-    imports = s.scalars(select(ReceivingImportRow)).all()
+    # B14 (acceptance C1): only what the rules read. A receiving import counts for these documents
+    # when it is committed and one of its receipt lines is on an in-scope PO line, or when it is a
+    # class A log declared complete (coverage is read across the account). A draft, a file still
+    # being checked and a voided import are read by no rule, so they are no input: a file left as a
+    # draft changes no fingerprint and marks no result out of date.
     receipt_rows = s.execute(
         select(ReceiptLineRow, ReceiptRow)
         .join(
             ReceiptRow,
             (ReceiptRow.id == ReceiptLineRow.receipt_id) & (ReceiptRow.tenant_id == ReceiptLineRow.tenant_id),
         )
-        .where(ReceiptLineRow.po_line_id.in_(po_line_ids))
+        .join(
+            ReceivingImportRow,
+            (ReceivingImportRow.id == ReceiptLineRow.receiving_import_id)
+            & (ReceivingImportRow.tenant_id == ReceiptLineRow.tenant_id),
+        )
+        .where(ReceiptLineRow.po_line_id.in_(po_line_ids), ReceivingImportRow.state == "succeeded")
     ).all()
+    used_imports = {rl.receiving_import_id for rl, _r in receipt_rows}
+    imports = [
+        i
+        for i in s.scalars(select(ReceivingImportRow).where(ReceivingImportRow.state == "succeeded")).all()
+        if i.id in used_imports or (i.evidence_class == "A" and i.declared_complete)
+    ]
     receipts = tuple(
         ReceiptLine(
             id=str(rl.id),
@@ -171,8 +186,8 @@ def build_match_input(
         ReceivingImport(
             id=str(i.id),
             evidence_class=EvidenceClass(i.evidence_class),
-            committed=i.state in {"succeeded", "voided"},
-            voided=i.state == "voided",
+            committed=True,
+            voided=False,
             declared_complete=i.declared_complete,
             coverage_start=i.coverage_start,
             coverage_end=i.coverage_end,
@@ -240,11 +255,14 @@ def build_match_input(
         else:
             vendor_tols.append((str(t.vendor_id), tol))
 
+    # B14 (acceptance C1): decisions on these documents only. Read for the whole account, another
+    # supplier's duplicate decision changed this fingerprint and nothing re-matched these documents.
     decided = s.scalars(
         select(ExceptionRow).where(
             ExceptionRow.resolution_code.in_(
                 ["confirmed_not_received", "confirmed_duplicate", "not_a_duplicate"]
-            )
+            ),
+            ExceptionRow.invoice_id.in_([i.id for i in inv_rows]),
         )
     ).all()
     confirmed = frozenset(

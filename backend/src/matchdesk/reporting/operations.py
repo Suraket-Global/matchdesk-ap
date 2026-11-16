@@ -30,6 +30,7 @@ OPERATION_WORDS = {
     "receiving_draft_cleanup": "Receiving draft removal (7 days)",
     "archive_expiry": "Archive expiry (24 hours)",
     "due_deletions": "Account deletions that are due",
+    "out_of_date_rematch": "Re-match of results found out of date",
 }
 
 

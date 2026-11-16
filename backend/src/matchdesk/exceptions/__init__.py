@@ -16,7 +16,14 @@ from matchdesk.exceptions.rules_admin import (
     suggestions,
 )
 from matchdesk.exceptions.runs import TASK as MATCH_RUN_TASK
-from matchdesk.exceptions.runs import execute_run, rematch_alias, request_run, stale_runs
+from matchdesk.exceptions.runs import (
+    execute_run,
+    partition,
+    rematch_alias,
+    rematch_out_of_date,
+    request_run,
+    stale_runs,
+)
 from matchdesk.exceptions.store import exception_fingerprint, retire_line_result, store_result
 from matchdesk.exceptions.triggers import TASK as MATCH_REQUEST_TASK
 from matchdesk.exceptions.triggers import (
@@ -24,6 +31,7 @@ from matchdesk.exceptions.triggers import (
     invoices_on_po_lines,
     invoices_on_pos,
     related_invoices,
+    rematch_everywhere,
     request_runs,
 )
 from matchdesk.exceptions.workflow import (
@@ -72,11 +80,14 @@ __all__ = [
     "invoices_for_alias_code",
     "invoices_on_po_lines",
     "invoices_on_pos",
+    "partition",
     "po_lines_with_open_exceptions",
     "preview_tolerance",
     "related_invoices",
     "rematch_alias",
+    "rematch_everywhere",
     "rematch_for_alias",
+    "rematch_out_of_date",
     "removal_rule",
     "remove_document",
     "reopen",

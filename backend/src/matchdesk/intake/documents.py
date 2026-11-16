@@ -177,7 +177,9 @@ def materialise(
         rows.append(inv)
     s.flush()
     record_usage(s, tenant_id, doc.id, rows)
-    if passed and rows:
+    # B14 (acceptance C1): a document that needs review is an input of its supplier's other results
+    # too (and is itself an exception, never dropped), so it requests a run like any other.
+    if rows:
         enqueue(
             s,
             MATCH_REQUEST_TASK,

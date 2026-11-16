@@ -63,7 +63,11 @@ def test_one_credit_nets_one_exception_whatever_the_document_order() -> None:
     for docs in ((a, b), (b, a)):
         res = evaluate(build(docs=docs, bills=(VC,), credit_decisions=(d,), **base))
         netted = [e for e in res.exceptions if e.resolution_code == ResolutionCode.RESOLVED_BY_CREDIT]
-        assert len(netted) == 1 and netted[0].key == target.key
+        # B14 (acceptance C2): the 40 units are also "above ordered" on the same line; the credit
+        # covers those same units, so both close with it and nothing on the other document does.
+        assert {(e.document_id, e.line_id) for e in netted} == {(target.document_id, target.line_id)}
+        assert target.key in {e.key for e in netted}
+        assert not [e for e in res.exceptions if e.line_id == target.line_id and e.qualifying]
         assert not [e for e in res.exceptions if e.possibly_credited_bill_id == "vc78"]
 
 
