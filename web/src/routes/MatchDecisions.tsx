@@ -44,6 +44,9 @@ function useDecision(e: ExceptionItem, onDone: () => void) {
 
 /** The money a decision is about: the amount counted for the line, else its variance. */
 function decisionAmount(e: ExceptionItem): string | null {
+  // B14 (M2): a possible duplicate is about the document's total, which is its variance; the amount
+  // counted under it can be zero when the lines already report the money.
+  if (e.type === "possible_duplicate") return e.variance_amount ?? e.reported_amount ?? null;
   return e.reported_amount ?? e.variance_amount ?? null;
 }
 

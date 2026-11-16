@@ -58,7 +58,7 @@ from matchdesk.core import (
 from matchdesk.exceptions import allowed_codes, request_run, stale_runs
 from matchdesk.exceptions.models import ExceptionRow, LineMatch, MatchRun
 from matchdesk.identity import Principal, csrf_matches, load_session
-from matchdesk.intake import add_file, create_batch, describe_fields
+from matchdesk.intake import add_file, create_batch, describe_fields, record_refusal
 from matchdesk.intake.models import DocumentRow, InvoiceLineRow, InvoiceRow, UploadBatch, live_invoice
 from matchdesk.qbo import (
     QboNotConfiguredError,
@@ -452,11 +452,22 @@ def create_app(
         # The body limit middleware has already refused any request above MAX_UPLOAD_BODY_BYTES.
         data = await file.read(MAX_UPLOAD_FILE_BYTES + 1)
         mime = sniff(data)
-        if mime is None:
-            raise HTTPException(415, "Only PDF, PNG and JPEG invoices are accepted")
-        if len(data) > MAX_FILE_BYTES[mime]:
-            raise HTTPException(413, "File is larger than 20 MB")
         name = (file.filename or "")[:255] or None
+        # B14 (acceptance M3): a refused file is kept on its batch by name and reason (never its
+        # content), so the batch shows every file that was chosen.
+        refusal = (
+            ("empty", 415, "The file is empty")
+            if not data
+            else ("not_supported", 415, "Only PDF, PNG and JPEG invoices are accepted")
+            if mime is None
+            else ("too_large", 413, "File is larger than 20 MB")
+            if len(data) > MAX_FILE_BYTES[mime]
+            else None
+        )
+        if refusal is not None:
+            await run_in_threadpool(_refuse, p, batch_id, idempotency_key, name, refusal[0], len(data))
+            raise HTTPException(refusal[1], refusal[2])
+        assert mime is not None
         try:
             return await run_in_threadpool(_store_file, p, batch_id, idempotency_key, data, mime, name)
         except IntegrityError:
@@ -464,6 +475,33 @@ def create_app(
             # time): the loser of the unique-file race retries once and is stored as a duplicate
             # file of the winner, instead of failing with 500 (B4).
             return await run_in_threadpool(_store_file, p, batch_id, idempotency_key, data, mime, name)
+
+    class RefusalBody(BaseModel):
+        name: str = Field(min_length=1, max_length=255)
+        byte_size: int = Field(ge=0)
+
+    @app.post("/api/v1/intake/batches/{batch_id}/refusals", status_code=201)
+    def post_refusal(
+        batch_id: uuid.UUID,
+        body: RefusalBody,
+        p: Auth,
+        idempotency_key: Annotated[str, Header(min_length=1, max_length=200)],
+    ) -> dict[str, Any]:
+        """A file the browser did not send because it is over the size limit (the request-body limit
+        would refuse it before this server could name it): kept on the batch like any other refused
+        file (B14, acceptance M3). Only this reason is taken from a client."""
+        require(p, "upload_and_receiving")
+        if body.byte_size <= max(MAX_FILE_BYTES.values()):
+            raise HTTPException(422, "this file is within the size limit: upload it")
+        _refuse(p, batch_id, idempotency_key, body.name, "too_large", body.byte_size)
+        return {"recorded": True}
+
+    def _refuse(
+        p: Principal, batch_id: uuid.UUID, key: str, name: str | None, reason: str, size: int
+    ) -> None:
+        with session(p.tenant_id, engine()) as s:
+            if not record_refusal(s, batch_id, name, reason, size, key):
+                raise NotFoundError("batch")
 
     def _store_file(
         p: Principal, batch_id: uuid.UUID, key: str, data: bytes, mime: str, name: str | None

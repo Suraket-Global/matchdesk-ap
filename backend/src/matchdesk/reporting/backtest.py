@@ -14,11 +14,13 @@ from __future__ import annotations
 
 import csv
 import io
+import textwrap
 import uuid
 from collections import Counter, defaultdict
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -808,34 +810,161 @@ def _deleted_lines(r: BacktestReport) -> list[str]:
     ]
 
 
-def export_pdf(r: BacktestReport, findings: list[ReportFinding]) -> bytes:
-    sec = r.totals.get("sections", {})
-    unmeasured = _unmeasured_line(r)
-    lines = [
-        f"MatchDesk back-test report  {r.period_start} to {r.period_end}  version {r.version_no}  ({r.status})",
-        f"Data cut-off: {r.data_cutoff_at.isoformat()}   History read from: {r.history_read_from or 'n/a'}",
-        *([unmeasured] if unmeasured else []),
-        "",
-        f"Qualifying total (refund criterion): {r.qualifying_amount}",
-        f"Flagged discrepancies: {flagged_amount(r)} (findings {r.findings_amount} + not received"
-        f" {r.not_received_amount})   Unverified: {r.unverified_amount}",
-        f"Waived (still counted): {sec.get('waived', {}).get('amount', '0.00')}"
-        f"   Undecided: {sec.get('open', {}).get('amount', '0.00')}",
-        f"Receipt coverage: {r.receipt_coverage_pct}%  class A complete-log coverage: {r.coverage_class_a_pct}%"
-        f"  class B: {r.coverage_class_b_pct}%  supplier-slip-only lines: {r.class_c_only_lines}",
-        *_declaration_lines(r),
-        *_inconsistent_lines(r),
-        *_deleted_lines(r),
-        "",
-        "Section       Type                 Document       PO       Line   Amount     Paid",
+PDF_WIDTH = 96  # characters of 9-point Courier inside the page margins (core.pdf: 532 pt / 5.4 pt)
+_PACIFIC = ZoneInfo("America/Vancouver")
+# The sections in the order S-13 shows them, with the heading the PDF gives each (design.md 9).
+PDF_SECTIONS = (
+    ("finding", "Findings"),
+    ("not_received", "Not received"),
+    ("unverified", "Unverified"),
+    ("open", "Undecided"),
+    ("waived", "Waived"),
+)
+_COLS = (("Type", 24), ("Supplier", 22), ("Document", 13), ("PO", 7), ("Line", 4))
+
+
+def _pacific(at: datetime | None) -> str:
+    """A time as a person writes it, in the account's time (Pacific): 17 Nov 2026, 00:46."""
+    if at is None:
+        return "not recorded"
+    local = at.astimezone(_PACIFIC)
+    return f"{local.day} {local:%b %Y}, {local:%H:%M} Pacific time"
+
+
+def _day(d: date | None) -> str:
+    return f"{d.day} {d:%b %Y}" if d else "not recorded"
+
+
+def _pct_word(v: Decimal | None) -> str:
+    return f"{v}%" if v is not None else "not measured"
+
+
+def _wrap(text: str, width: int = PDF_WIDTH, indent: str = "") -> list[str]:
+    """Break a line at spaces so nothing runs off the page; a word longer than the line is split."""
+    return textwrap.wrap(
+        text, width=width, subsequent_indent=indent, break_long_words=True, break_on_hyphens=False
+    ) or [""]
+
+
+def _row(cells: list[str], amount: str, paid: str) -> list[str]:
+    """One table row. A value wider than its column continues on the next line under it, so a long
+    supplier name is never cut and never pushes the amount out of its column."""
+    wrapped = [
+        textwrap.wrap(c, width=w, break_long_words=True, break_on_hyphens=False) or [""]
+        for c, (_n, w) in zip(cells, _COLS, strict=True)
     ]
-    for f in findings:
-        sn = f.snapshot
-        lines.append(
-            f"{f.section:<13} {f.type:<20} {str(sn.get('doc_number') or '')[:14]:<14} "
-            f"{str(sn.get('po_number') or '')[:8]:<8} {sn.get('line_no') or ''!s:<6} {f.amount!s:>10} {f.paid_status}"
+    out: list[str] = []
+    for i in range(max(len(w) for w in wrapped)):
+        left = " ".join(
+            f"{(w[i] if i < len(w) else ''):<{width}}" for w, (_n, width) in zip(wrapped, _COLS, strict=True)
         )
+        out.append(f"{left} {amount:>10}  {paid}".rstrip() if i == 0 else left.rstrip())
+    return out
+
+
+def export_pdf(
+    r: BacktestReport, findings: list[ReportFinding], context: dict[str, Any] | None = None
+) -> bytes:
+    """The report as a document a controller can hand to an owner or a supplier (B14, acceptance
+    M4): the words of design.md section 9 (never an internal code), the supplier on every row, dates
+    as a person writes them, and no line wider than the page. Every figure is the stored one, the
+    same as the screen and the CSV. ``context`` adds what the report row does not hold: the account
+    name, who approved, the pilot terms and the refund result (the export route builds it)."""
+    ctx = context or {}
+    sec = (r.totals or {}).get("sections", {})
+    unmeasured = _unmeasured_line(r)
+    status = {"draft": "Draft, not approved", "approved": "Approved", "superseded": "Superseded"}.get(
+        r.status, r.status.capitalize()
+    )
+    out: list[str] = []
+
+    def add(text: str = "", indent: str = "") -> None:
+        out.extend(_wrap(text, indent=indent) if text else [""])
+
+    add("MatchDesk back-test report")
+    if ctx.get("account"):
+        add(f"Account: {ctx['account']}")
+    add(f"Invoices dated {_day(r.period_start)} to {_day(r.period_end)}. Version {r.version_no}. {status}.")
+    history = f" Purchase-order history read from {_day(r.history_read_from)}." if r.history_read_from else ""
+    add(f"Data as of {_pacific(r.data_cutoff_at)}.{history}")
+    if r.status == "approved":
+        add(f"Approved by {ctx.get('approved_by_name') or 'a controller'} on {_pacific(r.approved_at)}.")
+    if unmeasured:
+        add(unmeasured)
+    add()
+    add("Totals (CAD)")
+    waived = sec.get("waived", {}).get("amount", "0.00")
+    waived_counted = round_cents(
+        sum((dec(f.amount) for f in findings if f.section == "waived" and f.qualifying), ZERO)
+    )
+    for label, value in (
+        ("Flagged discrepancies", f"{flagged_amount(r)}"),
+        ("  Findings", f"{r.findings_amount}"),
+        ("  Not received", f"{r.not_received_amount}"),
+        ("Unverified", f"{r.unverified_amount}"),
+        ("Undecided", f"{sec.get('open', {}).get('amount', '0.00')}"),
+        ("Waived", f"{waived}"),
+        ("Qualifying total for the refund", f"{r.qualifying_amount}"),
+    ):
+        add(f"{label:<34}{value:>12}")
+    add(
+        "The qualifying total is the flagged discrepancies plus the part of the waived amount that the "
+        f"rules counted as a finding ({waived_counted} of {waived}). A waiver never lowers it.",
+    )
+    add()
+    add("Receiving evidence")
+    add(f"Receipt coverage of the item lines: {_pct_word(r.receipt_coverage_pct)}")
+    add(f"  by a warehouse record (class A): {_pct_word(r.coverage_class_a_pct)}")
+    add(f"  by a signed delivery document (class B): {_pct_word(r.coverage_class_b_pct)}")
+    add(f"Lines with a supplier slip only (never counted as a receipt): {r.class_c_only_lines or 0}")
+    for extra in (*_declaration_lines(r), *_inconsistent_lines(r), *_deleted_lines(r)):
+        add(extra, indent="  ")
+    pilot = ctx.get("pilot") or {}
+    if pilot:
+        add()
+        add("Pilot terms and refund")
+        add(
+            f"Price CAD {pilot.get('price') or 'not recorded'}. Refunded when the qualifying total of the "
+            f"governing report version is below CAD {pilot.get('refund_threshold') or 'not recorded'}."
+        )
+        if ctx.get("is_governing") and pilot.get("refund_due") is not None:
+            add(
+                f"This version governs the refund: qualifying total CAD {pilot.get('refund_qualifying_amount')}, "
+                f"so the pilot fee is {'refunded' if pilot['refund_due'] else 'not refunded'}."
+            )
+        elif pilot.get("governing_report_id"):
+            add("Another version of this report governs the refund.")
+        else:
+            add("No governing version has been chosen yet; the refund is not decided.")
+    for key, heading in PDF_SECTIONS:
+        rows = [f for f in findings if f.section == key]
+        if not rows:
+            continue
+        add()
+        total = round_cents(sum((dec(f.amount) for f in rows), ZERO))
+        add(f"{heading}: {len(rows)} {'item' if len(rows) == 1 else 'items'}, CAD {total}")
+        out.append(" ".join(f"{n:<{w}}" for n, w in _COLS) + f" {'Amount':>10}  Paid")
+        out.append("-" * PDF_WIDTH)
+        for f in rows:
+            sn = f.snapshot
+            out.extend(
+                _row(
+                    [
+                        _word(TYPE_WORDS, f.type),
+                        str(sn.get("vendor_name") or "Supplier not identified"),
+                        str(sn.get("doc_number") or "No number"),
+                        str(sn.get("po_number") or ""),
+                        str(sn.get("line_no") or ""),
+                    ],
+                    str(f.amount),
+                    _word(PAID_WORDS, f.paid_status),
+                )
+            )
+    if not findings:
+        add()
+        add("Nothing was flagged, left unverified, waived or undecided in this period.")
+    assert all(len(ln) <= PDF_WIDTH for ln in out)
     mark = None if r.status == "approved" else DRAFT_MARK
     return text_pdf(
-        lines, title=f"Back-test {r.period_start} to {r.period_end} v{r.version_no}", watermark=mark
+        out, title=f"Back-test {r.period_start} to {r.period_end} v{r.version_no}", watermark=mark
     )

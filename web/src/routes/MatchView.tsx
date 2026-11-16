@@ -5,6 +5,7 @@ import { ApiError, errorText, get, send } from "../api/client";
 import type { ExceptionItem, InvoiceDetail, InvoiceLine, Neighbour, Neighbours, Page, Vendor } from "../api/types";
 import { usePeriod } from "../app/period";
 import { apiQuery, describeScope, readScope } from "../lib/queue";
+import { pickException } from "../lib/matchview";
 import { useSession } from "../app/session";
 import { Banner, ErrorState, Loading, StatusChip, toast, usePageTitle } from "../components/ui";
 import { cad, money, price, qty, subtract, toCents } from "../lib/decimal";
@@ -164,17 +165,8 @@ export function MatchViewPage() {
   const tol = useQuery({ queryKey: ["tolerances"], queryFn: () => get<{ waiver_limit: string }>("/api/v1/tolerances") });
   const inv = q.data;
   usePageTitle("Match view", inv?.doc_number);
-  const lineId = params.get("line") || inv?.lines.find((l) => inv.exceptions.some((e) => e.invoice_line_id === l.id && e.status === "open"))?.id || inv?.lines[0]?.id;
+  const { lineId, lineExcs, docExcs, current } = pickException(inv, params.get("line"), params.get("exc"));
   const line = inv?.lines.find((l) => l.id === lineId);
-  const lineExcs = (inv?.exceptions ?? []).filter((e) => e.invoice_line_id === lineId && e.status !== "auto_closed");
-  const docExcs = (inv?.exceptions ?? []).filter((e) => !e.invoice_line_id && e.status !== "auto_closed");
-  const excId = params.get("exc");
-  const current =
-    lineExcs.find((e) => e.id === excId) ??
-    lineExcs.find((e) => e.status === "open" || e.status === "pending_approval") ??
-    docExcs.find((e) => e.id === excId) ??
-    lineExcs[0] ??
-    docExcs.find((e) => e.status === "open");
 
   const detail = useExceptionDetail(current?.id);
   // B8: previous and next come from the server, over the same scope and order as the queue opened.
@@ -313,7 +305,7 @@ export function MatchViewPage() {
           </nav>
           <h1 ref={heading} tabIndex={-1}>
             {inv.doc_type === "credit_note" ? "Credit note" : "Invoice"} {inv.doc_number ?? "without number"}
-            {line ? <span className="h-sub"> line {line.line_no}</span> : null}
+            {current && !current.invoice_line_id ? <span className="h-sub"> whole document</span> : line ? <span className="h-sub"> line {line.line_no}</span> : null}
           </h1>
           <p className="lede">
             {inv.vendor_name ?? "Supplier not identified"}, dated {day(inv.doc_date)}, total <span className="money">{cad(inv.total)}</span>.{" "}
@@ -338,7 +330,7 @@ export function MatchViewPage() {
           )}
         </div>
       </div>
-      {line && m && current && <Ledger line={line} exc={current} here={here} />}
+      {line && m && current && current.invoice_line_id === line.id && <Ledger line={line} exc={current} here={here} />}
       {inv.stale && (
         <Banner tone="draft" role="status">
           {inv.lines.every((l) => l.result_status === null)
@@ -357,7 +349,23 @@ export function MatchViewPage() {
           {docExcs.map((e) => (
             <p key={e.id}>
               {typeWord(e.type)}
-              {money(e.reported_amount ?? e.variance_amount) ? ` (${cad(e.reported_amount ?? e.variance_amount)})` : ""} {chipFor(e)}
+              {money(e.reported_amount ?? e.variance_amount) ? ` (${cad(e.reported_amount ?? e.variance_amount)})` : ""} {chipFor(e)}{" "}
+              {/* B14 (M1): an exception on the whole document is opened by name, never by chance. */}
+              {current?.id === e.id ? (
+                <span className="small muted">Shown in the action panel.</span>
+              ) : (
+                <button
+                  className="btn small"
+                  onClick={() => {
+                    const p = new URLSearchParams(params);
+                    p.set("exc", e.id);
+                    p.delete("line");
+                    setParams(p, { replace: true });
+                  }}
+                >
+                  Open this exception
+                </button>
+              )}
             </p>
           ))}
         </Banner>
@@ -566,6 +574,11 @@ export function MatchViewPage() {
                 <h2>{typeWord(current.type)}</h2>
                 {current.status !== "open" && chipFor(current)}
               </div>
+              {!current.invoice_line_id && (
+                <p className="small muted panel-note" data-testid="doc-exception-note">
+                  About the whole document, not one line.
+                </p>
+              )}
               <div className="panel-body">
                 <div>
                   <div className="muted small">{zeroCounted(current) ? "Adds nothing" : "Value"}</div>

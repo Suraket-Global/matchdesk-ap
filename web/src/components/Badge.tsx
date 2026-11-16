@@ -51,6 +51,7 @@ export const STATUS: Record<string, { tone: Tone; icon: string; word: string }> 
   queued: { tone: "neutral", icon: "clock", word: "Queued" },
   processing: { tone: "neutral", icon: "pending", word: "Processing" },
   failed: { tone: "exception", icon: "cross", word: "Failed" },
+  refused: { tone: "exception", icon: "cross", word: "Refused" },
   "duplicate file": { tone: "absent", icon: "stack", word: "Duplicate file" },
   succeeded: { tone: "matched", icon: "tick", word: "Imported" },
   voided: { tone: "waived", icon: "dash", word: "Voided" },

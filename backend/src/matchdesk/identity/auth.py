@@ -563,20 +563,55 @@ def create_invitation(
     settings: Settings | None = None,
     now: datetime | None = None,
 ) -> tuple[dict[str, Any], OutgoingMail]:
+    return _invite(engine, p.tenant_id, p.user_id, "user", email, role, settings, now)
+
+
+def _invite(
+    engine: Engine,
+    tenant_id: uuid.UUID,
+    actor_user_id: uuid.UUID,
+    actor_type: str,
+    email: str,
+    role: str,
+    settings: Settings | None,
+    now: datetime | None,
+) -> tuple[dict[str, Any], OutgoingMail]:
+    """One open invitation per address (B14, acceptance m9): a person who is already a member is
+    refused (their role is changed on S-16, not by an invitation), and a new invitation to an address
+    replaces the one still open, so repeats never pile up and only the newest link works."""
     if role not in ROLES:
         raise ValueError("unknown role")
     cfg = settings or load_settings()
     at = _now(now)
     token = new_token()
-    with session(p.tenant_id, engine) as s:
-        tenant = s.get(Tenant, p.tenant_id)
+    address = email.strip()
+    with global_session(engine) as g:
+        existing_user = g.scalar(select(User.id).where(User.email == address))
+    with session(tenant_id, engine) as s:
+        tenant = s.get(Tenant, tenant_id)
         assert tenant is not None
+        if existing_user is not None and s.scalar(
+            select(Membership.id).where(Membership.user_id == existing_user)
+        ):
+            raise ConflictError(
+                "This person is already a member of the account. Change their role under Users."
+            )
+        for old in s.scalars(
+            select(Invitation)
+            .where(
+                Invitation.email == address,
+                Invitation.accepted_at.is_(None),
+                Invitation.revoked_at.is_(None),
+            )
+            .with_for_update()
+        ):
+            old.revoked_at = at
         inv = Invitation(
-            tenant_id=p.tenant_id,
-            email=email.strip(),
+            tenant_id=tenant_id,
+            email=address,
             role=role,
             token_hash=hash_token(token),
-            invited_by=p.user_id,
+            invited_by=actor_user_id,
             expires_at=at + INVITE_TTL,
             created_at=at,
         )
@@ -584,9 +619,9 @@ def create_invitation(
         s.flush()
         write_audit(
             s,
-            p.tenant_id,
-            actor_type="user",
-            actor_user_id=p.user_id,
+            tenant_id,
+            actor_type=actor_type,
+            actor_user_id=actor_user_id,
             action="invitation_created",
             entity_type="invitation",
             entity_id=inv.id,
@@ -595,7 +630,7 @@ def create_invitation(
         body = _invitation_body(inv)
         tenant_name = tenant.name
     mail = OutgoingMail(
-        to=email.strip(),
+        to=address,
         subject=f"You are invited to {tenant_name} on MatchDesk",
         body=(
             f"You have been invited to join {tenant_name} on MatchDesk as {role}.\n\n"
@@ -603,6 +638,62 @@ def create_invitation(
         ),
     )
     return body, mail
+
+
+def first_controller_state(
+    engine: Engine, tenant_id: uuid.UUID, now: datetime | None = None
+) -> dict[str, Any]:
+    """What the operator console may know about an account's first sign-in (B14, acceptance M5):
+    whether the account has an active controller, and the open invitations an operator sent. Nothing
+    else of the account is read; its users and their invitations stay the controller's."""
+    at = _now(now)
+    with global_session(engine) as g:
+        operators = set(g.scalars(select(User.id).where(User.is_operator.is_(True))))
+    with session(tenant_id, engine) as s:
+        has_controller = (
+            s.scalar(
+                select(func.count())
+                .select_from(Membership)
+                .where(Membership.role == "controller", Membership.status == "active")
+            )
+            or 0
+        ) > 0
+        open_invites = s.scalars(
+            select(Invitation)
+            .where(
+                Invitation.accepted_at.is_(None),
+                Invitation.revoked_at.is_(None),
+                Invitation.expires_at > at,
+                Invitation.invited_by.in_(operators),
+            )
+            .order_by(Invitation.created_at)
+        ).all()
+        return {
+            "has_controller": has_controller,
+            "invitations": [{"email": i.email, "expires_at": i.expires_at.isoformat()} for i in open_invites],
+        }
+
+
+def invite_first_controller(
+    engine: Engine,
+    operator_user_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+    email: str,
+    settings: Settings | None = None,
+    now: datetime | None = None,
+) -> tuple[dict[str, Any], OutgoingMail]:
+    """The operator invites an account's first controller (B14, acceptance M5; S-18). Only while the
+    account has no active controller: from then on its controller invites the users (S-16) and the
+    operator has no part in it. Audited in the account's log with the operator as the actor."""
+    with global_session(engine) as g:
+        tenant = g.get(Tenant, tenant_id)
+        if tenant is None:
+            raise NotFoundError("tenant")
+        if tenant.status == "ended":
+            raise ConflictError("This account has ended.")
+    if first_controller_state(engine, tenant_id, now)["has_controller"]:
+        raise ConflictError("This account has a controller, who invites its users.")
+    return _invite(engine, tenant_id, operator_user_id, "operator", email, "controller", settings, now)
 
 
 def _invitation_body(inv: Invitation) -> dict[str, Any]:
@@ -696,6 +787,9 @@ def accept_invitation(
                 user_id = found_user[0]
                 if m is None:
                     s.add(Membership(tenant_id=tenant_id, user_id=user_id, role=inv.role))
+                # B14 (acceptance m9): an invitation never changes an existing member's role, and
+                # the audit entry states the role the person really has.
+                role_now = inv.role if m is None else m.role
                 inv.accepted_at = at
                 write_audit(
                     s,
@@ -705,7 +799,7 @@ def accept_invitation(
                     action="invitation_accepted",
                     entity_type="invitation",
                     entity_id=inv.id,
-                    after={"role": inv.role},
+                    after={"role": role_now},
                 )
     if refusal is not None or user_id is None:
         _fail(engine, cfg, ip, at)

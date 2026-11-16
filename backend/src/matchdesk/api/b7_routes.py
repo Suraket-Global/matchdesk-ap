@@ -8,21 +8,22 @@ from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Annotated, Any
 
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
-from sqlalchemy import Engine, func, select
+from sqlalchemy import Engine, func, select, text
 
 from matchdesk import identity, intake, reporting
 from matchdesk.api.common import Auth, Ctx, StaleVersion, if_match, require
 from matchdesk.audit import write_audit
-from matchdesk.core import Mailer, NotFoundError, Settings
+from matchdesk.core import ConflictError, Mailer, NotFoundError, Settings, get_logger
 from matchdesk.identity.models import SupportGrant, Tenant
-from matchdesk.intake.models import InboundMessage, IntakeSender, UsageEvent
+from matchdesk.intake.models import InboundMessage, IntakeSender, UploadBatch, UsageEvent
 from matchdesk.reporting.models import BacktestReport, PilotEngagement
 from matchdesk.tenancy import global_session, operator_session, session
 
 INBOUND_PATH = "/api/v1/inbound/email"
+log = get_logger("matchdesk.api.operator")
 
 
 class PilotBody(BaseModel):
@@ -39,8 +40,17 @@ class PilotBody(BaseModel):
     outcome: str | None = Field(default=None, pattern="^(converted|refunded|ended)$")
 
 
+EMAIL = r"^[^@\s]+@[^@\s]+\.[^@\s]+$"
+
+
 class TenantCreate(BaseModel):
     name: str = Field(min_length=2, max_length=200)
+    # B14 (acceptance M5): the account's first controller, invited as the account is created.
+    controller_email: str | None = Field(default=None, min_length=3, max_length=254, pattern=EMAIL)
+
+
+class ControllerInvite(BaseModel):
+    email: str = Field(min_length=3, max_length=254, pattern=EMAIL)
 
 
 class GrantRequest(BaseModel):
@@ -196,16 +206,46 @@ def register_b7_routes(app: FastAPI, settings: Settings, engine: Engine, mailer:
         operator(ctx)
         return {"items": _tenant_rows()}
 
+    def _send_mail(mail: Any) -> None:
+        try:
+            mailer.send(mail)
+        except Exception as exc:  # the body and address are never logged
+            log.error("mail_failed", extra={"reason": type(exc).__name__})
+
     @app.post("/api/v1/operator/tenants", status_code=201)
-    def op_create_tenant(body: TenantCreate, ctx: Ctx) -> dict[str, Any]:
+    def op_create_tenant(body: TenantCreate, ctx: Ctx, background: BackgroundTasks) -> dict[str, Any]:
         operator(ctx)
+        name = " ".join(body.name.split())
         with global_session(engine) as g:
-            t = Tenant(name=body.name.strip(), status="pilot")
+            # B14 (acceptance M5, m1): one account per name. The lock makes two requests in the same
+            # moment (a double press of the button) create one account; the second answers 409.
+            g.execute(text("select pg_advisory_xact_lock(hashtext('operator:create_tenant'))"))
+            if g.scalar(select(Tenant.id).where(func.lower(Tenant.name) == name.lower())) is not None:
+                raise ConflictError(f'An account named "{name}" already exists. Open it from the list.')
+            t = Tenant(name=name, status="pilot")
             g.add(t)
             g.flush()
             tid = t.id
         intake.ensure_intake_address(engine, tid, settings)
-        return _tenant_rows([tid])[0]
+        if body.controller_email:
+            _created, mail = identity.invite_first_controller(
+                engine, ctx.user_id, tid, body.controller_email, settings
+            )
+            background.add_task(_send_mail, mail)
+        return {**_tenant_rows([tid])[0], "first_controller": identity.first_controller_state(engine, tid)}
+
+    @app.post("/api/v1/operator/tenants/{tenant_id}/controller-invitations", status_code=201)
+    def op_invite_controller(
+        tenant_id: uuid.UUID, body: ControllerInvite, ctx: Ctx, background: BackgroundTasks
+    ) -> dict[str, Any]:
+        """S-18: invite the account's first controller (B14, acceptance M5). Refused once the
+        account has a controller, who then invites its users on S-16."""
+        operator(ctx)
+        _created, mail = identity.invite_first_controller(
+            engine, ctx.user_id, tenant_id, body.email, settings
+        )
+        background.add_task(_send_mail, mail)
+        return identity.first_controller_state(engine, tenant_id)
 
     @app.get("/api/v1/operator/tenants/{tenant_id}")
     def op_tenant(tenant_id: uuid.UUID, ctx: Ctx) -> dict[str, Any]:
@@ -215,7 +255,13 @@ def register_b7_routes(app: FastAPI, settings: Settings, engine: Engine, mailer:
             raise NotFoundError("tenant")
         with operator_session(engine) as s:
             usage = reporting.usage_by_month(s, tenant_id)
-        return {**rows[0], "usage": usage, "grants": identity.operator_grants(engine, tenant_id)}
+        return {
+            **rows[0],
+            "usage": usage,
+            "grants": identity.operator_grants(engine, tenant_id),
+            # B14 (acceptance M5): whether the account can be signed in to yet.
+            "first_controller": identity.first_controller_state(engine, tenant_id),
+        }
 
     @app.put("/api/v1/operator/tenants/{tenant_id}/pilot")
     def op_put_pilot(
@@ -298,6 +344,14 @@ def register_b7_routes(app: FastAPI, settings: Settings, engine: Engine, mailer:
             msgs = s.scalars(
                 select(InboundMessage).order_by(InboundMessage.received_at.desc()).limit(100)
             ).all()
+            # B14 (acceptance M3): what became of the attachments, so an accepted message with
+            # nothing usable never reads as an invoice received.
+            batches = {
+                b.id: b
+                for b in s.scalars(
+                    select(UploadBatch).where(UploadBatch.id.in_([m.batch_id for m in msgs if m.batch_id]))
+                )
+            }
             return {
                 "address": address,
                 "provider": settings.inbound_provider,
@@ -311,6 +365,10 @@ def register_b7_routes(app: FastAPI, settings: Settings, engine: Engine, mailer:
                         "received_at": m.received_at.isoformat(),
                         "status": m.status,
                         "batch_id": str(m.batch_id) if m.batch_id else None,
+                        "files_read": batches[m.batch_id].file_count if m.batch_id in batches else None,
+                        "files_refused": len(batches[m.batch_id].refused_files or [])
+                        if m.batch_id in batches
+                        else None,
                     }
                     for m in msgs
                 ],

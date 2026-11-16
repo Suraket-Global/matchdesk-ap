@@ -581,7 +581,10 @@ def test_b2_s06_deactivation_revokes_invitations_and_no_invitation_reactivates(a
         )
     t1, t2 = (_token(m.body, "/invite") for m in rec.sent[-2:])
     member = _browser()
-    assert member.post("/api/v1/invitations/accept", json={"token": t1}).status_code == 201
+    # B14 (acceptance m9): a resent invitation replaces the earlier one; only the newest link works.
+    assert len(ctl.get("/api/v1/invitations", headers=boss.headers).json()["items"]) == 1
+    assert _browser().post("/api/v1/invitations/accept", json={"token": t1}).status_code == 400
+    assert member.post("/api/v1/invitations/accept", json={"token": t2}).status_code == 201
     users = {u["email"]: u for u in ctl.get("/api/v1/users", headers=boss.headers).json()["items"]}
     mid = users[x]["membership_id"]
     assert (
@@ -590,14 +593,12 @@ def test_b2_s06_deactivation_revokes_invitations_and_no_invitation_reactivates(a
         ).status_code
         == 200
     )
-    # The older open invitation was revoked with the membership, and the session ended.
+    # No invitation is open, and the session ended.
     assert ctl.get("/api/v1/invitations", headers=boss.headers).json()["items"] == []
     assert member.get("/api/v1/me").status_code == 401
-    assert _browser().post("/api/v1/invitations/accept", json={"token": t2}).status_code == 400
-    # A fresh invitation sent after the deactivation does not re-activate either.
-    ctl.post("/api/v1/invitations", json={"email": x, "role": "controller"}, headers=boss.headers)
-    t3 = _token(rec.sent[-1].body, "/invite")
-    assert _browser().post("/api/v1/invitations/accept", json={"token": t3}).status_code == 400
+    # B14: a member, deactivated or not, is not invited again, so no invitation can re-activate.
+    again = ctl.post("/api/v1/invitations", json={"email": x, "role": "controller"}, headers=boss.headers)
+    assert again.status_code == 409
     users = {u["email"]: u for u in ctl.get("/api/v1/users", headers=boss.headers).json()["items"]}
     assert (users[x]["status"], users[x]["role"]) == ("deactivated", "clerk")
     # Only a controller re-activates.

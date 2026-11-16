@@ -18,6 +18,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     select,
+    text,
 )
 from sqlalchemy.dialects.postgresql import CITEXT, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -33,6 +34,8 @@ class UploadBatch(TenantMixin, Base):
     __table_args__ = tenant_args(CheckConstraint(enum_check("source", ("upload", "email")), name="source"))
     source: Mapped[str] = mapped_column(Text, nullable=False, server_default="upload")
     file_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    # B14 (acceptance M3): files refused before storage, each {name, reason, byte_size, at, key}.
+    refused_files: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 

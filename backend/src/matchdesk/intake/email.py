@@ -33,7 +33,7 @@ from matchdesk.audit import write_audit
 from matchdesk.core import ConflictError, Settings, get_logger
 from matchdesk.identity.models import Tenant
 from matchdesk.intake.models import DocumentRow, InboundMessage, IntakeSender
-from matchdesk.intake.service import add_file, create_batch
+from matchdesk.intake.service import add_file, create_batch, record_refusal
 from matchdesk.tenancy import global_session, session
 
 log = get_logger("matchdesk.intake.email")
@@ -120,22 +120,34 @@ def sender_allowed(s: Session, address: str) -> bool:
     return addr in allowed or domain in allowed
 
 
-def _attachments(payload: dict[str, Any]) -> list[tuple[str, bytes, str]]:
+def _attachments(
+    payload: dict[str, Any],
+) -> tuple[list[tuple[str, bytes, str]], list[tuple[str, str, int]]]:
+    """The usable attachments, and the refused ones as (name, reason code, size) (B14, M3)."""
     out: list[tuple[str, bytes, str]] = []
+    refused: list[tuple[str, str, int]] = []
     for a in payload.get("attachments") or []:
+        name = str(a.get("filename") or "attachment")[:255]
         try:
             data = base64.b64decode(a.get("content_base64") or "", validate=True)
         except (ValueError, TypeError):
+            refused.append((name, "unreadable_attachment", 0))
             continue
         mime = next((m for sig, m in ACCEPTED.items() if data.startswith(sig)), None)
-        if mime is None or len(data) > MAX_ATTACHMENT_BYTES:
-            continue  # the declared type and name are ignored (TRD 8.7)
-        out.append((str(a.get("filename") or "attachment")[:255], data, mime))
-    return out
+        # The declared type and name are ignored (TRD 8.7).
+        if not data:
+            refused.append((name, "empty", 0))
+        elif mime is None:
+            refused.append((name, "not_supported", len(data)))
+        elif len(data) > MAX_ATTACHMENT_BYTES:
+            refused.append((name, "too_large", len(data)))
+        else:
+            out.append((name, data, mime))
+    return out, refused
 
 
 def _process(s: Session, tenant_id: uuid.UUID, msg: InboundMessage, payload: dict[str, Any]) -> None:
-    files = _attachments(payload)
+    files, refused = _attachments(payload)
     batch = create_batch(s, tenant_id, source="email")
     for n, (name, data, mime) in enumerate(files):
         add_file(
@@ -149,6 +161,8 @@ def _process(s: Session, tenant_id: uuid.UUID, msg: InboundMessage, payload: dic
             name,
             source="email",
         )
+    for n, (name, reason, size) in enumerate(refused):
+        record_refusal(s, batch.id, name, reason, size, f"email:{msg.provider_message_id}:refused:{n}")
     msg.batch_id = batch.id
     msg.status = "processed"
 

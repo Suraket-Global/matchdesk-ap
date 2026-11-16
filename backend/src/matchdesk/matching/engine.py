@@ -1178,12 +1178,10 @@ def _assign_reported_amounts(st: _State, docs: list[Document]) -> list[Exception
     """Per-line reported amounts that add up to no more than the line amount (TRD 8.5)."""
     out: list[ExceptionResult] = []
     by_line: dict[str, list[ExceptionResult]] = defaultdict(list)
+    whole_document: list[ExceptionResult] = []
     for e in st.exceptions:
         if e.line_id is None:
-            counts = e.status == ExceptionStatus.OPEN
-            amount = e.variance_amount or ZERO
-            reported = amount if counts and e.value_class != ValueClass.NONE else ZERO
-            out.append(_finalise(e, reported))
+            whole_document.append(e)
         else:
             by_line[e.line_id].append(e)
     for line_id in sorted(by_line):
@@ -1232,7 +1230,21 @@ def _assign_reported_amounts(st: _State, docs: list[Document]) -> list[Exception
         for e in excs:
             if e.value_class == ValueClass.NONE:
                 out.append(_finalise(e, ZERO))
-    return out
+    # Exceptions on the whole document. A possible duplicate is about the document's total, which
+    # its line exceptions may already report: only the part they do not report is counted under it,
+    # so one invoice's money is in the queue and the weekly open value once (B14, acceptance M2).
+    on_lines: dict[str, Decimal] = defaultdict(lambda: ZERO)
+    for e in out:
+        on_lines[e.document_id] += e.reported_amount
+    head: list[ExceptionResult] = []
+    for e in whole_document:
+        counts = e.status == ExceptionStatus.OPEN
+        amount = e.variance_amount or ZERO
+        reported = amount if counts and e.value_class != ValueClass.NONE else ZERO
+        if e.type == ExceptionType.POSSIBLE_DUPLICATE:
+            reported = max(ZERO, reported - on_lines[e.document_id])
+        head.append(_finalise(e, reported))
+    return head + out
 
 
 def _finalise(e: ExceptionResult, reported: Decimal) -> ExceptionResult:

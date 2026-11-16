@@ -22,6 +22,7 @@ from matchdesk.intake import (
     confirm,
     correct,
     describe_fields,
+    describe_refusals,
     retry_failed,
 )
 from matchdesk.intake.models import DocumentRow, InvoiceRow, UploadBatch
@@ -227,6 +228,9 @@ def register_invoice_routes(app: FastAPI, engine: Engine) -> None:
                 "id": str(batch.id),
                 "created_at": batch.created_at.isoformat(),
                 "totals": batch_summary(s, batch.id),
+                "source": batch.source,
+                # B14 (acceptance M3): files refused before storage, with the reason.
+                "refused": describe_refusals(batch),
                 "files": [
                     {
                         "id": str(d.id),

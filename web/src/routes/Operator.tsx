@@ -3,7 +3,7 @@ import { Link, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Building2, Eye, Plus } from "lucide-react";
 import { ApiError, errorText, get, send } from "../api/client";
-import type { DeletionRequest, Me, OperatorTenant, Page, Pilot, ScheduledOperation } from "../api/types";
+import type { DeletionRequest, FirstController, Me, OperatorTenant, Page, Pilot, ScheduledOperation } from "../api/types";
 import { useSession } from "../app/session";
 import { Banner, Dialog, Empty, ErrorState, Field, Loading, PageHead, StatusChip, toast, usePageTitle } from "../components/ui";
 import { AMOUNT_INPUT, cad, numberError, plainNumber } from "../lib/decimal";
@@ -29,8 +29,10 @@ function TenantList() {
   const navigate = useNavigate();
   const list = useQuery({ queryKey: ["operator", "tenants"], queryFn: () => get<Page<OperatorTenant>>("/api/v1/operator/tenants") });
   const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const ready = name.trim().length >= 2 && EMAIL_SHAPE.test(email.trim());
   const create = useMutation({
-    mutationFn: () => send<OperatorTenant>("POST", "/api/v1/operator/tenants", { name }),
+    mutationFn: () => send<OperatorTenant>("POST", "/api/v1/operator/tenants", { name: name.trim(), controller_email: email.trim() }),
     onSuccess: (t) => {
       qc.invalidateQueries({ queryKey: ["operator"] });
       navigate(`/operator/tenants/${t.id}`);
@@ -99,21 +101,93 @@ function TenantList() {
         className="inline-form panel-body"
         onSubmit={(e) => {
           e.preventDefault();
-          if (name.trim().length >= 2) create.mutate();
+          if (ready && !create.isPending) create.mutate();
         }}
       >
         <div className="field">
-          <label htmlFor="t-name">New pilot account</label>
+          <label htmlFor="t-name">Company name</label>
           <input id="t-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Company name" />
         </div>
-        <button className="btn" type="submit" disabled={create.isPending || name.trim().length < 2}>
+        {/* B14 (M5): an account is created with its first controller, or nobody could sign in to it. */}
+        <div className="field">
+          <label htmlFor="t-email">First controller&apos;s email</label>
+          <input id="t-email" type="email" autoComplete="off" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="controller@company.example" aria-describedby="t-email-hint" />
+          <span className="hint" id="t-email-hint">
+            They get an invitation that works once, for 7 days. The controller then invites everyone else.
+          </span>
+        </div>
+        <button className="btn" type="submit" disabled={create.isPending || !ready}>
           <Plus size={16} aria-hidden="true" />
-          Create account
+          {create.isPending ? "Creating…" : "Create account and invite"}
         </button>
-        {create.error && <span className="error-text">{errorText(create.error)}</span>}
+        {create.error && <span className="error-text" role="alert">{errorText(create.error)}</span>}
       </form>
       </details>
     </>
+  );
+}
+
+const EMAIL_SHAPE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+
+/** S-18 (B14, acceptance M5): how the account gets its first user. The operator invites the first
+ * controller; once a controller exists this is only a statement, and the controller invites the rest. */
+export function FirstControllerPanel({ tenantId, state }: { tenantId: string; state: FirstController | undefined }) {
+  const qc = useQueryClient();
+  const [email, setEmail] = useState("");
+  const invite = useMutation({
+    mutationFn: () => send<FirstController>("POST", `/api/v1/operator/tenants/${tenantId}/controller-invitations`, { email: email.trim() }),
+    onSuccess: () => {
+      toast(`Invitation sent to ${email.trim()}.`, "success");
+      setEmail("");
+      qc.invalidateQueries({ queryKey: ["operator"] });
+    },
+  });
+  if (!state) return null;
+  return (
+    <section className="panel" aria-labelledby="first-h" data-testid="first-controller">
+      <div className="panel-head">
+        <h2 id="first-h">First sign-in</h2>
+        <StatusChip status={state.has_controller ? "active" : state.invitations.length ? "requested" : "not_evaluated"} word={state.has_controller ? "Has a controller" : state.invitations.length ? "Invitation sent" : "Nobody can sign in"} />
+      </div>
+      <div className="panel-body stack">
+        {state.has_controller ? (
+          <p style={{ margin: 0 }}>This account has a controller. They invite its other users under Settings, Users.</p>
+        ) : (
+          <>
+            {state.invitations.length > 0 ? (
+              <ul className="plain-list">
+                {state.invitations.map((i) => (
+                  <li key={i.email}>
+                    Invitation sent to <strong>{i.email}</strong>, works until {when(i.expires_at)}.
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p style={{ margin: 0 }}>Nobody can sign in to this account yet. Invite its first controller.</p>
+            )}
+            <form
+              className="inline-form"
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (EMAIL_SHAPE.test(email.trim()) && !invite.isPending) invite.mutate();
+              }}
+            >
+              <div className="field">
+                <label htmlFor="fc-email">{state.invitations.length ? "Send a new invitation to" : "First controller's email"}</label>
+                <input id="fc-email" type="email" autoComplete="off" value={email} onChange={(e) => setEmail(e.target.value)} aria-describedby="fc-hint" />
+                <span className="hint" id="fc-hint">
+                  A new invitation to the same address replaces the earlier one.
+                </span>
+              </div>
+              <button className="btn" type="submit" disabled={invite.isPending || !EMAIL_SHAPE.test(email.trim())}>
+                {invite.isPending ? "Sending…" : "Send invitation"}
+              </button>
+              {invite.error && <span className="error-text" role="alert">{errorText(invite.error)}</span>}
+            </form>
+          </>
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -233,6 +307,7 @@ function TenantDetail() {
           <dd className="num">{t.usage_units}</dd>
         </div>
       </dl>
+      <FirstControllerPanel tenantId={t.id} state={t.first_controller} />
       <div className="operator-grid">
         <section className="panel" aria-labelledby="pilot-h">
           <div className="panel-head">

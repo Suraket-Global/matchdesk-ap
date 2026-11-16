@@ -51,6 +51,63 @@ DISPLAYED = {
 }
 
 
+# B14 (acceptance M3): why a file was refused before it was stored, in the words S-06 shows.
+REFUSALS = {
+    "not_supported": "Not a PDF, PNG or JPEG file",
+    "empty": "The file is empty",
+    "too_large": "Larger than the size limit",
+    "unreadable_attachment": "The attachment could not be decoded",
+}
+MAX_REFUSALS_KEPT = 500
+
+
+def record_refusal(
+    s: Session,
+    batch_id: uuid.UUID,
+    name: str | None,
+    reason: str,
+    byte_size: int,
+    key: str | None = None,
+    now: datetime | None = None,
+) -> bool:
+    """Keep a refused file's name and reason on its batch (the file itself is never stored), so the
+    batch shows every file that was chosen (B14, acceptance M3). Idempotent on ``key``; False when
+    the batch does not exist in this tenant."""
+    if reason not in REFUSALS:
+        raise ValueError(f"unknown refusal reason {reason}")
+    batch = s.get(UploadBatch, batch_id, with_for_update=True)
+    if batch is None:
+        return False
+    kept = list(batch.refused_files or [])
+    if (key and any(r.get("key") == key for r in kept)) or len(kept) >= MAX_REFUSALS_KEPT:
+        return True
+    kept.append(
+        {
+            "name": (name or "")[:255] or None,
+            "reason": reason,
+            "byte_size": int(byte_size),
+            "at": (now or datetime.now(UTC)).isoformat(),
+            "key": key,
+        }
+    )
+    batch.refused_files = kept
+    s.flush()
+    return True
+
+
+def describe_refusals(batch: UploadBatch) -> list[dict[str, Any]]:
+    return [
+        {
+            "name": r.get("name"),
+            "reason": r.get("reason"),
+            "reason_words": REFUSALS.get(str(r.get("reason")), "Refused"),
+            "byte_size": r.get("byte_size"),
+            "at": r.get("at"),
+        }
+        for r in (batch.refused_files or [])
+    ]
+
+
 def create_batch(s: Session, tenant_id: uuid.UUID, source: str = "upload") -> UploadBatch:
     batch = UploadBatch(tenant_id=tenant_id, source=source)
     s.add(batch)
@@ -151,6 +208,8 @@ def batch_summary(s: Session, batch_id: uuid.UUID) -> dict[str, int]:
     counts = Counter("deleted" if removed is not None else DISPLAYED[st] for st, removed in rows)
     summary = {name: counts.get(name, 0) for name in sorted({*DISPLAYED.values(), "deleted"})}
     summary["file_count"] = batch.file_count if batch else 0
+    # B14 (acceptance M3): files refused before storage; file_count + refused = files chosen.
+    summary["refused"] = len(batch.refused_files or []) if batch else 0
     return summary
 
 

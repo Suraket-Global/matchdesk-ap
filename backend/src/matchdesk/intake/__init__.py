@@ -24,12 +24,15 @@ from matchdesk.intake.review import (
 )
 from matchdesk.intake.service import (
     DISPLAYED,
+    REFUSALS,
     add_file,
     batch_summary,
     complete,
     create_batch,
+    describe_refusals,
     make_handler,
     process_document,
+    record_refusal,
     retry_failed,
     take,
 )
@@ -40,6 +43,7 @@ from matchdesk.intake.service import (
 __all__ = [
     "DISPLAYED",
     "PROCESS_DOCUMENT_TASK",
+    "REFUSALS",
     "InboundRefused",
     "VersionConflict",
     "add_file",
@@ -52,6 +56,7 @@ __all__ = [
     "current_gates",
     "decide_held",
     "describe_fields",
+    "describe_refusals",
     "ensure_intake_address",
     "identify_vendor",
     "intake_address",
@@ -61,6 +66,7 @@ __all__ = [
     "process_document",
     "purge_raw",
     "receive",
+    "record_refusal",
     "record_usage",
     "remove_line",
     "remove_sender",

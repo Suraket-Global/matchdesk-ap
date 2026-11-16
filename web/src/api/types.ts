@@ -339,6 +339,16 @@ export interface BatchTotals {
   /** B12: files a person deleted; counted here only, so the counts still add up. */
   deleted?: number;
   file_count: number;
+  /** B14 (M3): files refused before storage; file_count + refused = files chosen. */
+  refused?: number;
+}
+
+export interface RefusedFile {
+  name: string | null;
+  reason: string;
+  reason_words: string;
+  byte_size: number | null;
+  at: string | null;
 }
 
 export interface Batch {
@@ -348,6 +358,7 @@ export interface Batch {
   created_at: string;
   totals: BatchTotals;
   files?: BatchFile[];
+  refused?: RefusedFile[];
 }
 
 export interface BatchFile {
@@ -809,6 +820,13 @@ export interface OperatorTenant {
   pending_requests: number;
   usage?: { month: string; invoice: number; credit_note: number; units: number }[];
   grants?: SupportGrant[];
+  /** B14 (M5): whether the account has a controller, and the invitations an operator sent. */
+  first_controller?: FirstController;
+}
+
+export interface FirstController {
+  has_controller: boolean;
+  invitations: { email: string; expires_at: string }[];
 }
 
 export interface IntakeEmail {
@@ -823,5 +841,8 @@ export interface IntakeEmail {
     received_at: string;
     status: string;
     batch_id: string | null;
+    /** B14 (M3): attachments stored as files, and attachments refused; null when not in a batch. */
+    files_read?: number | null;
+    files_refused?: number | null;
   }[];
 }

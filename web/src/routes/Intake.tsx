@@ -5,7 +5,7 @@ import { TableSkeleton } from "../components/States";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, errorText, get, newKey, send, upload } from "../api/client";
-import type { Batch, BatchFile, BatchTotals, IntakeEmail, Page } from "../api/types";
+import type { Batch, BatchFile, BatchTotals, IntakeEmail, Page, RefusedFile } from "../api/types";
 import { useSession } from "../app/session";
 import { Banner, Dialog, Empty, ErrorState, Loading, PageHead, StatusChip, ThrottledStatus, toast, usePageTitle } from "../components/ui";
 import { FAILURE_CODES } from "../lib/words";
@@ -13,7 +13,6 @@ import { plural, when } from "../lib/format";
 import { DeleteDocument } from "./DeleteDocument";
 
 const MAX_BYTES = 20 * 1024 * 1024;
-const ACCEPT = ["application/pdf", "image/png", "image/jpeg"];
 
 interface Pending {
   name: string;
@@ -33,7 +32,7 @@ const SEGMENTS: { key: keyof BatchTotals; label: string; cls: string }[] = [
 /** Six segments that always add up to the file count (DD-08). The counts are text. */
 export function TotalsBar({ totals }: { totals: BatchTotals }) {
   return (
-    <div className="totals" role="group" aria-label={`Files: ${totals.file_count}`}>
+    <div className="totals" role="group" aria-label={`Files: ${totals.file_count + (totals.refused ?? 0)}`}>
       {SEGMENTS.map((s) => (
         <div key={s.key} className={s.cls}>
           <span className="n">{totals[s.key]}</span>
@@ -46,18 +45,93 @@ export function TotalsBar({ totals }: { totals: BatchTotals }) {
           <span className="muted small">Deleted</span>
         </div>
       )}
+      {(totals.refused ?? 0) > 0 && (
+        <div className="seg-failed">
+          <span className="n">{totals.refused}</span>
+          <span className="muted small">Refused</span>
+        </div>
+      )}
     </div>
   );
 }
 
-function sentence(t: BatchTotals): string {
+/** What happened to the files of a batch, in one sentence. Refused files are always named: a batch
+ * never reads as complete when a file that was chosen is not in it (B14, acceptance M3). */
+export function sentence(t: BatchTotals): string {
   const inProgress = t.queued + t.processing;
+  const refused = t.refused ?? 0;
   const parts = [`${t.ready} ready`, `${t["needs review"]} need review`, `${t.failed} failed`];
   if (t["duplicate file"]) parts.push(`${t["duplicate file"]} duplicate`);
   if (t.deleted) parts.push(`${t.deleted} deleted`);
+  const chosen = refused ? `${plural(t.file_count + refused, "file")} chosen: ${refused} refused and not read. ` : "";
   // "Reading" only while files are in progress; afterwards the totals alone (B6 review minor).
-  if (!inProgress) return `${plural(t.file_count, "file")} read: ${parts.join(", ")}.`;
-  return `Reading ${plural(t.file_count, "file")}. ${parts.join(", ")}, ${inProgress} still in progress. You can leave this page; nothing will be lost.`;
+  if (!inProgress) return `${chosen}${plural(t.file_count, "file")} read: ${parts.join(", ")}.`;
+  return `${chosen}Reading ${plural(t.file_count, "file")}. ${parts.join(", ")}, ${inProgress} still in progress. You can leave this page; nothing will be lost.`;
+}
+
+/** What the batch can claim once reading has finished (B14, acceptance M3): never "every file is
+ * read" when a file was refused or nothing was read at all. */
+export function batchVerdict(t: BatchTotals): { tone: "ok" | "warn"; text: string } | null {
+  const refused = t.refused ?? 0;
+  if (t["needs review"] > 0) return null; // the review list leads
+  if (refused > 0)
+    return {
+      tone: "warn",
+      text:
+        t.file_count === 0
+          ? `No file in this batch could be read: ${plural(refused, "file")} refused. Their names and reasons are below.`
+          : `${plural(refused, "file")} refused and not read; ${refused === 1 ? "its name and reason are" : "their names and reasons are"} below. The other ${plural(t.file_count, "file")} ${t.file_count === 1 ? "is" : "are"} read.`,
+    };
+  if (t.file_count === 0) return null;
+  return { tone: "ok", text: "Every file in this batch is read. Nothing needs review." };
+}
+
+/** S-06: the files the server refused, by name, with the reason and the size. */
+export function RefusedFiles({ files }: { files: RefusedFile[] }) {
+  if (!files.length) return null;
+  return (
+    <section className="batch-group" aria-labelledby="refused-h">
+      <h2 id="refused-h">{plural(files.length, "file")} refused</h2>
+      <p className="muted small">Not stored and not read. Fix the file and add it to this batch again.</p>
+      <div className="table-wrap">
+        <table className="stack-sm">
+          <caption className="sr-only">Refused files</caption>
+          <thead>
+            <tr>
+              <th scope="col">File</th>
+              <th scope="col">State</th>
+              <th scope="col">Why</th>
+              <th scope="col" className="num">
+                Size
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {files.map((f, i) => (
+              <tr key={i}>
+                <td data-label="File">
+                  <span className="cell-main">{f.name ?? "file without a name"}</span>
+                </td>
+                <td data-label="State">
+                  <StatusChip status="refused" />
+                </td>
+                <td data-label="Why">{f.reason_words}</td>
+                <td className="num" data-label="Size">
+                  {f.byte_size ? bytesWord(f.byte_size) : "0 bytes"}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function bytesWord(n: number): string {
+  if (n < 1024) return `${n} bytes`;
+  if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
+  return `${Math.round(n / (1024 * 1024))} MB`;
 }
 
 /** Upload files into a batch, four at a time, each with its own idempotency key (S-06). */
@@ -70,13 +144,20 @@ function useUploader(onDone: (batchId: string) => void) {
       setBusy(true);
       const list: Pending[] = files.map((f) => ({ name: f.name, state: "waiting" }));
       const refuse = (i: number, reason: string) => (list[i] = { ...list[i], state: "refused", reason });
+      // B14 (M3): the server judges the content and keeps every refused file on the batch by name.
+      // A file over the limit cannot be sent, so it is reported to the batch instead.
+      const tooLarge: number[] = [];
       files.forEach((f, i) => {
-        if (f.size > MAX_BYTES) refuse(i, "Larger than 20 MB.");
-        else if (f.type && !ACCEPT.includes(f.type)) refuse(i, "Not a PDF or image.");
+        if (f.size > MAX_BYTES) {
+          refuse(i, "Larger than 20 MB.");
+          tooLarge.push(i);
+        }
       });
       setPending([...list]);
       try {
         const id = batchId ?? (await send<{ id: string }>("POST", "/api/v1/intake/batches")).id;
+        for (const i of tooLarge)
+          await send("POST", `/api/v1/intake/batches/${id}/refusals`, { name: files[i].name.slice(0, 255), byte_size: files[i].size }).catch(() => undefined);
         let next = 0;
         const worker = async () => {
           while (next < files.length) {
@@ -92,7 +173,9 @@ function useUploader(onDone: (batchId: string) => void) {
             } catch (err) {
               const why =
                 err instanceof ApiError && err.status === 415
-                  ? "Not a PDF or image."
+                  ? files[i].size === 0
+                    ? "The file is empty."
+                    : "Not a PDF or image."
                   : err instanceof ApiError && err.status === 413
                     ? "Larger than 20 MB."
                     : errorText(err);
@@ -210,6 +293,9 @@ export function IntakeListPage() {
                       {s.label}
                     </th>
                   ))}
+                  {/* B14 (m5, M3): with these two the row adds up to the files chosen. */}
+                  <th scope="col" className="num">Deleted</th>
+                  <th scope="col" className="num">Refused</th>
                 </tr>
               </thead>
               <tbody>
@@ -219,12 +305,14 @@ export function IntakeListPage() {
                       <Link to={`/intake/batches/${b.id}`}>{when(b.created_at)}</Link>
                     </td>
                     <td data-label="Source">{b.source === "email" ? "Email" : "Upload"}</td>
-                    <td className="num" data-label="Files">{b.totals.file_count}</td>
+                    <td className="num" data-label="Files">{b.totals.file_count + (b.totals.refused ?? 0)}</td>
                     {SEGMENTS.map((s) => (
                       <td className="num" key={s.key} data-label={s.label}>
                         {b.totals[s.key]}
                       </td>
                     ))}
+                    <td className="num" data-label="Deleted">{b.totals.deleted ?? 0}</td>
+                    <td className="num" data-label="Refused">{b.totals.refused ?? 0}</td>
                   </tr>
                 ))}
               </tbody>
@@ -279,6 +367,7 @@ export function BatchPage() {
   const b = q.data!;
   const t = b.totals;
   const done = t.queued + t.processing === 0;
+  const verdict = batchVerdict(t);
   const names = new Map<string, string>();
   (b.files ?? []).forEach((f) => names.set(f.id, f.original_name ?? "file"));
   const byState = (st: string) => (b.files ?? []).filter((f) => f.displayed_state === st);
@@ -310,7 +399,9 @@ export function BatchPage() {
         <>
           {can("upload") && <DropZone onFiles={(f) => start(f, batchId)} disabled={busy} />}
           <PendingList pending={pending} />
-          <FileTable files={b.files ?? []} names={names} caption="Files in this batch" />
+          {verdict && done && <Banner tone={verdict.tone}>{verdict.text}</Banner>}
+          <RefusedFiles files={b.refused ?? []} />
+          {(b.files ?? []).length > 0 && <FileTable files={b.files ?? []} names={names} caption="Files in this batch" />}
         </>
       ) : (
         <>
@@ -324,8 +415,9 @@ export function BatchPage() {
               <FileTable files={byState("needs review")} names={names} caption="Invoices to review" primary />
             </section>
           ) : (
-            <Banner tone="ok">Every file in this batch is read. Nothing needs review.</Banner>
+            verdict && <Banner tone={verdict.tone}>{verdict.text}</Banner>
           )}
+          <RefusedFiles files={b.refused ?? []} />
           {byState("failed").length > 0 && (
             <section className="batch-group" aria-labelledby="failed-h">
               <h2 id="failed-h">{plural(byState("failed").length, "file")} could not be read</h2>
@@ -585,10 +677,18 @@ function EmailIntake() {
             <ul className="plain-list small" style={{ marginTop: 8 }}>
               {recent.map((m) => (
                 <li key={m.id}>
-                  <StatusChip status={m.status} /> {m.from_address}, {when(m.received_at)}
+                  {m.status === "processed" && m.files_read === 0 ? <StatusChip status="refused" word="Nothing usable" /> : <StatusChip status={m.status} />} {m.from_address}, {when(m.received_at)}
                   {m.batch_id && (
                     <>
-                      {" "}
+                      {/* B14 (M3): what became of the attachments, before the link. */}
+                      {m.files_read === 0 ? (
+                        <span className="error-text">
+                          {" "}
+                          no usable attachment{m.files_refused ? ` (${plural(m.files_refused, "attachment")} refused)` : ""},
+                        </span>
+                      ) : m.files_refused ? (
+                        <span className="error-text"> {plural(m.files_refused, "attachment")} refused,</span>
+                      ) : null}{" "}
                       <Link to={`/intake/batches/${m.batch_id}`}>open its batch</Link>
                     </>
                   )}

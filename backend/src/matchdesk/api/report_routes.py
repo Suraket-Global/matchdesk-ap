@@ -11,11 +11,12 @@ from pydantic import BaseModel
 from sqlalchemy import Engine, select
 
 from matchdesk import reporting
-from matchdesk.api import paging
+from matchdesk.api import paging, views
 from matchdesk.api.common import Auth, body_hash, idempotent_replay, page_limit, remember, require
 from matchdesk.core import NotFoundError
+from matchdesk.identity import Tenant
 from matchdesk.reporting.models import BacktestReport
-from matchdesk.tenancy import session
+from matchdesk.tenancy import global_session, session
 
 
 class DraftBody(BaseModel):
@@ -125,7 +126,22 @@ def register_report_routes(app: FastAPI, engine: Engine) -> None:
         with session(p.tenant_id, engine) as s:
             r = _load(s, report_id)
             findings = reporting.findings_of(s, r.id)
-            data = reporting.export_pdf(r, findings) if format == "pdf" else reporting.export_csv(r, findings)
+            if format == "pdf":
+                with global_session(engine) as g:
+                    tenant = g.get(Tenant, p.tenant_id)
+                    account = tenant.name if tenant else None
+                approver = views.user_names(s, [r.approved_by]).get(r.approved_by) if r.approved_by else None
+                pilot = reporting.get_pilot(s, p.tenant_id)
+                # B14 (acceptance M4): what the document states besides the report row.
+                context = {
+                    "account": account,
+                    "approved_by_name": approver,
+                    "pilot": reporting.describe_pilot(pilot),
+                    "is_governing": bool(pilot and pilot.governing_report_id == r.id),
+                }
+                data = reporting.export_pdf(r, findings, context)
+            else:
+                data = reporting.export_csv(r, findings)
             kind = "draft" if r.status != "approved" else "approved"
             name = f"backtest-{r.period_start}-{r.period_end}-v{r.version_no}-{kind}.{format}"
             return Response(
