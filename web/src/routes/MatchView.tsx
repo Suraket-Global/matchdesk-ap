@@ -601,7 +601,11 @@ export function MatchViewPage() {
                 <div>
                   <div className="muted small">{zeroCounted(current) ? "Adds nothing" : "Value"}</div>
                   <div className="amount">{zeroCounted(current) ? "CAD 0.00" : amount ? cad(amount) : "—"}</div>
-                  {zeroCounted(current) && <div className="small muted">The line&apos;s amount is counted under another exception.</div>}
+                  {zeroCounted(current) && (
+                    <div className="small muted">
+                      {current.invoice_line_id ? "The line's amount is counted under another exception." : "The document's amount is already counted on its lines."}
+                    </div>
+                  )}
                 </div>
                 {msg && (
                   <p className={msg.tone === "error" ? "error-text" : "muted"} role="alert" style={{ margin: 0 }}>

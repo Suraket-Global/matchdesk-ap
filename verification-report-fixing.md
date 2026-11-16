@@ -1131,3 +1131,75 @@ Until B12, `make demo-reset` dropped the whole schema of `matchdesk_dev`, so the
 - Not seen in the Canadian company: vendor credits, a `TaxInclusive` document, PST, QST or GST-only rates, units of measure.
 - Bill 97 shows that QuickBooks closes a PO with an unbilled line (PO 1004 line 2); MatchDesk reads the PO lines as ordered and does not treat "Closed" as received.
 - Production keys and Intuit's app assessment, the hosted extractor, a hosted email provider and deployment stay account-bound.
+
+## B14 2026-11-17
+
+Source: the independent end-to-end acceptance test of 2026-11-17 on `main` at B13 (the findings file is kept outside this repository): 2 Critical, 5 Major, 13 Minor, and a list of what it could not reach. Branch `feat/b14-acceptance`. Migration 0027. Every Critical and Major was reproduced first, by a test that fails on B13 and by hand in the browser. No write to QuickBooks; the two Intuit sandbox accounts were not disconnected and no secret, token or realm ID was printed or committed. All data synthetic.
+
+### B14.1 Critical
+
+| Finding | Root cause | Fix | Test |
+|---|---|---|---|
+| C1. Results stay "out of date" after ordinary actions; "Matching…" never clears; report approval blocked | Three causes in how the input fingerprint is built and compared. (1) `build_match_input` put every receiving import of the account into every run's input, drafts included, so a file left as a draft changed every fingerprint and no trigger ran. (2) Duplicate and not-received decisions were read for the whole account. (3) A run's fingerprint covers its whole scope: a run over several suppliers (tolerance save, QuickBooks read) went out of date for all of them when one supplier was re-matched alone, and nothing was queued for the others. Further gaps of the same kind found while fixing: a document that needs review, a saved correction, a removed line, an alias waiting for approval and a returned approval changed inputs without requesting a run | One supplier per run (`exceptions.partition`); inputs hold only what the rules read (no draft or voided import; decisions of the run's documents); every trigger also re-matches any other supplier found out of date (`rematch_out_of_date`); the missing triggers added; the worker's minute tick runs the same check as a safety net and logs a warning when it finds something (it also heals results stored before B14 by a run over several suppliers). Nothing was relaxed in the staleness check itself | `test_b14_criticals.py`: `test_c1a_…draft…`, `test_c1b_credit_decision…`, `test_c1c_document_deletion…`, `test_c1_a_run_never_spans_two_suppliers…`, `test_c1_results_stored_by_a_run_over_several_suppliers_are_healed…`, and the invariant `test_c1_invariant_no_ordinary_action_leaves_a_result_out_of_date` (23 actions through the API, each followed by one worker drain without the minute tick: no pending job, no out-of-date result). Browser: `uncovered-b14.spec.ts` tests 1 and 2 |
+| C2. "Credited" on FF-1003 created a CAD 84.00 finding on the same units, which reached the governing report and the refund figure | Where "invoiced above received" (168.00) and "invoiced above ordered" (84.00) both fail on one line, the smaller reports nothing. The credit decision resolved only the exception it was keyed to; the other was then the only open one on the line and reported its full amount | `matching.engine._flag_possibly_credited`: the credited amount is taken off every exception on the same line that is about the same units (receipt absent, above received, above ordered); one that reaches zero closes as resolved by credit; the credited amount also counts against the line amount before anything else on the line reports. The dialog's sentence is now true as written | `test_b14_units.py` (3: the FF-1003 case, the partial case, and a grid property: a decided credit never raises the reported total and lowers it by no more than the credit); `test_c2_credited_decision_raises_no_finding_on_the_same_units` (queue, report totals, flagged amount, approval, refund evaluation); `test_b9_units.py` corrected. Browser: `uncovered-b14.spec.ts` test 2 |
+
+### B14.2 Major
+
+| Finding | Root cause | Fix | Test |
+|---|---|---|---|
+| M1. A possible duplicate cannot be decided in the web app when the invoice also has a line exception | `MatchView` chose any open line exception before the document exception named in the address | `lib/matchview.ts` `pickException`: the named exception always wins; the heading says "whole document"; other document exceptions get **Open this exception**; the ledger strip shows only for a line exception | `b14-acceptance.test.tsx` (5); `uncovered-b14.spec.ts` test 1 (clerk sees the waiting text and no resolve controls; controller decides) |
+| M2. A possible duplicate counted twice in the queue total and the weekly open value | The possible duplicate reported the document total while the line exception reported the same money | The engine reports under a possible duplicate only what its lines do not already report; the decision text reads the document total from the variance | `test_m2_…counted_once…`, `test_m2_…clean_lines…` |
+| M3. Refused files disappear without a trace | A refusal answered 415 and stored nothing; the batch knew only stored files | Migration 0027 `upload_batches.refused_files`; `intake.record_refusal`; totals carry `refused`; the batch names each refused file and never claims every file was read; an email with no usable attachment is "Nothing usable" | `test_m3_refused_files_stay_on_the_batch…`, `test_m3_an_email_with_no_usable_attachment…`; `b14-acceptance.test.tsx` (3); `uncovered-b14.spec.ts` test 1 |
+| M4. The PDF export is not a document | It printed codes, raw timestamps and one long line per fact in a fixed-width page | `reporting.export_pdf` rewritten: words of design.md section 9, supplier column, wrapped lines (96 characters), Pacific time, account, approver, pilot terms and refund result; "Waived" explained against the qualifying total | `test_m4_pdf_uses_the_screen_words_names_suppliers_fits_the_page_and_equals_the_screen` (figures equal the report API the screen reads; every row amount present); `uncovered-b14.spec.ts` test 2 |
+| M5. A new account cannot get its first user | `POST /operator/tenants` took a name only; nothing created a first membership but the seed scripts | The operator creates the account with its first controller's invitation, or invites while no controller exists (`identity.invite_first_controller`); one account per name | `test_m5_operator_creates_an_account_and_its_first_controller_signs_in` (create, mail, accept, `/me`, a later sign-in by link, operator shut out afterwards), `test_m5_invite_later_replace_and_refusals`; `b14-acceptance.test.tsx` (2); `uncovered-b14.spec.ts` test 4 |
+
+### B14.3 Minor (13 of 13 fixed; none found not real)
+
+| Finding | Fix | Test |
+|---|---|---|
+| m1 repeated submits: five endpoints answered 500, others duplicated; 500s not diagnosable from the log | Row or advisory locks on receiving commit, tolerance save (an unchanged save writes no version), governing version, deletion request, held-mail decision, archive request, support request, invitation, account creation; `tenancy.held_lock` around the weekly send; a write conflict answers 409; `unhandled_error` logged with path, method, error class and traceback frames | `test_m1_a_double_press_never_answers_500_and_acts_once` (nine endpoints, two simultaneous requests each), `test_m1_an_unexpected_error_is_logged…` |
+| m2 stale-tab message | `staleMessage`: an assignment is not called a resolution | web test |
+| m3 UTC dates | `today()` for the coverage default; `day()` shows a moment as the reader's day | web test |
+| m4 receiving validation | reasons in words; `warning_rows` for a negative quantity (a return) and a date after today | `test_m4_…`; web test |
+| m5 "deleted after approval" not shown; batch list does not add up | `DeletedAfterApprovalList` on S-13; Deleted and Refused columns | web test |
+| m6 labels | one meaning of "Unverified" on queue and report; "Unverified (could not be checked)"; the top "Confirmed by the controller" reads the same data as section 8; "Not measured" instead of a bare "%"; an unreadable pilot amount is named and not sent; a wrong one-time code says so; a supplier name that matches no vendor needs review and blocks approval | `test_m6_an_unknown_supplier_needs_review_and_blocks_the_report`; web tests; `uncovered-b14.spec.ts` test 4 |
+| m7 another supplier's credit note accepted | refused by `record_outcome`; the list offers the same supplier's only | `test_m7_…`; web test |
+| m8 figures | S-10 counts QuickBooks bills with no document; the strip says "Credited"; tolerances written as 0, 0.02, 0.5%; the PO total labelled | `test_m8_…`; web tests |
+| m9 invitations | a member is refused; a new invitation replaces the open one; the audit entry states the real role | `test_m9_…`; `test_b2_s06…` updated |
+| m10 value filter | applies on Enter | web test |
+| m11 remove line without a reason | refused (422); the button waits for a reason | `test_m11_…` |
+| m12 exports | JSON in the audit CSV and the archive; `suppliers.csv`, `items.csv`, `purchase_orders.csv`, `purchase_order_lines.csv`, `users.csv` | `test_m12_…` |
+| m13 support access | the operator's tab returns to the console when the access ends; the grant dialog names the audit log | web test |
+
+### B14.4 What the acceptance test could not reach
+
+| Area | Result | Test |
+|---|---|---|
+| Queue paging in the screen | works: next page from the cursor, same scope, no row twice, the scope's total unchanged | `b14-coverage.test.tsx` |
+| Pane drag-resize | works: follows the pointer, kept on reload, never collapses a pane | `uncovered-b14.spec.ts` test 3 |
+| PNG and JPEG upload | accepted by content (a PNG named `.pdf` is stored as a PNG); the local reader reads nothing from an image, so it waits under "Needs review" and is in the queue as extraction not confirmed; never ready or matched | `test_b14_coverage.py` |
+| XLSX receiving file | already covered (`test_xlsx_import_and_hostile_xlsx_refused`) | existing |
+| Void an import | works in the screen; lines become receipt absent; nothing stays out of date | `uncovered-b14.spec.ts` test 3; `test_void_stops_counting_and_rematches` |
+| Alias create and retire | works in the screen; both re-match | `uncovered-b14.spec.ts` test 3 |
+| Reopen an exception | works in the screen; history kept | `uncovered-b14.spec.ts` test 3 |
+| Idle sign-out | the dialog two minutes before, "Stay signed in", and sign-out at 60 minutes | `b14-coverage.test.tsx`; server: `test_idle_and_absolute_limits` |
+
+### B14.5 Commands and results (from `matchdesk-ap/`)
+
+| Command | Result |
+|---|---|
+| `make test` | 456 passed (429 before B14; 27 new: 7 criticals, 7 majors, 9 minors, 1 coverage, 3 unit) |
+| `make check` (ruff, format, mypy, import contracts, top-level imports, float lint) | passed |
+| Web type check, ESLint, production build | passed |
+| Vitest | 192 passed (167 before B14; 25 new: `b14-acceptance.test.tsx` 21, `b14-coverage.test.tsx` 4) |
+| `make web-e2e` (own stack `matchdesk_e2e`; the owner's stack left running) | 22 passed (18 before B14; `uncovered-b14.spec.ts` 4); `matchdesk_dev` unchanged by the run. One line of screen text ("The document's amount is already counted on its lines.") was changed after this run; type check, lint, Vitest and build were run again, Playwright was not |
+| In-app browser, isolated "shots" stack (`matchdesk_shots`, API 8103, web 5175), a fresh preloaded tenant, torn down afterwards | C1 (a) a second receiving file checked and left as a draft: 12 invoices, none out of date. M3: `junk.pdf`, an empty file and FF-1010 in one upload: "3 files chosen: 2 refused and not read", both named with their reason, no "every file is read". M2: FF-1010 listed three times, 105.00 once. M1: **Review** on "FF-1010, Possible duplicate" opened that exception ("whole document"); the clerk saw the waiting text, the controller chose **Is a duplicate**; afterwards one "Duplicate 105.00". C2 after a tolerance save and the recorded PO change: FF-1003 168.00 possibly credited and 0.00 above ordered; **Credited**: nothing open on FF-1003, queue total 1,413.70 to 1,245.70 (exactly 168.00), strip ends "Credited CAD 168.00". C1 (b), (c): no invoice out of date after the decision and after deleting FF-1004; the draft's blocking reasons name only the two documents in review and one pending approval. M4: the PDF of that draft read back: account, period, Pacific time, totals equal to the screen (flagged 863.00), suppliers, widest line 96. M5: operator signed in (a wrong code said so), **Create account and invite** disabled without an email, "Invitation sent"; the invited address joined and was the account's controller |
+
+### B14.6 Left, and why
+
+- **A draft receiving import still cannot be discarded by hand** (the tester noted it under C1). It no longer affects any result, and it is removed after 7 days as before. A "discard draft" action has no requirement behind it; not added (R-21).
+- **A file over the request-body limit** is recorded on the batch on the browser's word (`POST /intake/batches/{id}/refusals`, size only), because the server refuses the body before it can read a name. Other clients that never call it leave no trace of such a file.
+- **The local reader reads nothing from PNG or JPEG.** They wait for a person under "Needs review". Reading them needs the hosted extractor (account-bound, unchanged).
+- **The minute tick's re-match reads every supplier's inputs of every account once a minute.** Fine at pilot size; to be measured before many accounts exist [assumption: no measurement made].
+- **`make demo-reset` on the owner's database** was run at the end, after every check above, then `make sandbox-up`: migration 0027 applied, the demo tenant seeded again, API, worker and web left running on http://localhost:5173. Both Intuit sandbox accounts are still `connected` with the same stored token (a digest compared before and after, not printed). They hold no match results, so the worker's minute tick had nothing to re-match (`out_of_date_rematch` last result 0, no failure); results stored before B14 by any other account would be re-matched by that tick, which reads and stores match results only and never calls QuickBooks.
+- Not changed, as before: production Intuit keys, the hosted extractor, a hosted email provider, deployment.
