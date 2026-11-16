@@ -493,7 +493,7 @@ function UserMenu() {
 }
 
 /** Two minutes before the 60-minute idle limit, ask; "Stay signed in" resets the server timer. */
-function IdleGuard() {
+export function IdleGuard({ tickMs = 5_000 }: { tickMs?: number }) {
   const { signOut, me } = useSession();
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -507,9 +507,9 @@ function IdleGuard() {
         navigate(`/signed-out?expired=1&next=${encodeURIComponent(location.pathname + location.search)}`);
         void signOut(); // ends the server session and clears every cached read (review W8)
       } else if (left <= 2 * 60_000) setWarn(true);
-    }, 5_000);
+    }, tickMs);
     return () => window.clearInterval(t);
-  }, [navigate, qc, me, signOut]);
+  }, [navigate, qc, me, signOut, tickMs]);
   return (
     <Dialog
       open={warn}

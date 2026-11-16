@@ -40,6 +40,11 @@ export function lastServerContact(): number {
   return lastContact;
 }
 
+/** For tests: pretend the server last saw this browser at `at`. */
+export function setLastServerContact(at: number): void {
+  lastContact = at;
+}
+
 export function setCsrfToken(token: string | null): void {
   csrfToken = token;
 }
