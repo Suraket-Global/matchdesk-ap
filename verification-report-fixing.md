@@ -1260,3 +1260,26 @@ Source: the owner decided (2026-11-17) that USD accounts are in scope and that t
 - **Report screens other than section 7** still label a report's figures with the account's currency (B15), not the version's stored `currency`; they differ only if an account's currency changes after a version was drafted.
 - **Decision.md 5.1 point 4** still reads "CAD 500" as the proposal's example; the section 5 row states that the threshold is the fee in the account's currency.
 
+
+## B18 2026-11-18
+
+Source: the owner asked (2026-11-18) for deployment steps 1 to 5 on the owner's server, before the domain (B19). Branch `feat/b18-deploy`. No application code changed; everything is in `deploy/` ([deploy/README.md](deploy/README.md)), TRD section 7 and AGENTS.md. The server runs other people's applications: none was stopped, restarted or reconfigured; sshd and the ufw rules were not changed; no secret was printed, copied off the server or committed. Only the synthetic demo account is on the server.
+
+| Step | What ran | Result |
+|---|---|---|
+| Deploy files | `deploy/Dockerfile`, `web.Dockerfile`, `compose.yml`, `migrate.py`, `nginx.conf`, `landing-csp.mjs`, `env.example`, `gen-env.sh`, `backup.sh`, `systemd/matchdesk-backup.*`, `README.md` | built on the server; every service healthy, `migrate` exited 0 at head 0028 |
+| Docker | Docker Engine 29.10 and Compose 5.8 from Docker's apt repository (key fingerprint 9DC8 5822 9FC7 DD38 854A E2D8 8D81 803C 0EBF CD88); only new packages, nothing upgraded or removed; `/etc/docker/daemon.json` sets `"ip": "127.0.0.1"` and log rotation | Docker sets `net.ipv4.ip_forward=1`, so `ufw status verbose` now reads "deny (routed)" instead of "disabled (routed)"; the forward policy stays DROP and the ufw rules are unchanged (OpenSSH only) |
+| Ports | `ss -tlnp` | MatchDesk listens on 127.0.0.1:8201, 8202, 8203, 8225 only; no listener outside loopback except sshd |
+| Demo account | `--profile demo run --rm demo-seed` (`seed_demo.py --preload`, run with `MATCHDESK_ENV=demo` because the script refuses production; api and worker run in production) | 13 files uploaded, 23 jobs, 9 open exceptions |
+| Walk through the SSH tunnel, in-app browser | sign-in links from Mailpit (127.0.0.1:8225); controller signed in with the production `__Host-` Secure cookies on http://127.0.0.1:8202; queue (9 exceptions, CAD 1,268.70); FF-1003 (invoiced 100, received 60, excess 40 × 4.20 = CAD 168.00) with the PDF drawn; October draft report with PDF (`%PDF`, DRAFT) and CSV exports answering 200; operator signed in with a one-time code generated on the server, console listing the demo account; landing page on 8203 with no policy violation | passed after one fix: nginx served the PDF.js worker (`.mjs`) as `application/octet-stream`, so the browser refused it and the match view said "The document could not be shown"; `nginx.conf` now serves `.mjs` as `text/javascript` |
+| Response headers | `curl -I` on 8202 | `Strict-Transport-Security`, `Content-Security-Policy` (TRD 8.7 value), `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer` |
+| Backup | `systemctl start matchdesk-backup.service`; restore of the dump into a scratch database `matchdesk_restore_check`, dropped afterwards | checksums good; restored 1 tenant, 14 documents, head 0028, equal to the live database; the file archive lists 12 PDFs; timer active daily at 03:30 UTC |
+| Local checks | `make test`; `make web-check` | 467 passed; web type check, ESLint, Vitest 205 and build passed |
+
+### B18 left, and why
+
+- **Domain, TLS, ports 80 and 443, the owner's SMTP account**: B19. Until then `MATCHDESK_APP_BASE_URL` is the tunnel address and Mailpit catches all mail.
+- **Backups stay on the same server**; an offsite copy and the restore drill on another machine (OPS-01) are not done. The backup key must be copied off the server by the owner.
+- **The demo account** must be removed before the first real account (`deploy/README.md`).
+- **The start-up check on the public base URL** (TRD section 7, R-16) is not built; the tunnel address is plain HTTP on loopback.
+- `make deploy` and `make restore` stay proposed; the steps are by hand in `deploy/README.md`.
