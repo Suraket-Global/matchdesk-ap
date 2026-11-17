@@ -749,9 +749,9 @@ body:not(.legal) .legal-view{display:none}
   <thead><tr><th scope="col">Provider</th><th scope="col">What it does</th><th scope="col">Country</th></tr></thead>
   <tbody>
     <tr><td><span data-cfg="hostingProvider"></span></td><td>Server that runs MatchDesk and stores its database and files</td><td><span data-cfg="hostingCountry"></span></td></tr>
-    <tr><td><span data-cfg="emailProvider"></span></td><td>Sends sign-in links, invitations and weekly summaries</td><td>[country]</td></tr>
+    <tr><td><span data-cfg="emailProvider"></span></td><td>Sends sign-in links, invitations and weekly summaries</td><td>Outside Canada (Titan Mail)</td></tr>
     <tr><td>Intuit (QuickBooks Online)</td><td>Source of the QuickBooks data your controller connects</td><td>United States and Canada</td></tr>
-    <tr><td>[Payment provider]</td><td>Takes payment for the pilot and plans</td><td>[country]</td></tr>
+    <tr><td>Interac e-Transfer (your bank) or Stripe</td><td>Takes payment for the pilot and plans; we never see card numbers</td><td>Canada / United States</td></tr>
   </tbody>
 </table>
 <p>MatchDesk reads documents on our own server. If we add a document-reading service, we will name it here and tell each customer before any of its documents are sent to it, and we will only use a service whose terms exclude training on customer content. Information processed outside Canada may be accessible to courts and authorities in that country.</p>
@@ -976,15 +976,15 @@ body:not(.legal) .legal-view{display:none}
 // Business details shown on every page. Edit these values once before publishing.
 const CONFIG = {
   brand: "MatchDesk",
-  legalName: "[Legal business name]",            // e.g. the registered name of your company
-  address: "[Business mailing address], Vancouver, BC, Canada",
+  legalName: "Suraket",            // e.g. the registered name of your company
+  address: "1762 Davies St., Vancouver, BC V6G 1W2, Canada",
   email: "matchdesk@bitloomix.io",                   // general contact and sales
   privacyEmail: "matchdesk@bitloomix.io",          // can be the same mailbox
-  privacyOfficer: "[Name of the person responsible for privacy]",
+  privacyOfficer: "the Privacy Officer, Suraket",
   hostingProvider: "Contabo",
-  hostingCountry: "the European Union",
+  hostingCountry: "Germany",
   emailProvider: "Hostinger (Titan Mail)",
-  updated: "[date you publish]"
+  updated: "18 November 2026"
 };
 
 document.querySelectorAll("[data-cfg]").forEach(el => { el.textContent = CONFIG[el.dataset.cfg]; });
