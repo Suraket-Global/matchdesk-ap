@@ -179,6 +179,14 @@ The account "Sandbox Distributor CA (Intuit sandbox)" (currency CAD) is connecte
 5. **Double presses.** Pressing a button twice imports, saves, sends or requests once; the second press never answers "server error".
 6. **Small things.** Removing a line needs a reason. The value filter of the queue applies on Enter. An invitation to an address replaces the earlier one, and a member is not invited again. **Record credit recovered** offers the credit notes of the same supplier only. The purchase-order page counts QuickBooks bills that have no document, as the match view does. The archive has `suppliers.csv`, `items.csv`, `purchase_orders.csv`, `purchase_order_lines.csv` and `users.csv` to explain its ids, and the audit CSV writes before and after as JSON. When the controller ends support access, the operator's tab returns to the console by itself.
 
+## 16. What changed in B15 (found while recording the product tour)
+
+1. **Extraction review keeps what you typed.** Correct a field on S-07 and wait more than 30 seconds: "Draft saved at …" appears and the field keeps your value; **Confirm and match** then works ("changed by someone else" no longer appears after a draft save).
+2. **Tolerances save twice in a row.** After a save the form shows stored values without trailing zeros (0.01, not 0.010000) and the next save is accepted; a value with more than 4 significant decimals is still refused.
+3. **A PNG or JPEG invoice is shown on S-07** as an image with zoom, **Fit width**, expand and download. It still waits under **Needs review**, because the local reader reads text PDFs only.
+4. **Voiding a receiving import closes its pending late-receiving approval** ("approval withdrawn" in the audit log); nothing is approved, and the report is no longer blocked by it.
+5. **Money carries the account's currency.** On the USD sandbox account the screens, the weekly email and the report PDF say USD (for example "total in QuickBooks USD 205.00"), and USD invoices are matched instead of stopping as "currency not supported". The pilot price and refund threshold stay in CAD.
+
 ## Not built yet (each needs an outside account; the screens say so)
 
 - **Production Intuit keys and Intuit's app assessment.** The demo reads recorded, invented responses; the sandbox accounts of section 12 read Intuit's sandbox. A real company needs production keys and Intuit's app assessment (`execution-plan.md` section 3). A Canadian sandbox company (CAD, 13 % HST) has been read (section 14; [qbo-fact-sheet.md section 6](qbo-fact-sheet.md#6-canada-company-captured)).
