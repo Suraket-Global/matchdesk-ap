@@ -1021,7 +1021,8 @@ document.querySelectorAll(".print-btn").forEach(b => b.addEventListener("click",
   });
   window.addEventListener("hashchange", () => show(location.hash.slice(1)));
   window.addEventListener("popstate", () => show(location.hash.slice(1)));
-  show(location.hash.slice(1));
+  const fromPath = location.pathname.replace(/^\/+|\/+$/g, "");
+  show(views.includes(fromPath) && !location.hash ? fromPath : location.hash.slice(1));
 })();
 
 // ---- one-line check (same rule order as the product: quantity first, then price on the rest) ----
