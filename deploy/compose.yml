@@ -26,7 +26,13 @@ x-app-env: &app-env
   MATCHDESK_SMTP_USERNAME: ${MATCHDESK_SMTP_USERNAME:-}
   MATCHDESK_SMTP_PASSWORD: ${MATCHDESK_SMTP_PASSWORD:-}
   MATCHDESK_MAIL_FROM: ${MATCHDESK_MAIL_FROM:-MatchDesk <no-reply@matchdesk.invalid>}
-  MATCHDESK_QBO_MODE: recorded
+  # QuickBooks: accounts without their own mode use this one. The demo account is pinned to
+  # recorded responses (tenants.qbo_mode); real customers use Intuit production once the keys are set.
+  MATCHDESK_QBO_MODE: ${MATCHDESK_QBO_MODE:-recorded}
+  MATCHDESK_QBO_CLIENT_ID: ${MATCHDESK_QBO_CLIENT_ID:-}
+  MATCHDESK_QBO_CLIENT_SECRET: ${MATCHDESK_QBO_CLIENT_SECRET:-}
+  MATCHDESK_QBO_REDIRECT_URI: ${MATCHDESK_QBO_REDIRECT_URI:-}
+  MATCHDESK_QBO_API_BASE_URL: ${MATCHDESK_QBO_API_BASE_URL:-https://sandbox-quickbooks.api.intuit.com}
   MATCHDESK_EXTRACTOR: local
   MATCHDESK_INBOUND_PROVIDER: local
 
