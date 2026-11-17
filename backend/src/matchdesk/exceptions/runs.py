@@ -105,7 +105,7 @@ def request_run(
     trigger: str = "manual",
     trigger_ref: uuid.UUID | None = None,
     ruleset_code: str = "v1",
-    currency: str = "CAD",
+    currency: str | None = None,
 ) -> tuple[MatchRun, bool]:
     """Request a run for each supplier in the scope; returns (the first supplier's run, whether any
     run was created). After a QuickBooks disconnect no run is created (Intuit terms s. 12.2;
@@ -124,7 +124,7 @@ def _request_one(
     trigger: str,
     trigger_ref: uuid.UUID | None,
     ruleset_code: str,
-    currency: str,
+    currency: str | None,
 ) -> tuple[MatchRun, bool]:
     """Create a queued run for one supplier's documents and enqueue its job in the same
     transaction. Returns (run, created).
@@ -188,12 +188,14 @@ def rematch_out_of_date(
     for part in partition(s, list(live)):
         if not has_result.intersection(part):
             continue
-        _run, made = _request_one(s, tenant_id, part, trigger, trigger_ref, "v1", "CAD")
+        _run, made = _request_one(s, tenant_id, part, trigger, trigger_ref, "v1", None)
         created += int(made)
     return created
 
 
-def execute_run(s: Session, payload: dict[str, Any], ruleset_code: str = "v1", currency: str = "CAD") -> None:
+def execute_run(
+    s: Session, payload: dict[str, Any], ruleset_code: str = "v1", currency: str | None = None
+) -> None:
     """Worker handler for ``match_run`` jobs. Runs inside the job wrapper's tenant session."""
     tenant_id = uuid.UUID(payload["tenant_id"])
     _lock_tenant_runs(s, tenant_id)
@@ -235,7 +237,7 @@ def execute_run(s: Session, payload: dict[str, Any], ruleset_code: str = "v1", c
 
 
 def stale_runs(
-    s: Session, run_ids: list[uuid.UUID], ruleset_code: str = "v1", currency: str = "CAD"
+    s: Session, run_ids: list[uuid.UUID], ruleset_code: str = "v1", currency: str | None = None
 ) -> dict[uuid.UUID, bool]:
     """Read-time staleness (B1-001): a run's stored result is stale when the current inputs of its
     scope no longer have the fingerprint it evaluated. Derived from the inputs on every read,

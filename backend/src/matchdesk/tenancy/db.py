@@ -91,6 +91,18 @@ def session(tenant_id: uuid.UUID | str, engine: Engine | None = None) -> Iterato
         yield s
 
 
+def tenant_currency(s: Session) -> str:
+    """B15: the currency of the tenant this transaction is set to (``tenants.currency``), for
+    matching and for labelling money. Raises without a tenant context."""
+    tid = s.scalar(text("select nullif(current_setting('app.tenant_id', true), '')"))
+    if not tid:
+        raise TenantContextError("no tenant set for this transaction")
+    code = s.scalar(text("select currency from tenants where id = cast(:t as uuid)"), {"t": tid})
+    if not code:
+        raise TenantContextError("tenant not found")
+    return str(code).upper()
+
+
 @contextmanager
 def global_session(engine: Engine | None = None) -> Iterator[Session]:
     """Transaction with no tenant: global tables only; tenant tables read as empty."""

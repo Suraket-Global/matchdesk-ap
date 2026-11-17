@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from matchdesk.audit import write_audit
@@ -69,6 +69,48 @@ def request_late_receipt_approval(
         after={"subject": "late_receipt", "lines": late_lines},
     )
     return approval
+
+
+def _import_voided(s: Session, import_id: uuid.UUID | None) -> bool:
+    if import_id is None:
+        return False
+    state = s.scalar(text("select state from receiving_imports where id = :i"), {"i": import_id})
+    return bool(state == "voided")
+
+
+def close_import_approvals(
+    s: Session, tenant_id: uuid.UUID, import_id: uuid.UUID, user_id: uuid.UUID
+) -> list[Approval]:
+    """B15: a voided import's late lines can never count, so a pending late-receiving approval of
+    that import (it belongs to that import only) is closed as ``withdrawn``, with the reason in the
+    decision note and an audit entry. Nothing is approved; the row stays as history. Returns the
+    approvals closed (none when nothing was pending)."""
+    pending = s.scalars(
+        select(Approval).where(
+            Approval.receiving_import_id == import_id,
+            Approval.subject_type == "late_receipt",
+            Approval.status == "pending",
+        )
+    ).all()
+    now = datetime.now(UTC)
+    for approval in pending:
+        lock_for_update(s, approval)
+        approval.status, approval.version = "withdrawn", approval.version + 1
+        approval.decided_at = now
+        approval.decision_note = "Closed because the receiving import was voided."
+        s.flush()
+        write_audit(
+            s,
+            tenant_id,
+            actor_type="user",
+            actor_user_id=user_id,
+            action="approval.withdrawn",
+            entity_type="approval",
+            entity_id=approval.id,
+            before={"status": "pending"},
+            after={"subject": "late_receipt", "status": "withdrawn", "reason": "import_voided"},
+        )
+    return list(pending)
 
 
 # --- Resolutions, waivers and approvals (T-4.2.1 (d), T-4.2.3; IT-13, IT-14, IT-22, IT-23, IT-27) ---
@@ -407,6 +449,8 @@ def decide(
         raise ConflictError("stale version")
     if approval.status != "pending":
         raise ConflictError(f"an approval in status {approval.status} cannot be decided")
+    if approval.subject_type == "late_receipt" and _import_voided(s, approval.receiving_import_id):
+        raise ConflictError("the receiving import was voided; its late lines can no longer count")
     waived_exc: ExceptionRow | None = None
     if approval.subject_type == "waiver":
         waived_exc = s.get(ExceptionRow, approval.exception_id)

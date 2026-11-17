@@ -39,6 +39,7 @@ from matchdesk.matching import (
 )
 from matchdesk.qbo.models import PoLineRow, PurchaseOrderRow, QboBillLineRow, QboBillRow
 from matchdesk.receiving.models import ReceiptLineRow, ReceiptRow, ReceivingImportRow
+from matchdesk.tenancy import tenant_currency as tenant_currency_of
 
 
 def _s(v: uuid.UUID | None) -> str | None:
@@ -46,7 +47,10 @@ def _s(v: uuid.UUID | None) -> str | None:
 
 
 def build_match_input(
-    s: Session, test_invoice_ids: Iterable[uuid.UUID], tenant_currency: str = "CAD", ruleset_code: str = "v1"
+    s: Session,
+    test_invoice_ids: Iterable[uuid.UUID],
+    tenant_currency: str | None = None,
+    ruleset_code: str = "v1",
 ) -> MatchInput:
     test_ids = sorted({uuid.UUID(str(i)) for i in test_invoice_ids})
     tests = s.scalars(select(InvoiceRow).where(InvoiceRow.id.in_(test_ids), live_invoice())).all()
@@ -301,7 +305,9 @@ def build_match_input(
     )
 
     return MatchInput(
-        tenant_currency=tenant_currency,
+        # B15: the account's own currency unless the caller names one (it was always "CAD", so a
+        # USD account's USD invoices stopped as "currency not supported").
+        tenant_currency=tenant_currency or tenant_currency_of(s),
         test_document_ids=frozenset(str(t.id) for t in tests),
         documents=docs,
         purchase_orders=pos,

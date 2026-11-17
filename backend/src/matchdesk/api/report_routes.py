@@ -130,11 +130,13 @@ def register_report_routes(app: FastAPI, engine: Engine) -> None:
                 with global_session(engine) as g:
                     tenant = g.get(Tenant, p.tenant_id)
                     account = tenant.name if tenant else None
+                    currency = tenant.currency if tenant else None
                 approver = views.user_names(s, [r.approved_by]).get(r.approved_by) if r.approved_by else None
                 pilot = reporting.get_pilot(s, p.tenant_id)
                 # B14 (acceptance M4): what the document states besides the report row.
                 context = {
                     "account": account,
+                    "currency": currency,
                     "approved_by_name": approver,
                     "pilot": reporting.describe_pilot(pilot),
                     "is_governing": bool(pilot and pilot.governing_report_id == r.id),

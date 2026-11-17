@@ -23,6 +23,7 @@ from matchdesk.api.common import Auth, body_hash, idempotent_replay, if_match, p
 from matchdesk.api.limits import MAX_UPLOAD_FILE_BYTES
 from matchdesk.core import NotFoundError
 from matchdesk.exceptions import (
+    close_import_approvals,
     invoices_on_po_lines,
     po_lines_with_open_exceptions,
     request_late_receipt_approval,
@@ -185,6 +186,9 @@ def register_receiving_routes(app: FastAPI, engine: Engine) -> None:
                 lines = receiving.void(s, imp, p.user_id, body.reason)
             except ValueError as exc:
                 raise HTTPException(422, str(exc)) from None
+            # B15: a pending late-receiving approval of this import no longer has anything to
+            # decide; closing it lets the report be approved (also run when voided earlier).
+            close_import_approvals(s, p.tenant_id, imp.id, p.user_id)
             run_id = _rematch(s, p.tenant_id, lines, imp.id)
             return {**receiving.describe_import(imp), "match_run_id": run_id}
 

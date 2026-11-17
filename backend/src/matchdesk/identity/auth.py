@@ -533,6 +533,9 @@ def describe_me(engine: Engine, ctx: SessionContext) -> dict[str, Any]:
         user = s.get(User, ctx.user_id)
         assert user is not None
         email, name = user.email, user.display_name
+        # B15: the account's currency labels its money on every screen (it was always "CAD").
+        tenant = s.get(Tenant, ctx.tenant_id) if ctx.tenant_id else None
+        currency = tenant.currency if tenant is not None else None
     return {
         "user": {
             "id": str(ctx.user_id),
@@ -546,6 +549,7 @@ def describe_me(engine: Engine, ctx: SessionContext) -> dict[str, Any]:
         ],
         "active_tenant_id": str(ctx.tenant_id) if ctx.tenant_id else None,
         "role": ctx.role,
+        "currency": currency,
         "support": _support_body(engine, ctx),
         "idle_expires_at": ctx.idle_expires_at.isoformat(),
         "absolute_expires_at": ctx.absolute_expires_at.isoformat(),

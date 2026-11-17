@@ -10,6 +10,7 @@ from matchdesk.tenancy.db import (
     operator_session,
     session,
     tenant_args,
+    tenant_currency,
     tfk,
     user_session,
 )
@@ -55,6 +56,7 @@ __all__ = [
     "seal",
     "session",
     "tenant_args",
+    "tenant_currency",
     "tfk",
     "transition",
     "unseal",

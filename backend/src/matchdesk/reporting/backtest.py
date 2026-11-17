@@ -871,6 +871,9 @@ def export_pdf(
     same as the screen and the CSV. ``context`` adds what the report row does not hold: the account
     name, who approved, the pilot terms and the refund result (the export route builds it)."""
     ctx = context or {}
+    # B15: the account's currency labels the report's figures; the pilot price and threshold are
+    # the signed terms, in CAD (Decision.md section 5).
+    money_code = str(ctx.get("currency") or "CAD")
     sec = (r.totals or {}).get("sections", {})
     unmeasured = _unmeasured_line(r)
     status = {"draft": "Draft, not approved", "approved": "Approved", "superseded": "Superseded"}.get(
@@ -892,7 +895,7 @@ def export_pdf(
     if unmeasured:
         add(unmeasured)
     add()
-    add("Totals (CAD)")
+    add(f"Totals ({money_code})")
     waived = sec.get("waived", {}).get("amount", "0.00")
     waived_counted = round_cents(
         sum((dec(f.amount) for f in findings if f.section == "waived" and f.qualifying), ZERO)
@@ -929,7 +932,7 @@ def export_pdf(
         )
         if ctx.get("is_governing") and pilot.get("refund_due") is not None:
             add(
-                f"This version governs the refund: qualifying total CAD {pilot.get('refund_qualifying_amount')}, "
+                f"This version governs the refund: qualifying total {money_code} {pilot.get('refund_qualifying_amount')}, "
                 f"so the pilot fee is {'refunded' if pilot['refund_due'] else 'not refunded'}."
             )
         elif pilot.get("governing_report_id"):
@@ -942,7 +945,7 @@ def export_pdf(
             continue
         add()
         total = round_cents(sum((dec(f.amount) for f in rows), ZERO))
-        add(f"{heading}: {len(rows)} {'item' if len(rows) == 1 else 'items'}, CAD {total}")
+        add(f"{heading}: {len(rows)} {'item' if len(rows) == 1 else 'items'}, {money_code} {total}")
         out.append(" ".join(f"{n:<{w}}" for n, w in _COLS) + f" {'Amount':>10}  Paid")
         out.append("-" * PDF_WIDTH)
         for f in rows:

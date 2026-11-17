@@ -32,7 +32,7 @@ from matchdesk.intake.models import InvoiceLineRow, InvoiceRow, live_invoice
 from matchdesk.qbo.models import Vendor
 from matchdesk.reporting.backtest import _current_matches, measurement_state, measurement_words, section_of
 from matchdesk.reporting.models import WeeklySummaryDelivery, WeeklySummaryRun
-from matchdesk.tenancy import global_session, session
+from matchdesk.tenancy import global_session, session, tenant_currency
 
 PACIFIC = ZoneInfo("America/Vancouver")
 OPEN = ("open", "pending_approval")
@@ -140,12 +140,14 @@ def summary(s: Session, week_start: date) -> dict[str, Any]:
         "measurement": measurement_words(state, "this week"),
         "suppliers": rows,
         "total": total,
+        "currency": tenant_currency(s),
     }
 
 
 def email_text(tenant_name: str, fig: dict[str, Any], link: str) -> tuple[str, str]:
     """Totals and a link only (IT-25): no supplier, price, document or line."""
     t = fig["total"]
+    code = str(fig.get("currency") or "CAD")  # B15: the account's currency
     start = date.fromisoformat(fig["week_start"])
     end = date.fromisoformat(fig["week_end"])
     span = f"{start.day} {start:%b} to {end.day} {end:%b %Y}"
@@ -156,8 +158,8 @@ def email_text(tenant_name: str, fig: dict[str, Any], link: str) -> tuple[str, s
         [
             f"Documents: {t['documents']}",
             f"Lines checked: {t['lines']} (passed every check: {rate})",
-            f"Flagged discrepancies: CAD {t['flagged_amount']}",
-            f"Open exceptions: {t['open_count']}, CAD {t['open_value']}",
+            f"Flagged discrepancies: {code} {t['flagged_amount']}",
+            f"Open exceptions: {t['open_count']}, {code} {t['open_value']}",
         ]
         if words["figures"]
         # B10 (outside QA item 6): an unmeasured week says so, never "CAD 0.00" (the S-14 words).
