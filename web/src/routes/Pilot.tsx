@@ -6,7 +6,7 @@ import { errorText, get, send } from "../api/client";
 import type { PilotRead, Report } from "../api/types";
 import { useSession } from "../app/session";
 import { Dialog, toast } from "../components/ui";
-import { cad } from "../lib/decimal";
+import { currencyCode, inCurrency } from "../lib/decimal";
 import { day, monthName, when } from "../lib/format";
 
 export const PAYMENT_WORDS: Record<string, string> = { unpaid: "Not paid yet", paid: "Paid", refunded: "Refunded" };
@@ -39,11 +39,11 @@ export function PilotCard() {
           <dl className="facts">
             <dt>Pilot</dt>
             <dd>
-              {cad(p.price)} for {day(p.period_start)} to {day(p.period_end)}
+              {inCurrency(p.price, p.currency)} for {day(p.period_start)} to {day(p.period_end)}
             </dd>
             <dt>Refund</dt>
             <dd>
-              {p.refund_condition} Threshold: {cad(p.refund_threshold)}.
+              {p.refund_condition} Threshold: {inCurrency(p.refund_threshold, p.currency)}, the pilot fee.
             </dd>
             <dt>Signed terms</dt>
             <dd>
@@ -91,24 +91,43 @@ export function PilotSection({ r }: { r: Report }) {
   const p = q.data?.pilot;
   const gov = q.data?.governing;
   if (q.isLoading) return null;
+  // B16: a report's figures are in its stored currency (the account's before B16).
+  const reportCode = (r.currency ?? currencyCode()).toUpperCase();
   if (!p)
-    return (
+    return reportCode === "CAD" ? (
       <p className="muted">
-        No pilot record yet, so the default threshold of {cad("500.00")} is shown. MatchDesk records the signed terms before the pilot starts.
+        No pilot record yet, so the default threshold of {inCurrency("500.00", "CAD")} is shown. MatchDesk records the signed terms before the pilot starts.
+      </p>
+    ) : (
+      <p className="muted" data-testid="pilot-no-fee">
+        No pilot record yet, so there is no refund threshold: a {reportCode} account has no default fee. MatchDesk records the fee in {reportCode} with the signed
+        terms before the pilot starts.
       </p>
     );
   const isGoverning = gov?.report_id === r.id;
+  const mixed = p.currency.toUpperCase() !== reportCode;
   return (
     <>
       <dl className="facts panel panel-body">
         <dt>Pilot</dt>
         <dd>
-          {cad(p.price)}, {day(p.period_start)} to {day(p.period_end)}
+          {inCurrency(p.price, p.currency)}, {day(p.period_start)} to {day(p.period_end)}
         </dd>
         <dt>Refund condition</dt>
         <dd>{p.refund_condition}</dd>
         <dt>Threshold</dt>
-        <dd>{cad(p.refund_threshold)}, from the signed terms ({p.signed_terms_ref ?? "reference not recorded"})</dd>
+        <dd>
+          {inCurrency(p.refund_threshold, p.currency)}, the pilot fee, from the signed terms ({p.signed_terms_ref ?? "reference not recorded"})
+        </dd>
+        {mixed && (
+          <>
+            <dt>Currency</dt>
+            <dd className="error-text" data-testid="pilot-currency-mismatch">
+              This report is in {reportCode} and the pilot terms are in {p.currency}. MatchDesk never converts currencies, so this version cannot decide the
+              refund until the pilot record states its fee in {reportCode}.
+            </dd>
+          </>
+        )}
         <dt>Governing version</dt>
         <dd>
           {isGoverning ? (
@@ -125,13 +144,13 @@ export function PilotSection({ r }: { r: Report }) {
           <>
             <dt>Refund result</dt>
             <dd>
-              Qualifying discrepancies {cad(p.refund_qualifying_amount)} against the threshold {cad(p.refund_threshold)}:{" "}
+              Qualifying discrepancies {inCurrency(p.refund_qualifying_amount, p.currency)} against the threshold {inCurrency(p.refund_threshold, p.currency)}:{" "}
               <strong>{p.refund_due ? "refund applies" : "no refund"}</strong>.
             </dd>
           </>
         )}
       </dl>
-      {r.status === "approved" && !gov && can("approve_report") && (
+      {r.status === "approved" && !gov && !mixed && can("approve_report") && (
         <p style={{ marginTop: 12 }}>
           <button className="btn primary" onClick={() => setOpen(true)}>
             Make version {r.version_no} the governing version
@@ -154,8 +173,8 @@ export function PilotSection({ r }: { r: Report }) {
         }
       >
         <p>
-          The pilot refund is decided on this version once, from its stored qualifying total of {cad(r.qualifying_amount)} against the threshold of{" "}
-          {cad(p.refund_threshold)} in the signed terms. This choice cannot be changed later, and a newer version will not replace it.
+          The pilot refund is decided on this version once, from its stored qualifying total of {inCurrency(r.qualifying_amount, reportCode)} against the threshold
+          of {inCurrency(p.refund_threshold, p.currency)} in the signed terms. This choice cannot be changed later, and a newer version will not replace it.
         </p>
         {govern.error && <p className="error-text">{errorText(govern.error)}</p>}
       </Dialog>

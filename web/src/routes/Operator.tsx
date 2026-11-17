@@ -6,7 +6,7 @@ import { ApiError, errorText, get, send } from "../api/client";
 import type { DeletionRequest, FirstController, Me, OperatorTenant, Page, Pilot, ScheduledOperation } from "../api/types";
 import { useSession } from "../app/session";
 import { Banner, Dialog, Empty, ErrorState, Field, Loading, PageHead, StatusChip, toast, usePageTitle } from "../components/ui";
-import { AMOUNT_INPUT, cad, numberError, plainNumber } from "../lib/decimal";
+import { AMOUNT_INPUT, inCurrency, money, numberError, plainNumber, toCents } from "../lib/decimal";
 import { day, plural, when } from "../lib/format";
 import { OUTCOME_WORDS, PAYMENT_WORDS } from "./Pilot";
 import { archiveSnapshotText, DeletionStateChip } from "./AccountData";
@@ -79,7 +79,7 @@ function TenantList() {
                     <StatusChip status={t.status} />
                   </td>
                   <td data-label="Pilot">
-                    {t.pilot ? `${cad(t.pilot.price)}, ${day(t.pilot.period_start)} to ${day(t.pilot.period_end)}` : <span className="muted">No record yet</span>}
+                    {t.pilot ? `${inCurrency(t.pilot.price, t.pilot.currency)}, ${day(t.pilot.period_start)} to ${day(t.pilot.period_end)}` : <span className="muted">No record yet</span>}
                   </td>
                   <td data-label="Payment">{t.pilot ? PAYMENT_WORDS[t.pilot.payment_status] : "–"}</td>
                   <td className="num" data-label="Billable units">{t.usage_units}</td>
@@ -191,11 +191,14 @@ export function FirstControllerPanel({ tenantId, state }: { tenantId: string; st
   );
 }
 
+// B16: the fee is entered in the account's currency; only a CAD account starts from CAD 500
+// (Decision.md section 5). The refund threshold is the fee (Decision.md 5.1), never entered apart.
+const DEFAULT_FEES: Record<string, string> = { CAD: "500.00" };
+
 const EMPTY_FORM = {
-  price: "500.00",
+  price: "",
   period_start: "",
   period_end: "",
-  refund_threshold: "500.00",
   refund_condition: "",
   signed_terms_ref: "",
   signed_by_name: "",
@@ -217,22 +220,37 @@ function TenantDetail() {
   const [hours, setHours] = useState("24");
   const [reason, setReason] = useState("");
   const p = q.data?.pilot ?? null;
+  const code = (q.data?.currency ?? "CAD").toUpperCase();
+  // B16: a record in another currency than the account's (before B16 every record was CAD) is restated.
+  const otherCurrency = !!p && p.currency.toUpperCase() !== code;
   useEffect(() => {
     if (!q.data) return;
     const src: Partial<Pilot> = q.data.pilot ?? {};
-    setForm(Object.fromEntries(Object.keys(EMPTY_FORM).map((k) => [k, String((src as Record<string, unknown>)[k] ?? (EMPTY_FORM as Record<string, string>)[k] ?? "")])));
+    const acct = (q.data.currency ?? "CAD").toUpperCase();
+    const fee = q.data.pilot ? (q.data.pilot.currency.toUpperCase() === acct ? q.data.pilot.price : "") : (DEFAULT_FEES[acct] ?? "");
+    setForm({
+      ...Object.fromEntries(Object.keys(EMPTY_FORM).map((k) => [k, String((src as Record<string, unknown>)[k] ?? (EMPTY_FORM as Record<string, string>)[k] ?? "")])),
+      price: fee,
+    });
   }, [q.data]);
   // B14 (acceptance m6): a number that cannot be read is named beside its field and never sent;
-  // before, "1,5x" went to the server and came back as "Request is not valid".
-  const badNumber = numberError(form.price, AMOUNT_INPUT) ?? (p?.governing_report_id ? null : numberError(form.refund_threshold, AMOUNT_INPUT));
+  // before, "1,5x" went to the server and came back as "Request is not valid". B16: the fee is
+  // required (no default outside CAD) and more than 0.
+  const feeError = (() => {
+    if (form.price.trim() === "") return `Enter the pilot fee in ${code}`;
+    const bad = numberError(form.price, AMOUNT_INPUT);
+    if (bad) return bad;
+    const cents = toCents(plainNumber(form.price, AMOUNT_INPUT));
+    return cents !== null && cents <= 0n ? "The pilot fee must be more than 0" : null;
+  })();
+  const badNumber = p?.governing_report_id ? null : feeError;
   const save = useMutation({
     mutationFn: () => {
       const body = Object.fromEntries(
         Object.entries(form)
           .filter(([k, v]) => v !== "" || k === "signed_terms_ref")
-          .map(([k, v]) => [k, k === "price" || k === "refund_threshold" ? plainNumber(v, AMOUNT_INPUT) || v : v]),
+          .map(([k, v]) => [k, k === "price" ? plainNumber(v, AMOUNT_INPUT) || v : v]),
       );
-      if (p?.governing_report_id) delete body.refund_threshold;
       return send<Pilot>("PUT", `/api/v1/operator/tenants/${tenantId}/pilot`, body, p ? { ifMatch: p.version } : undefined);
     },
     onSuccess: () => {
@@ -265,7 +283,7 @@ function TenantDetail() {
   if (q.error) return <ErrorState error={q.error} retry={() => q.refetch()} />;
   const t = q.data!;
   const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
-  const fixedThreshold = !!p?.governing_report_id;
+  const fixedTerms = !!p?.governing_report_id;
   const active = (t.grants ?? []).find((g) => g.status === "active");
   return (
     <>
@@ -279,7 +297,7 @@ function TenantDetail() {
         <div>
           <dt>Payment</dt>
           <dd className={p?.payment_status === "paid" ? "ok" : "warn"}>{p ? PAYMENT_WORDS[p.payment_status] ?? p.payment_status : "No pilot record"}</dd>
-          {p && <span className="n">{cad(p.price)} pilot</span>}
+          {p && <span className="n">{inCurrency(p.price, p.currency)} pilot</span>}
         </div>
         <div>
           <dt>Pilot</dt>
@@ -325,20 +343,34 @@ function TenantDetail() {
             }}
           >
             <div className="form-grid">
-              <Field label="Price (CAD)" error={numberError(form.price, AMOUNT_INPUT) ?? undefined}>
-                {(f) => <input id={f.id} className="num" inputMode="decimal" value={form.price} aria-invalid={f.invalid} aria-describedby={f.describedBy} onChange={(e) => set("price", e.target.value)} />}
-              </Field>
-              <Field label="Refund threshold (CAD)" hint={fixedThreshold ? "Fixed: the governing version is chosen" : undefined} error={numberError(form.refund_threshold, AMOUNT_INPUT) ?? undefined}>
+              <Field
+                label={`Pilot fee (${code})`}
+                hint={fixedTerms ? "Fixed: the governing version is chosen" : code === "CAD" ? "CAD 500 unless the signed terms say otherwise" : `No default for a ${code} account: enter the fee from the signed terms`}
+                error={badNumber ?? undefined}
+              >
                 {(f) => (
                   <input
                     id={f.id}
                     className="num"
                     inputMode="decimal"
-                    value={form.refund_threshold}
-                    disabled={fixedThreshold}
+                    value={form.price}
+                    required
+                    disabled={fixedTerms}
+                    aria-invalid={f.invalid}
                     aria-describedby={f.describedBy}
-                    onChange={(e) => set("refund_threshold", e.target.value)}
+                    onChange={(e) => set("price", e.target.value)}
                   />
+                )}
+              </Field>
+              <Field label="Refund threshold" hint="Always the pilot fee (Decision.md 5.1)">
+                {(f) => (
+                  <output id={f.id} className="num" data-testid="pilot-threshold" aria-describedby={f.describedBy}>
+                    {fixedTerms && p
+                      ? inCurrency(p.refund_threshold, p.currency)
+                      : plainNumber(form.price, AMOUNT_INPUT)
+                        ? `${code} ${money(plainNumber(form.price, AMOUNT_INPUT))}`
+                        : `The pilot fee, in ${code}`}
+                  </output>
                 )}
               </Field>
               <Field label="Pilot starts">{(f) => <input id={f.id} type="date" value={form.period_start} onChange={(e) => set("period_start", e.target.value)} />}</Field>
@@ -391,8 +423,17 @@ function TenantDetail() {
             {p?.governing_report_id && (
               <Banner tone="info">
                 <p>
-                  Governing version chosen by the account on {when(p.refund_determined_at)}: qualifying {cad(p.refund_qualifying_amount)},{" "}
+                  Governing version chosen by the account on {when(p.refund_determined_at)}: qualifying {inCurrency(p.refund_qualifying_amount, p.currency)} against{" "}
+                  {inCurrency(p.refund_threshold, p.currency)},{" "}
                   {p.refund_due ? "refund applies" : "no refund"}.
+                </p>
+              </Banner>
+            )}
+            {otherCurrency && !fixedTerms && (
+              <Banner tone="warn">
+                <p data-testid="pilot-restate">
+                  This record is in {p?.currency} ({inCurrency(p?.price, p?.currency)}) and the account is in {code}. Enter the fee in {code} from the signed terms;
+                  MatchDesk never converts it.
                 </p>
               </Banner>
             )}

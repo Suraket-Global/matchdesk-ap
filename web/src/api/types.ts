@@ -520,6 +520,8 @@ export interface Report {
   not_received_amount: string;
   unverified_amount: string;
   qualifying_amount: string;
+  /** B16: the figures' currency, stored with the version; null before B16 (the account's). */
+  currency?: string | null;
   is_stale: boolean;
   changed_since_cutoff?: boolean | null;
   flagged_amount?: string;
@@ -543,6 +545,9 @@ export interface Refund {
   report_id: string;
   report_status: string;
   threshold: string;
+  /** B16: the report's currency and the threshold's (the pilot's); the server refuses a mix. */
+  currency?: string;
+  threshold_currency?: string;
   qualifying_total: string;
   unverified_total: string;
   refund_due: boolean;
@@ -722,6 +727,8 @@ export interface DeletionRequest {
 export interface Pilot {
   id: string;
   price: string;
+  /** B16: the currency of the fee, the threshold and the stored qualifying amount. */
+  currency: string;
   period_start: string;
   period_end: string;
   refund_condition: string;
@@ -818,6 +825,8 @@ export interface OperatorTenant {
   status: string;
   created_at: string;
   intake_address: string | null;
+  /** B16: the account's currency, in which the operator enters the pilot fee. */
+  currency?: string;
   pilot: Pilot | null;
   usage_units: number;
   active_grant: boolean;

@@ -36,8 +36,8 @@ export function money(value: string | null | undefined): string {
 }
 
 // B15: the signed-in account's currency (from /me), set by the session before any screen renders.
-// Every amount of the account's documents is labelled with it; only the pilot terms (price and
-// refund threshold, Decision.md section 5) are always CAD and use `cad`.
+// Every amount of the account's documents is labelled with it. B16: the pilot terms (fee and refund
+// threshold) carry the pilot record's own currency and use `inCurrency`.
 let accountCurrency = "CAD";
 export function setCurrency(code: string | null | undefined): void {
   accountCurrency = (code ?? "").trim().toUpperCase() || "CAD";
@@ -57,7 +57,14 @@ export function curCents(cents: bigint): string {
   return `${accountCurrency} ${formatCents(cents)}`;
 }
 
-/** "CAD 1,234.50": the pilot terms only, which are in CAD whatever the account's currency. */
+/** "USD 1,234.50" in a named currency: the pilot terms and a report's stored figures (B16). */
+export function inCurrency(value: string | null | undefined, code: string | null | undefined): string {
+  const m = money(value);
+  const c = (code ?? "").trim().toUpperCase() || accountCurrency;
+  return m ? `${c} ${m}` : "";
+}
+
+/** "CAD 1,234.50". */
 export function cad(value: string | null | undefined): string {
   const m = money(value);
   return m ? `CAD ${m}` : "";

@@ -53,7 +53,9 @@ test("B7 operator console, support access, pilot record, weekly summary and emai
   await axe(page, "operator console");
   await page.getByRole("link", { name: new RegExp(tag) }).click();
   await expect(page.getByRole("heading", { name: /pilot record/i })).toBeVisible(); // B8: "Edit the pilot record"
-  await expect(page.getByLabel("Refund threshold (CAD)")).toHaveValue("500.00");
+  // B16: the fee in the account's currency (CAD 500 for a CAD account); the threshold is the fee.
+  await expect(page.getByLabel("Pilot fee (CAD)")).toHaveValue("500.00");
+  await expect(page.getByTestId("pilot-threshold")).toHaveText("CAD 500.00");
   await page.getByLabel("Signed terms reference").fill(`Pilot terms v2 (synthetic) ${tag}`);
   await page.getByRole("button", { name: "Save pilot record" }).click();
   await expect(page.getByText("Pilot record saved.")).toBeVisible();

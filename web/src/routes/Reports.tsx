@@ -7,7 +7,7 @@ import type { Page, Refund, Report } from "../api/types";
 import { useSession } from "../app/session";
 import { usePeriod } from "../app/period";
 import { Banner, Dialog, Empty, ErrorState, Loading, PageHead, StatusChip, toast, usePageTitle } from "../components/ui";
-import { cad, cur, curCents, compareDecimal, formatCents, money, sumCents, currencyCode } from "../lib/decimal";
+import { cur, curCents, inCurrency, compareDecimal, formatCents, money, sumCents, currencyCode } from "../lib/decimal";
 import { day, monthName, monthRange, plural, when } from "../lib/format";
 import { typeWord, zeroCounted } from "../lib/words";
 import { PilotSection, usePilot } from "./Pilot";
@@ -657,9 +657,16 @@ export function ReportPage() {
         {r.status === "approved" && refund.data && (
           <p className="workings" style={{ display: "block" }}>
             <span className="sentence">
-              Qualifying discrepancies in this version: {cur(refund.data.qualifying_total)}. Threshold {cad(refund.data.threshold)}.{" "}
-              {refund.data.refund_due ? "Refund applies." : "No refund."} Unverified (could not be checked): {cur(refund.data.unverified_total)}.
+              Qualifying discrepancies in this version: {inCurrency(refund.data.qualifying_total, refund.data.currency)}. Threshold{" "}
+              {inCurrency(refund.data.threshold, refund.data.threshold_currency)}. {refund.data.refund_due ? "Refund applies." : "No refund."} Unverified (could not be
+              checked): {inCurrency(refund.data.unverified_total, refund.data.currency)}.
             </span>
+          </p>
+        )}
+        {/* B16: a report and a pilot in two currencies, or a non-CAD account with no fee yet: refused, never converted. */}
+        {r.status === "approved" && refund.error && (
+          <p className="error-text" data-testid="refund-refused">
+            {errorText(refund.error)}
           </p>
         )}
         <PilotSection r={r} />
