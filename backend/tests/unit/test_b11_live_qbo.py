@@ -379,3 +379,23 @@ def test_unknown_po_history_blocks_every_line_and_stays_out_of_the_fingerprint()
     assert res.line("oct-l1").status.value == "exception"
     assert "history_incomplete" in {e.type.value for e in res.exceptions}
     assert input_fingerprint(build(docs=(oct_inv,), po=unknown, **base)) != input_fingerprint(plain)
+
+
+def test_an_error_answer_logs_intuit_tid_but_never_the_token_or_realm(caplog):  # type: ignore[no-untyped-def]
+    """Intuit's questionnaire: capture intuit_tid on errors. The token and realm stay out of logs."""
+    import logging
+
+    from matchdesk.core import load_settings
+    from matchdesk.qbo.intuit_http import HttpAnswer, IntuitApi
+
+    def transport(url: str, headers: dict[str, str], timeout: int) -> HttpAnswer:
+        return HttpAnswer(400, {"intuit_tid": "1-abc-tid"}, b'{"Fault": {}}')
+
+    api = IntuitApi(load_settings(), "9130350000000000", lambda rejected: "secret-access-token", transport)
+    with caplog.at_level(logging.WARNING, logger="matchdesk.qbo.http"):
+        answer = api.query("select * from Vendor")
+    assert answer.status == 400
+    records = [r for r in caplog.records if r.getMessage() == "qbo_error_response"]
+    assert records and records[0].intuit_tid == "1-abc-tid" and records[0].status == 400
+    text = " ".join(str(r.__dict__) for r in caplog.records)
+    assert "secret-access-token" not in text and "9130350000000000" not in text

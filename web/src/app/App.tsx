@@ -471,7 +471,7 @@ function UserMenu() {
             </select>
           </label>
           <hr />
-          <a href="mailto:support@matchdesk.invalid">
+          <a href="mailto:matchdesk@bitloomix.io">
             <LifeBuoy size={16} aria-hidden="true" />
             Help and contact
           </a>

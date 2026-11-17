@@ -12,7 +12,9 @@ retries once. 429, 5xx and network errors raise ``QboTransientError``; the sync 
 from its cursor. Other answers (for example a 400 for a bad statement) are returned to the caller.
 
 Headers that bear on call limits are kept (``limit_headers``) so T-1.1.1 can record them. The
-access token, the realm ID and Intuit's request ID (``intuit_tid``) are never logged.
+access token and the realm ID are never logged. When QuickBooks answers with an error, Intuit's request
+ID (``intuit_tid``) is logged with the status and the path template, as Intuit recommends, so Intuit
+support can trace a failed call; a successful call logs nothing.
 """
 
 from __future__ import annotations
@@ -26,7 +28,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
 
-from matchdesk.core import Settings
+from matchdesk.core import Settings, get_logger
 from matchdesk.qbo.client import QboTransientError
 
 TokenSource = Callable[[str | None], str]
@@ -121,15 +123,34 @@ class IntuitApi:
         url = f"{self.base}/v3/company/{realm}/{tail}?{query}"
         token = self._tokens(None)
         answer = self._transport(url, _headers(token), self._timeout)
+        path = "/v3/company/{realmId}/" + tail.replace(self.realm_id, "{realmId}")
         if answer.status == 401:
+            _log_error(answer.status, path, answer.headers)
             token = self._tokens(token)
             answer = self._transport(url, _headers(token), self._timeout)
             if answer.status == 401:
+                _log_error(answer.status, path, answer.headers)
                 raise QboAuthError("QuickBooks refused the refreshed access token")
+        if answer.status != 200:
+            _log_error(answer.status, path, answer.headers)
         if answer.status == 429 or answer.status >= 500:
             raise QboTransientError(f"QuickBooks HTTP {answer.status}")
-        path = "/v3/company/{realmId}/" + tail.replace(self.realm_id, "{realmId}")
         return ApiAnswer(path, statement, answer.status, answer.headers, answer.body)
+
+
+_log = get_logger("matchdesk.qbo.http")
+
+
+def _tid(headers: dict[str, str]) -> str | None:
+    for key, value in headers.items():
+        if key.lower() in ("intuit_tid", "intuit-tid"):
+            return value
+    return None
+
+
+def _log_error(status: int, path: str, headers: dict[str, str]) -> None:
+    """An error answer from QuickBooks: status, path template (no realm) and intuit_tid only."""
+    _log.warning("qbo_error_response", extra={"status": status, "path": path, "intuit_tid": _tid(headers)})
 
 
 def _headers(token: str) -> dict[str, str]:
