@@ -18,7 +18,6 @@ also sets `"ip": "127.0.0.1"` as the default for published ports.
 | `api` | `matchdesk-app:<tag>` | `127.0.0.1:8201` | API (`/healthz`, `/readyz`, `/api/v1`); files on volume `matchdesk_blobs` |
 | `worker` | `matchdesk-app:<tag>` | none | Jobs and the once-a-minute schedule; 1 GB memory limit (TRD 8.7) |
 | `web` | `matchdesk-web:<tag>` | `127.0.0.1:8202` app, `127.0.0.1:8203` landing | nginx: the built web app, `/api` and `/oauth` proxied to `api`, TRD 8.7 response headers; the landing page on its own port |
-| `mailpit` | `axllent/mailpit` | `127.0.0.1:8225` (inbox UI) | Temporary mail catcher until the owner's SMTP account is set |
 | `demo-seed`, `operator-code` | `matchdesk-app:<tag>` | none | Profile `demo`, run by hand only (below) |
 
 Settings: `MATCHDESK_ENV=production`, Secure `__Host-` cookies (`MATCHDESK_LOCAL_HTTP_COOKIES` is not
@@ -51,7 +50,7 @@ dc() { docker compose --env-file /opt/matchdesk/.env -f /opt/matchdesk/app/deplo
 3. `/opt/matchdesk/app/deploy/gen-env.sh <short commit>`: writes `/opt/matchdesk/.env` with every
    secret from `openssl rand`. It refuses to overwrite an existing file. Store a copy of
    `MATCHDESK_BACKUP_KEY` off the server (password manager) by reading it on the server yourself.
-4. `dc build && dc up -d`, then `dc ps`: `api`, `worker`, `web`, `mailpit`, `db` healthy, `migrate`
+4. `dc build && dc up -d`, then `dc ps`: `api`, `worker`, `web`, `db` healthy, `migrate`
    exited 0.
 5. Backup timer: `install -m 644 /opt/matchdesk/app/deploy/systemd/matchdesk-backup.* /etc/systemd/system/`,
    `systemctl daemon-reload && systemctl enable --now matchdesk-backup.timer`.
@@ -62,14 +61,14 @@ From the Mac:
 
 ```sh
 ssh -i ~/.ssh/matchdesk_deploy -N \
-  -L 8202:127.0.0.1:8202 -L 8203:127.0.0.1:8203 -L 8225:127.0.0.1:8225 root@185.174.253.63
+  -L 8202:127.0.0.1:8202 -L 8203:127.0.0.1:8203 root@185.174.253.63
 ```
 
 - App: http://127.0.0.1:8202 (use this exact origin; it is `MATCHDESK_APP_BASE_URL`, and the API
   refuses another `Origin`). The session cookies are `Secure` with the `__Host-` prefix; Chromium
   browsers accept them on `http://127.0.0.1` because a loopback address counts as a secure context.
 - Landing page: http://127.0.0.1:8203
-- Mailpit (sign-in links): http://127.0.0.1:8225
+- Sign-in links go to the real mailbox (SMTP in `.env`); Mailpit was removed on 2026-11-18.
 
 ## Demo account
 
@@ -171,3 +170,10 @@ rate limits see the tunnel's address), removing the demo account before the firs
 - The owner's SMTP account in `.env` (`MATCHDESK_SMTP_*`, `MATCHDESK_MAIL_FROM` on the domain with SPF
   and DKIM), and the `mailpit` service removed.
 - The demo account removed before the first real account (above); backups copied off the server.
+
+## Logs and mail (2026-11-18)
+
+- Every long-running container keeps at most 5 log files of 10 MB (`x-logging` in compose.yml), so
+  logs cannot fill the disk.
+- Mail goes only through the owner's SMTP mailbox in `.env` (Titan, `smtp.titan.email:587`, STARTTLS);
+  the temporary Mailpit container is gone. `dc up -d --remove-orphans` removes its old container.
