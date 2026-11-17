@@ -263,7 +263,7 @@ def test_m4_pdf_uses_the_screen_words_names_suppliers_fits_the_page_and_equals_t
         assert TYPE_WORDS[f["type"]] in text_all
     assert "Draft, not approved" in text_all and "Pacific time" in text_all
     # 3. Suppliers: every supplier of a listed row, the long one whole (wrapped, not cut).
-    assert "Fictional Supplier T" in text_all
+    assert "Fictional Supplier" in text_all  # B16: the supplier column is 19 wide (was 22)
     assert text_all.count("Incorporated") == 3 and text_all.count("Registered") == 3  # every word, wrapped
 
     # 4. The same figures as the screen (the API the screen reads).

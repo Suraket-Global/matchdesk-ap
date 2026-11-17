@@ -650,7 +650,7 @@ export function ReportPage() {
         <h2>7. Pilot terms and refund calculation</h2>
         {r.status !== "approved" && (
           <p>
-            The refund is decided only on the approved, governing version. This draft shows qualifying discrepancies of {cur(r.qualifying_amount)}; the figure can still
+            The refund is decided only on the approved, governing version. This draft shows qualifying discrepancies of {inCurrency(r.qualifying_amount, r.currency)}; the figure can still
             change.
           </p>
         )}

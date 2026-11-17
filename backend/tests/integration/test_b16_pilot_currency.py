@@ -197,3 +197,44 @@ def test_pdf_and_csv_state_the_pilot_currency(app_engine, client):  # type: igno
     assert b"Pilot fee USD 400.00" in pdf and b"refund threshold of USD 400.00" in pdf
     assert b"qualifying total USD 15.00 against USD 400.00" in pdf
     assert b"CAD" not in pdf
+
+
+def test_report_pdf_fits_a_row_already_paid_or_not_yet_paid():  # type: ignore[no-untyped-def]
+    """Found in the B16 browser walk: a flagged row whose bill is paid or unpaid was 99 characters
+    wide, so the PDF export answered 500 (only "Not known" fitted the 96)."""
+    from datetime import UTC, datetime
+
+    from matchdesk.reporting import export_pdf
+    from matchdesk.reporting.models import ReportFinding
+
+    r = BacktestReport(
+        period_start=date(2026, 10, 1),
+        period_end=date(2026, 10, 31),
+        version_no=1,
+        status="draft",
+        data_cutoff_at=datetime(2026, 11, 1, tzinfo=UTC),
+        totals={},
+        findings_amount=Decimal("50.00"),
+        not_received_amount=Decimal("0.00"),
+        unverified_amount=Decimal("0.00"),
+        qualifying_amount=Decimal("50.00"),
+        currency="USD",
+    )
+    rows = [
+        ReportFinding(
+            section="finding",
+            type="qty_over_received",
+            amount=Decimal("1234567.89"),
+            qualifying=True,
+            paid_status=paid,
+            snapshot={
+                "vendor_name": "Synthetic Supply Company of the North",
+                "doc_number": "SS-5102-LONG-NUMBER",
+                "po_number": "4510",
+                "line_no": 1,
+            },
+        )
+        for paid in ("paid", "unpaid", "unknown")
+    ]
+    pdf = export_pdf(r, rows, {"currency": "USD"})
+    assert pdf.startswith(b"%PDF") and b"Not yet paid" in pdf and b"Already paid" in pdf

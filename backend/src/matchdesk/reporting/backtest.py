@@ -860,7 +860,9 @@ PDF_SECTIONS = (
     ("open", "Undecided"),
     ("waived", "Waived"),
 )
-_COLS = (("Type", 24), ("Supplier", 22), ("Document", 13), ("PO", 7), ("Line", 4))
+# B16: 19 for the supplier, so a row with "Already paid" or "Not yet paid" fits the 96 characters
+# (it was 22, and such a row was 99 wide: the export answered 500).
+_COLS = (("Type", 24), ("Supplier", 19), ("Document", 13), ("PO", 7), ("Line", 4))
 
 
 def _pacific(at: datetime | None) -> str:
