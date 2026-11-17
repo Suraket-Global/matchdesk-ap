@@ -1,0 +1,694 @@
+<!doctype html>
+<html lang="en-CA">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MatchDesk: check supplier invoices against what arrived</title>
+<meta name="description" content="MatchDesk checks every supplier invoice line against the purchase order and your own receiving record, and lists only the lines that disagree. For wholesale distributors on QuickBooks Online.">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<meta property="og:title" content="MatchDesk: check supplier invoices against what arrived">
+<meta property="og:description" content="Every supplier invoice line checked against the PO and your receiving record. Start with a back-test of last month, refunded if it finds less than the fee.">
+<meta name="theme-color" content="#15253A">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700;800&family=Courier+Prime:wght@400;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#F2F4F6; --ink:#15253A; --ink-2:#4A5A6E; --line:#D5DBE2; --white:#FFFFFF;
+  --po:#FFFFFF; --rcv:#FFF1A8; --inv:#FCE1E7;
+  --red:#C4202F; --green:#1F7A5A; --navy:#1D3F8C;
+  --radius-sm:4px; --radius-lg:14px;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--ink);font:400 17px/1.6 "Schibsted Grotesk",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+img{max-width:100%;display:block}
+a{color:var(--navy)}
+:focus-visible{outline:3px solid var(--navy);outline-offset:3px;border-radius:2px}
+.wrap{max-width:1140px;margin:0 auto;padding:0 24px}
+h1,h2,h3{line-height:1.12;margin:0;letter-spacing:-.02em}
+h1{font-size:clamp(38px,5.4vw,64px);font-weight:800}
+h2{font-size:clamp(28px,3.4vw,40px);font-weight:800}
+h3{font-size:20px;font-weight:700;letter-spacing:-.01em}
+p{margin:0}
+.lead{font-size:20px;color:var(--ink-2);max-width:34em}
+.num{font-variant-numeric:tabular-nums}
+
+/* header */
+header.top{position:sticky;top:0;z-index:10;background:rgba(242,244,246,.92);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+header.top .wrap{display:flex;align-items:center;justify-content:space-between;height:64px}
+.brand{display:flex;align-items:center;gap:10px;font-weight:800;font-size:20px;color:var(--ink);text-decoration:none}
+.brand-mark{width:34px;height:34px;flex:none}
+.brand{font-size:22px;letter-spacing:-.03em}
+.wm-2{font-weight:500}
+.brand-light{color:#fff}
+nav.links{display:flex;gap:26px;align-items:center}
+nav.links a{color:var(--ink);text-decoration:none;font-weight:500;font-size:15px}
+nav.links a:hover{color:var(--navy)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:13px 22px;border-radius:999px;font:600 16px/1 "Schibsted Grotesk",sans-serif;text-decoration:none;cursor:pointer;border:2px solid var(--ink);transition:background .15s,color .15s}
+.btn-primary{background:var(--ink);color:#fff}
+.btn-primary:hover{background:var(--navy);border-color:var(--navy)}
+.btn-ghost{background:transparent;color:var(--ink)}
+.btn-ghost:hover{background:var(--white)}
+nav.links .btn{padding:10px 18px;font-size:15px;color:#fff}
+
+/* hero */
+.hero{padding:72px 0 88px;overflow-x:clip}
+.hero .wrap{display:grid;grid-template-columns:1.02fr 1fr;gap:56px;align-items:center}
+.hero h1{margin-bottom:22px}
+.hero .lead{margin-bottom:30px}
+.hero-ctas{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.trust{list-style:none;padding:0;margin:0;display:grid;gap:8px;color:var(--ink-2);font-size:15px}
+.trust li{display:flex;gap:10px;align-items:baseline}
+.trust li::before{content:"";flex:none;width:8px;height:8px;border-radius:50%;background:var(--green);transform:translateY(-1px)}
+
+/* the three carbon copies */
+.stack{position:relative;height:600px}
+.form{position:absolute;width:82%;border-radius:var(--radius-sm);box-shadow:0 1px 0 rgba(21,37,58,.08),0 14px 30px -12px rgba(21,37,58,.28);font-family:"Courier Prime",ui-monospace,monospace;font-size:14px;color:#2a2f36;padding:18px 20px 16px}
+.form .fh{display:flex;justify-content:space-between;font-family:"Schibsted Grotesk",sans-serif;font-weight:700;font-size:13px;color:var(--ink);border-bottom:1.5px solid rgba(21,37,58,.35);padding-bottom:8px;margin-bottom:10px}
+.form .fh span:last-child{font-weight:500;color:var(--ink-2)}
+.form table{width:100%;border-collapse:collapse}
+.form td{padding:3px 0}
+.form td:last-child{text-align:right}
+.form .row-key{font-weight:700;background:rgba(21,37,58,.06)}
+.form .row-key td{padding:5px 6px}
+.f-po{background:var(--po);top:0;left:0;transform:rotate(-2.2deg)}
+.f-rcv{background:var(--rcv);top:150px;left:14%;transform:rotate(1.4deg)}
+.f-inv{background:var(--inv);top:290px;left:5%;transform:rotate(-.8deg)}
+.sign{font-family:"Schibsted Grotesk",sans-serif;font-style:italic;color:var(--ink-2);font-size:13px;margin-top:6px}
+.verdict{position:absolute;right:0;bottom:0;width:58%;background:var(--white);border-left:5px solid var(--red);border-radius:var(--radius-sm);padding:14px 16px;box-shadow:0 18px 36px -16px rgba(21,37,58,.45)}
+.verdict b{display:block;color:var(--red);font-size:15px;margin-bottom:2px}
+.verdict .amt{font-size:28px;font-weight:800;letter-spacing:-.02em}
+.verdict small{display:block;color:var(--ink-2);font-size:13px;line-height:1.4;margin-top:2px}
+.caption-ex{position:absolute;left:0;bottom:-30px;font-size:13px;color:var(--ink-2)}
+@media (prefers-reduced-motion:no-preference){
+  .f-po{animation:drop .5s ease-out both}
+  .f-rcv{animation:drop .5s .15s ease-out both}
+  .f-inv{animation:drop .5s .3s ease-out both}
+  .verdict{animation:stamp .45s .85s cubic-bezier(.2,1.4,.4,1) both}
+  @keyframes drop{from{opacity:0;translate:0 -18px}to{opacity:1;translate:0 0}}
+  @keyframes stamp{from{opacity:0;scale:1.12}to{opacity:1;scale:1}}
+}
+
+/* sections */
+section{padding:88px 0}
+.sec-head{max-width:720px;margin-bottom:44px}
+.sec-head p{margin-top:14px;color:var(--ink-2);font-size:18px}
+.band{background:var(--white);border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+
+/* what slips through */
+.slips{display:grid;grid-template-columns:repeat(4,1fr);gap:0;border-top:2px solid var(--ink)}
+.slip{padding:22px 22px 6px 0;border-right:1px solid var(--line)}
+.slip+.slip{padding-left:22px}
+.slip:last-child{border-right:0}
+.slip h3{margin-bottom:8px}
+.slip p{color:var(--ink-2);font-size:16px}
+.slip .eg{display:block;margin-top:12px;font-family:"Courier Prime",monospace;font-size:14px;color:var(--ink)}
+
+
+/* try it */
+.tryit{display:grid;grid-template-columns:1.15fr .85fr;gap:28px;align-items:start}
+.calc{display:grid;gap:14px}
+.calc fieldset{margin:0;border:1px solid var(--line);border-radius:var(--radius-lg);background:var(--white);padding:16px 18px 18px;display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px}
+.calc legend{font-weight:700;padding:0 6px;margin-left:-6px}
+.calc .fs-rcv{background:#FFFBE3;border-color:#EADF9E}
+.calc .fs-inv{background:#FFF5F7;border-color:#F0C7D1}
+.calc input{font-variant-numeric:tabular-nums;text-align:right}
+.calc input[aria-invalid="true"]{border-color:var(--red)}
+.result{background:var(--ink);color:#fff;border-radius:var(--radius-lg);padding:26px;position:sticky;top:88px}
+.checks{list-style:none;margin:0;padding:0;display:grid;gap:14px}
+.checks li{display:grid;grid-template-columns:26px 1fr auto;gap:10px;align-items:start}
+.checks .ic{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;font-size:13px;font-weight:800;margin-top:2px}
+.checks .ok .ic{background:#2C8C68}
+.checks .bad .ic{background:var(--red)}
+.checks .info .ic{background:#5D6E86}
+.checks b{display:block;font-size:16px}
+.checks small{display:block;color:#AFBDCE;font-size:14px;line-height:1.45}
+.checks .amt{font-weight:700;white-space:nowrap}
+.total{display:flex;justify-content:space-between;align-items:baseline;border-top:1px solid #34496A;margin-top:20px;padding-top:16px;gap:12px}
+.total strong{font-size:30px;letter-spacing:-.02em}
+.total.zero strong{color:#7FD1AE}
+.calc-note{color:#AFBDCE;font-size:13px;margin-top:14px}
+@media (max-width:960px){.tryit{grid-template-columns:1fr}.result{position:static}}
+
+/* how it works: a real sequence */
+.steps{list-style:none;padding:0;margin:0;display:grid;grid-template-columns:repeat(3,1fr);gap:28px;counter-reset:s}
+.steps li{counter-increment:s;position:relative;padding-top:56px}
+.steps li::before{content:counter(s);position:absolute;top:0;left:0;width:40px;height:40px;border-radius:50%;border:2px solid var(--ink);display:grid;place-items:center;font-weight:800}
+.steps li::after{content:"";position:absolute;top:20px;left:52px;right:-16px;height:2px;background:var(--line)}
+.steps li:last-child::after{display:none}
+.steps h3{margin-bottom:8px}
+.steps p{color:var(--ink-2)}
+
+/* report shot */
+.shot{display:grid;grid-template-columns:.9fr 1.1fr;gap:56px;align-items:center}
+.shot figure{margin:0;border-radius:var(--radius-lg);overflow:hidden;border:1px solid var(--line);box-shadow:0 30px 60px -30px rgba(21,37,58,.45);background:#fff}
+.shot figcaption{font-size:13px;color:var(--ink-2);padding:10px 14px;border-top:1px solid var(--line)}
+.counts{list-style:none;padding:0;margin:28px 0 0;display:grid;gap:18px}
+.counts li{border-left:3px solid var(--ink);padding-left:16px}
+.counts b{display:block;font-size:18px}
+.counts span{color:var(--ink-2);font-size:16px}
+
+/* offer */
+.offer{background:var(--ink);color:#fff;border-radius:var(--radius-lg);padding:56px;display:grid;grid-template-columns:1.1fr .9fr;gap:48px;align-items:start}
+.offer h2{color:#fff}
+.offer .lead{color:#C9D3E0;margin-top:16px}
+.ticket{background:var(--rcv);color:var(--ink);border-radius:var(--radius-sm);padding:26px 26px 22px;transform:rotate(1.2deg);box-shadow:0 20px 40px -20px rgba(0,0,0,.6)}
+.ticket .price{font-size:52px;font-weight:800;letter-spacing:-.03em;line-height:1}
+.ticket .per{font-weight:600;margin:6px 0 16px}
+.ticket ul{margin:0 0 18px;padding-left:20px}
+.ticket li{margin-bottom:6px}
+.ticket .fine{font-size:14px;color:#5b5228;border-top:1.5px dashed rgba(21,37,58,.35);padding-top:12px}
+.offer-points{list-style:none;padding:0;margin:26px 0 0;display:grid;gap:14px}
+.offer-points li{padding-left:28px;position:relative;color:#E4EAF2}
+.offer-points li::before{content:"";position:absolute;left:0;top:9px;width:14px;height:2px;background:var(--rcv)}
+
+/* pricing */
+.plans{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
+.plan{background:var(--white);border:1px solid var(--line);border-radius:var(--radius-lg);padding:28px}
+.plan.mid{border:2px solid var(--ink)}
+.plan.included{margin-top:20px}
+.plan.included ul{grid-template-columns:1fr 1fr;column-gap:32px}
+@media (max-width:960px){.plan.included ul{grid-template-columns:1fr}}
+.plan .who{color:var(--ink-2);font-size:15px;margin:4px 0 18px}
+.plan .p{font-size:44px;font-weight:800;letter-spacing:-.03em;line-height:1}
+.plan .p small{font-size:16px;font-weight:500;color:var(--ink-2);letter-spacing:0}
+.plan ul{margin:20px 0 0;padding:0;list-style:none;display:grid;gap:9px;font-size:16px}
+.plan li{padding-left:22px;position:relative}
+.plan li::before{content:"";position:absolute;left:2px;top:9px;width:9px;height:5px;border-left:2px solid var(--green);border-bottom:2px solid var(--green);transform:rotate(-45deg)}
+.price-notes{margin-top:22px;color:var(--ink-2);font-size:15px;display:grid;gap:4px}
+.compare{margin-top:44px;width:100%;border-collapse:collapse;font-size:15px;background:var(--white);border-radius:var(--radius-lg);overflow:hidden;border:1px solid var(--line)}
+.compare th,.compare td{text-align:left;padding:12px 16px;border-bottom:1px solid var(--line);vertical-align:top}
+.compare th{background:#E8ECF1;font-weight:700}
+.compare tr:last-child td{border-bottom:0}
+.compare td:first-child{font-weight:600}
+.compare caption{caption-side:bottom;text-align:left;color:var(--ink-2);font-size:13px;padding-top:10px}
+
+/* fit */
+.fit{display:grid;grid-template-columns:1fr 1fr;gap:40px}
+.fit h3{margin-bottom:14px}
+.fit ul{margin:0;padding:0;list-style:none;display:grid;gap:12px}
+.fit li{padding-left:30px;position:relative}
+.fit .yes li::before,.fit .no li::before{position:absolute;left:0;top:0;font-weight:800;width:20px;text-align:center}
+.fit .yes li::before{content:"✓";color:var(--green)}
+.fit .no li::before{content:"✕";color:var(--red)}
+
+/* safety */
+.safe{display:grid;grid-template-columns:repeat(3,1fr);gap:36px}
+.safe h3{margin-bottom:8px}
+.safe p{color:var(--ink-2);font-size:16px}
+
+/* faq */
+.faq{max-width:820px}
+.faq details{border-bottom:1px solid var(--line);padding:4px 0}
+.faq summary{cursor:pointer;list-style:none;padding:18px 40px 18px 0;font-weight:700;font-size:18px;position:relative}
+.faq summary::-webkit-details-marker{display:none}
+.faq summary::after{content:"+";position:absolute;right:6px;top:14px;font-size:26px;font-weight:400;transition:transform .2s}
+.faq details[open] summary::after{transform:rotate(45deg)}
+.faq details p{padding:0 0 20px;color:var(--ink-2);max-width:42em}
+
+/* contact */
+.contact{display:grid;grid-template-columns:.9fr 1.1fr;gap:56px;align-items:start}
+form.ask{background:var(--white);border:1px solid var(--line);border-radius:var(--radius-lg);padding:30px;display:grid;gap:16px}
+.field{display:grid;gap:6px}
+.field label{font-weight:600;font-size:15px}
+.field .hint{font-size:13px;color:var(--ink-2)}
+.field input,.field select,.field textarea{font:inherit;font-size:16px;padding:11px 12px;border:1.5px solid #B9C3CE;border-radius:8px;background:#fff;color:var(--ink);width:100%}
+.field input:focus,.field select:focus,.field textarea:focus{outline:none;border-color:var(--navy);box-shadow:0 0 0 3px rgba(29,63,140,.18)}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.form-note{font-size:13px;color:var(--ink-2)}
+.err{color:var(--red);font-size:14px;font-weight:600;min-height:1em}
+
+footer{background:var(--ink);color:#C9D3E0;padding:48px 0 40px;font-size:14px;margin-top:40px}
+footer .wrap{display:grid;grid-template-columns:1.3fr 1fr;gap:32px}
+footer a{color:#fff}
+footer .legal{grid-column:1/-1;border-top:1px solid #2E4058;padding-top:20px;color:#93A2B5;font-size:13px}
+
+@media (max-width:960px){
+  .hero .wrap,.shot,.offer,.contact,.fit{grid-template-columns:1fr}
+  .stack{height:540px;max-width:520px}
+  .slips{grid-template-columns:1fr 1fr}
+  .slip:nth-child(2){border-right:0}
+  .slip:nth-child(3){padding-left:0}
+  .plans,.safe{grid-template-columns:1fr}
+  nav.links a:not(.btn){display:none}
+  .offer{padding:36px 26px}
+  .steps{grid-template-columns:1fr;gap:24px}
+  .steps li::after{display:none}
+  .compare-wrap{overflow-x:auto}
+}
+@media (max-width:560px){
+  body{font-size:16px}
+  .wrap{padding:0 16px}
+  .hero{padding:44px 0 72px}
+  section{padding:64px 0}
+  .slips{grid-template-columns:1fr}
+  .slip,.slip+.slip{padding:18px 0 4px;border-right:0;border-bottom:1px solid var(--line)}
+  .stack{height:540px}
+  .form{width:94%;font-size:13px;padding:14px}
+  .f-rcv{left:4%;top:150px}.f-inv{left:2%;top:290px}
+  .verdict{width:84%}
+  .row2{grid-template-columns:1fr}
+  .ticket .price{font-size:44px}
+  footer .wrap{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="#top" aria-label="MatchDesk home"><svg class="brand-mark" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="15" fill="#15253A"/><rect x="9" y="15" width="24" height="32" rx="3" fill="#FFFFFF" transform="rotate(-9 21 31)"/><rect x="20" y="15" width="24" height="32" rx="3" fill="#FFE66B" transform="rotate(-1 32 31)"/><rect x="31" y="16" width="24" height="32" rx="3" fill="#F7B6C6" transform="rotate(7 43 32)"/><path d="M7 33.5H57" stroke="#E5484D" stroke-width="4.5" stroke-linecap="round"/></svg><span>Match<span class="wm-2">Desk</span></span></a>
+    <nav class="links" aria-label="Main">
+      <a href="#try">Try a line</a>
+      <a href="#how">How it works</a>
+      <a href="#offer">Back-test</a>
+      <a href="#pricing">Pricing</a>
+      <a href="#faq">Questions</a>
+      <a class="btn btn-primary" href="#contact">Book a back-test</a>
+    </nav>
+  </div>
+</header>
+
+<main id="top">
+
+<section class="hero" aria-labelledby="h-hero">
+  <div class="wrap">
+    <div>
+      <h1 id="h-hero">Every supplier invoice line, checked against the PO and what actually arrived.</h1>
+      <p class="lead">MatchDesk lines up each invoice with your purchase order and your own receiving record, across every delivery and earlier invoice, and lists only the lines that disagree, with the documents to show your supplier.</p>
+      <div class="hero-ctas">
+        <a class="btn btn-primary" href="#contact">Book a back-test of last month</a>
+        <a class="btn btn-ghost" href="#how">See how it works</a>
+      </div>
+      <ul class="trust">
+        <li>For wholesale distributors on QuickBooks Online Plus and Advanced</li>
+        <li>Read-only: MatchDesk never changes anything in QuickBooks</li>
+        <li>Refunded if the back-test finds less than the fee</li>
+      </ul>
+    </div>
+
+    <div class="stack" role="img" aria-label="Example: a purchase order for 80 hex bolts, a receiving log showing 60 arrived, and invoices billing 100. MatchDesk flags 40 units billed above what arrived, CAD 168.00.">
+      <div class="form f-po">
+        <div class="fh"><span>Purchase order 4390</span><span>Fictional Fasteners Ltd</span></div>
+        <table class="num">
+          <tr><td>WS-M8 Washer M8</td><td>500 EA</td></tr>
+          <tr class="row-key"><td>HB-M8 Hex bolt M8 @ 4.20</td><td>80 EA</td></tr>
+          <tr><td>NT-M8 Nut M8</td><td>500 EA</td></tr>
+        </table>
+      </div>
+      <div class="form f-rcv">
+        <div class="fh"><span>Warehouse receiving log</span><span>28 Sep</span></div>
+        <table class="num">
+          <tr><td>PO 4390 WS-M8</td><td>500 EA</td></tr>
+          <tr class="row-key"><td>PO 4390 HB-M8</td><td>60 EA</td></tr>
+        </table>
+        <div class="sign">received by: J. Ortiz</div>
+      </div>
+      <div class="form f-inv">
+        <div class="fh"><span>Supplier invoices</span><span>FF-1002, FF-1003</span></div>
+        <table class="num">
+          <tr><td>FF-1002 HB-M8 @ 4.20</td><td>60 EA</td></tr>
+          <tr class="row-key"><td>FF-1003 HB-M8 @ 4.20</td><td>40 EA</td></tr>
+          <tr><td>Billed to date</td><td>100 EA</td></tr>
+        </table>
+      </div>
+      <div class="verdict">
+        <b>Invoiced above received</b>
+        <span class="amt">CAD 168.00</span>
+        <small>100 billed, 60 arrived: 40 EA × 4.20 on FF-1003</small>
+      </div>
+      <span class="caption-ex">Example from a synthetic demo month</span>
+    </div>
+  </div>
+</section>
+
+<section class="band" aria-labelledby="h-slips">
+  <div class="wrap">
+    <div class="sec-head">
+      <h2 id="h-slips">What gets paid without anyone noticing</h2>
+      <p>Your clerk compares an invoice with a PO. The errors that cost money hide across documents: a delivery two weeks ago, an invoice last month, a credit that never came.</p>
+    </div>
+    <div class="slips">
+      <div class="slip">
+        <h3>Short shipments</h3>
+        <p>The invoice bills the full order; the dock received part of it.</p>
+        <span class="eg">ordered 80 · received 60 · billed 80</span>
+      </div>
+      <div class="slip">
+        <h3>Price creep</h3>
+        <p>A unit price a few cents above the PO, line after line.</p>
+        <span class="eg">PO 4.20 · invoiced 4.38</span>
+      </div>
+      <div class="slip">
+        <h3>Billed twice</h3>
+        <p>The same goods on a second invoice, or a resent invoice with a new number.</p>
+        <span class="eg">FF-1004 = FF-1004-R</span>
+      </div>
+      <div class="slip">
+        <h3>Billed, never received</h3>
+        <p>An invoice for goods your receiving record does not show at all.</p>
+        <span class="eg">invoiced 25 · received 0</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="try" aria-labelledby="h-try">
+  <div class="wrap">
+    <div class="sec-head">
+      <h2 id="h-try">Check one invoice line yourself</h2>
+      <p>Pick a line from a recent invoice and fill in the four numbers your clerk would compare. This is the core rule MatchDesk runs on every line, across every delivery and earlier invoice on the PO.</p>
+    </div>
+    <div class="tryit">
+      <form class="calc" id="calc" aria-describedby="calc-note">
+        <fieldset>
+          <legend>Purchase order</legend>
+          <div class="field"><label for="c-ord">Quantity ordered</label><input id="c-ord" inputmode="decimal" value="80"></div>
+          <div class="field"><label for="c-pop">Price on the PO</label><input id="c-pop" inputmode="decimal" value="4.20"></div>
+        </fieldset>
+        <fieldset class="fs-rcv">
+          <legend>Your receiving record</legend>
+          <div class="field"><label for="c-rcv">Quantity that arrived</label><input id="c-rcv" inputmode="decimal" value="60"></div>
+        </fieldset>
+        <fieldset class="fs-inv">
+          <legend>Supplier invoices</legend>
+          <div class="field"><label for="c-prev">Already billed on earlier invoices</label><input id="c-prev" inputmode="decimal" value="60"></div>
+          <div class="field"><label for="c-qty">Quantity on this invoice</label><input id="c-qty" inputmode="decimal" value="40"></div>
+          <div class="field"><label for="c-ip">Price on this invoice</label><input id="c-ip" inputmode="decimal" value="4.20"></div>
+        </fieldset>
+      </form>
+      <div class="result" aria-live="polite">
+        <ul class="checks" id="checks"></ul>
+        <div class="total"><span>At risk on this invoice</span><strong id="c-total">CAD 0.00</strong></div>
+        <p class="calc-note" id="calc-note">Simplified: MatchDesk also nets credit notes, catches duplicates, applies your tolerances and unit conversions, and never counts the same units twice.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="how" aria-labelledby="h-how">
+  <div class="wrap">
+    <div class="sec-head">
+      <h2 id="h-how">How the back-test works</h2>
+      <p>You check one past month first. Nothing changes in your accounts and nobody needs your QuickBooks login.</p>
+    </div>
+    <ol class="steps">
+      <li>
+        <h3>You send last month</h3>
+        <p>The supplier invoices (PDFs), and exports of your purchase orders, bills and receiving records, into a folder your company owns.</p>
+      </li>
+      <li>
+        <h3>We match every line</h3>
+        <p>Each invoice line is checked against its PO line and your receiving record, counting partial deliveries, earlier invoices and credit notes on the same PO.</p>
+      </li>
+      <li>
+        <h3>You get the report</h3>
+        <p>Only the lines that disagree, each with its dollar amount and the documents behind it, within 15 business days. Your controller approves it.</p>
+      </li>
+    </ol>
+  </div>
+</section>
+
+<section class="band" aria-labelledby="h-report">
+  <div class="wrap shot">
+    <div>
+      <h2 id="h-report">A report you can put in front of a supplier</h2>
+      <p class="lead" style="margin-top:16px">Every flagged line names the invoice, the PO, the receiving entry and the rule it broke. Three numbers are kept apart so nobody overstates what was found.</p>
+      <ul class="counts">
+        <li><b>Flagged</b><span>Discrepancies the rules raised that no document, credit or receipt explains.</span></li>
+        <li><b>Confirmed by your controller</b><span>The ones you agree are real overcharges, at the amount you confirm.</span></li>
+        <li><b>Credit recovered</b><span>What the supplier actually credited or refunded.</span></li>
+      </ul>
+    </div>
+    <figure>
+      <img src="report.png" width="1172" height="844" loading="lazy" alt="MatchDesk report screen: flagged discrepancies by document with the amount flagged, the controller's confirmation and the credit recovered, plus the refund result for the pilot.">
+      <figcaption>The report screen, on a synthetic demo account</figcaption>
+    </figure>
+  </div>
+</section>
+
+<section id="offer" aria-labelledby="h-offer">
+  <div class="wrap">
+    <div class="offer">
+      <div>
+        <h2 id="h-offer">Start with last month. If it finds less than the fee, you get the fee back.</h2>
+        <p class="lead">The back-test is the whole sales pitch. Either it finds money your team paid without the goods or at the wrong price, or it shows your process already works, and you are refunded.</p>
+        <ul class="offer-points">
+          <li>The refund is decided on one approved version of the report, from a written rule agreed before we start.</li>
+          <li>Only evidence removes a finding: a credit note, a corrected invoice or a receiving record. A waiver never does.</li>
+          <li>Lines we cannot verify are shown separately and never counted for or against you.</li>
+        </ul>
+      </div>
+      <div class="ticket">
+        <div class="price num">CAD 500</div>
+        <div class="per">30-day pilot, paid once</div>
+        <ul>
+          <li>Back-test of last month's invoices</li>
+          <li>Live checking of new invoices for the rest of the 30 days</li>
+          <li>Approved report with PDF and CSV export</li>
+          <li>Weekly summary by email</li>
+        </ul>
+        <p class="fine"><a href="pilot-agreement.html" style="color:inherit">Read the pilot agreement</a>. Refunded in full if the qualifying discrepancies on the approved report total less than CAD 500. US accounts: the pilot is priced in USD; ask us.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="pricing" class="band" aria-labelledby="h-pricing">
+  <div class="wrap">
+    <div class="sec-head">
+      <h2 id="h-pricing">After the pilot: a monthly plan by invoice volume</h2>
+      <p>Nothing is billed until day 31, and only if you decide to continue. Every plan includes every feature; plans differ only in how many invoices are checked.</p>
+    </div>
+    <div class="plans">
+      <div class="plan">
+        <h3>Starter</h3>
+        <p class="who">Up to 300 invoices a month</p>
+        <div class="p num">CAD 249<small> /month</small></div>
+      </div>
+      <div class="plan mid">
+        <h3>Pro</h3>
+        <p class="who">Up to 800 invoices a month</p>
+        <div class="p num">CAD 449<small> /month</small></div>
+      </div>
+      <div class="plan">
+        <h3>Business</h3>
+        <p class="who">Up to 2,000 invoices a month</p>
+        <div class="p num">CAD 799<small> /month</small></div>
+      </div>
+    </div>
+    <div class="plan included">
+      <h3>Every plan includes</h3>
+      <ul>
+        <li>Three-way match on every invoice line, across partial deliveries, earlier invoices and credit notes</li>
+        <li>Invoice upload and email intake, with a review screen for anything that does not add up</li>
+        <li>Receiving file import with saved column mappings</li>
+        <li>Exception queue for clerks; approvals, tolerances and unit conversions for the controller</li>
+        <li>Approved reports with PDF and CSV export, and a weekly summary by email</li>
+        <li>Read-only QuickBooks Online connection, audit log and archive export</li>
+      </ul>
+    </div>
+    <div class="price-notes">
+      <p>Above your plan: CAD 0.60 per extra invoice or credit note. Annual billing: 15% off. Prices exclude GST/PST.</p>
+    </div>
+
+    <div class="compare-wrap">
+      <table class="compare">
+        <caption>Published prices read in November 2026; check each vendor's page before comparing.</caption>
+        <thead><tr><th scope="col">Option</th><th scope="col">Line-level three-way match</th><th scope="col">Published price</th></tr></thead>
+        <tbody>
+          <tr><td>MatchDesk</td><td>On every plan; purchasing stays in QuickBooks Online</td><td>From CAD 249 a month</td></tr>
+          <tr><td>BILL</td><td>On the Enterprise plan only</td><td>Enterprise: custom quote</td></tr>
+          <tr><td>Precoro</td><td>Yes, with purchasing moved into Precoro</td><td>From USD 499 a month, billed annually</td></tr>
+          <tr><td>Your team by hand</td><td>As far as time allows</td><td>Clerk hours each week</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section aria-labelledby="h-fit">
+  <div class="wrap">
+    <div class="sec-head">
+      <h2 id="h-fit">Is it a fit? Better to know before you pay.</h2>
+    </div>
+    <div class="fit">
+      <div class="yes">
+        <h3>It works when</h3>
+        <ul>
+          <li>You are a wholesale distributor (food, building supply, industrial) on QuickBooks Online Plus or Advanced.</li>
+          <li>Most purchases go through purchase orders.</li>
+          <li>Someone records the quantity that actually arrives: a warehouse log, receiver-signed slips, or item receipts entered at delivery.</li>
+          <li>You handle roughly 200 to 1,500 supplier invoices a month.</li>
+        </ul>
+      </div>
+      <div class="no">
+        <h3>It is not for you if</h3>
+        <ul>
+          <li>You use QuickBooks Desktop, Sage 50, or QuickBooks Online below Plus.</li>
+          <li>Few of your purchases have a PO.</li>
+          <li>You already run a three-way match tool.</li>
+          <li>Nobody records what arrives. Then we can still check prices and duplicates, but every line shows as "receipt absent", never as a pass.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="band" aria-labelledby="h-safe">
+  <div class="wrap">
+    <div class="sec-head">
+      <h2 id="h-safe">Your books stay yours</h2>
+    </div>
+    <div class="safe">
+      <div>
+        <h3>Read-only access</h3>
+        <p>MatchDesk only reads purchase orders, bills, vendor credits, vendors and items. It never writes to QuickBooks, and you can disconnect at any time.</p>
+      </div>
+      <div>
+        <h3>Separate and encrypted</h3>
+        <p>Each company's documents are kept apart from every other account. QuickBooks access tokens are encrypted and erased when you disconnect.</p>
+      </div>
+      <div>
+        <h3>Nothing passes on a guess</h3>
+        <p>No line is marked as matched without an independent receiving record. A document whose numbers do not add up goes to a person, not into the report.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="faq" aria-labelledby="h-faq">
+  <div class="wrap">
+    <div class="sec-head"><h2 id="h-faq">Questions controllers ask</h2></div>
+    <div class="faq">
+      <details>
+        <summary>Our clerk already checks invoices. Why would this find anything?</summary>
+        <p>Maybe it won't, and then you get your fee back and a clear answer. The errors a person misses are the ones spread across documents: a second partial invoice on the same PO, a delivery recorded two weeks earlier, a credit that was promised and never issued.</p>
+      </details>
+      <details>
+        <summary>We don't record receiving in QuickBooks.</summary>
+        <p>That's fine. A warehouse log or receiver-signed packing slips work too; you upload the file and map its columns once. What does not count is the quantity QuickBooks shows as billed against the PO, or a supplier's slip with no receiver's mark.</p>
+      </details>
+      <details>
+        <summary>Do you need our QuickBooks login for the back-test?</summary>
+        <p>No. For the back-test you export the reports into a folder your company owns. For live checking afterwards, your controller connects QuickBooks with Intuit's own sign-in, and MatchDesk gets read-only access.</p>
+      </details>
+      <details>
+        <summary>How exactly is the refund decided?</summary>
+        <p>On the approved report, we add up the qualifying discrepancies: invoiced above received or ordered, price beyond your tolerance, duplicates, unmatched charges, and goods invoiced but not received where your log covers the order. If the total is under the fee, the fee is refunded. The rule is written down before we start.</p>
+      </details>
+      <details>
+        <summary>We use BILL. Doesn't it do this?</summary>
+        <p>BILL lists automatic three-way matching on its custom-priced Enterprise plan; its lower plans list two-way matching. If you are on Enterprise and it covers your receiving records, you may not need us.</p>
+      </details>
+      <details>
+        <summary>How much will we save?</summary>
+        <p>We don't know until we look at your month, and nobody should promise you a number before that. That is why the first step is a back-test with a refund.</p>
+      </details>
+    </div>
+  </div>
+</section>
+
+<section id="contact" class="band" aria-labelledby="h-contact">
+  <div class="wrap contact">
+    <div>
+      <h2 id="h-contact">Book a 20-minute call about a back-test</h2>
+      <p class="lead" style="margin-top:16px">We look at one recent purchase order, its receiving entry and the invoice together. If they can be matched, we agree the back-test month and the refund rule.</p>
+    </div>
+    <form class="ask" id="ask" novalidate>
+      <div class="row2">
+        <div class="field"><label for="f-name">Your name</label><input id="f-name" name="name" autocomplete="name" required></div>
+        <div class="field"><label for="f-company">Company</label><input id="f-company" name="company" autocomplete="organization" required></div>
+      </div>
+      <div class="row2">
+        <div class="field"><label for="f-email">Work email</label><input id="f-email" name="email" type="email" autocomplete="email" required></div>
+        <div class="field"><label for="f-role">Your role</label>
+          <select id="f-role" name="role"><option>Controller</option><option>Owner</option><option>AP clerk</option><option>Bookkeeper or accountant</option><option>Other</option></select>
+        </div>
+      </div>
+      <div class="field"><label for="f-vol">Supplier invoices a month</label>
+        <select id="f-vol" name="volume"><option>Under 200</option><option selected>200 to 500</option><option>500 to 1,500</option><option>Over 1,500</option></select>
+      </div>
+      <div class="field"><label for="f-rcv">Who records the actual quantity when goods arrive?</label>
+        <span class="hint" id="f-rcv-hint">For example: a warehouse log, signed packing slips, or item receipts in QuickBooks</span>
+        <textarea id="f-rcv" name="receiving" rows="3" aria-describedby="f-rcv-hint"></textarea>
+      </div>
+      <p class="err" id="ask-err" role="alert"></p>
+      <button class="btn btn-primary" type="submit">Send request</button>
+      <p class="form-note">This opens your email app with your answers filled in. We use them only to reply to you.</p>
+    </form>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <div>
+      <a class="brand brand-light" href="#top"><svg class="brand-mark" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="15" fill="#24395A"/><rect x="9" y="15" width="24" height="32" rx="3" fill="#FFFFFF" transform="rotate(-9 21 31)"/><rect x="20" y="15" width="24" height="32" rx="3" fill="#FFE66B" transform="rotate(-1 32 31)"/><rect x="31" y="16" width="24" height="32" rx="3" fill="#F7B6C6" transform="rotate(7 43 32)"/><path d="M7 33.5H57" stroke="#E5484D" stroke-width="4.5" stroke-linecap="round"/></svg><span>Match<span class="wm-2">Desk</span></span></a>
+      <p style="margin-top:12px;max-width:34em">Three-way match for wholesale distributors on QuickBooks Online.</p>
+    </div>
+    <div>
+      <p><span data-cfg="legalName"></span><br><span data-cfg="address"></span></p>
+      <p style="margin-top:8px"><a data-cfg-mail href="#"></a></p>
+      <p style="margin-top:8px"><a href="privacy.html">Privacy notice</a> · <a href="terms.html">Terms of service</a> · <a href="pilot-agreement.html">Pilot agreement</a></p>
+    </div>
+    <p class="legal">QuickBooks is a trademark of Intuit Inc. MatchDesk is an independent product and is not affiliated with or endorsed by Intuit. Figures on this page come from a synthetic demo account.</p>
+  </div>
+</footer>
+
+<script src="site.js"></script>
+<script>
+
+// ---- one-line check (same rule order as the product: quantity first, then price on the rest) ----
+(() => {
+  const ids = ["c-ord","c-pop","c-rcv","c-prev","c-qty","c-ip"];
+  const el = Object.fromEntries(ids.map(i => [i, document.getElementById(i)]));
+  const cents = n => Math.round(n * 100);
+  const money = c => "CAD " + (c / 100).toLocaleString("en-CA", {minimumFractionDigits: 2, maximumFractionDigits: 2});
+  const qty = n => Number.isInteger(n) ? String(n) : n.toFixed(2);
+  const read = i => { const v = el[i].value.replace(/,/g, "").trim(); const n = v === "" ? NaN : Number(v); const bad = !isFinite(n) || n < 0; el[i].setAttribute("aria-invalid", bad); return bad ? null : n; };
+  function run() {
+    const [ord, pop, rcv, prev, q, ip] = ids.map(read);
+    const out = document.getElementById("checks"), tot = document.getElementById("c-total");
+    if ([ord, pop, rcv, prev, q, ip].some(v => v === null)) { out.innerHTML = '<li class="info"><span class="ic">!</span><span><b>Enter numbers of zero or more</b><small>Use digits only, for example 1,000 or 4.20.</small></span><span></span></li>'; tot.textContent = "CAD 0.00"; return; }
+    const rows = []; let risk = 0;
+    const billed = prev + q;
+    const overRcv = Math.min(q, Math.max(0, billed - rcv));
+    if (rcv === 0 && q > 0) rows.push(["bad", "Receipt absent", "Your record shows nothing arrived on this PO line. Never passed; a finding where your log covers the order.", cents(q * ip)]);
+    else if (overRcv > 0) rows.push(["bad", "Invoiced above received", qty(billed) + " billed to date, " + qty(rcv) + " arrived: " + qty(overRcv) + " × " + ip.toFixed(2) + " on this invoice.", cents(overRcv * ip)]);
+    else rows.push(["ok", "Quantity matches what arrived", qty(billed) + " billed to date, " + qty(rcv) + " arrived.", 0]);
+    const counted = rcv === 0 ? q : overRcv;
+    if (billed > ord) rows.push(["info", "Invoiced above ordered", qty(billed) + " billed against " + qty(ord) + " ordered. Same units as above, so not counted twice.", null]);
+    const diff = ip - pop, rest = q - counted;
+    if (diff > 0 && rest > 0) rows.push(["bad", "Price above the PO", qty(rest) + " × (" + ip.toFixed(2) + " − " + pop.toFixed(2) + ").", cents(rest * diff)]);
+    else rows.push(["ok", "Price matches the PO", diff < 0 ? "Invoiced below the PO price." : "Invoice price " + ip.toFixed(2) + ", PO " + pop.toFixed(2) + ".", 0]);
+    out.innerHTML = rows.map(([c, t, d, a]) => { if (a) risk += a; return '<li class="' + c + '"><span class="ic" aria-hidden="true">' + (c === "ok" ? "✓" : c === "bad" ? "✕" : "i") + '</span><span><b>' + t + '</b><small>' + d + '</small></span><span class="amt">' + (a ? money(a) : "") + '</span></li>'; }).join("");
+    tot.textContent = money(risk);
+    tot.parentElement.classList.toggle("zero", risk === 0);
+  }
+  ids.forEach(i => el[i].addEventListener("input", run));
+  run();
+})();
+
+document.getElementById("ask").addEventListener("submit", e => {
+  e.preventDefault();
+  const f = e.target, err = document.getElementById("ask-err");
+  const missing = ["name", "company", "email"].filter(n => !f[n].value.trim());
+  if (missing.length || !f.email.checkValidity()) {
+    err.textContent = missing.length ? "Fill in your name, company and work email." : "Enter a work email like name@company.com.";
+    (f[missing[0]] || f.email).focus();
+    return;
+  }
+  err.textContent = "";
+  const body = [
+    "Name: " + f.name.value, "Company: " + f.company.value, "Email: " + f.email.value,
+    "Role: " + f.role.value, "Supplier invoices a month: " + f.volume.value,
+    "Who records receiving: " + (f.receiving.value || "(not answered)")
+  ].join("\n");
+  location.href = "mailto:" + CONFIG.email + "?subject=" + encodeURIComponent("Back-test request: " + f.company.value) + "&body=" + encodeURIComponent(body);
+});
+</script>
+</body>
+</html>
