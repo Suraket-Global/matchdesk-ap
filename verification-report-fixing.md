@@ -1229,6 +1229,34 @@ Source: five bugs found while recording the product tour video. Branch `feat/b15
 
 ### B15 left, and why
 
-- **A USD account's pilot terms read in CAD** while its report figures are in USD. The pilot fee is CAD by decision (Decision.md section 5); comparing a USD qualifying total with a CAD threshold is a commercial question for the owner, not changed here.
+- **A USD account's pilot terms read in CAD** while its report figures are in USD. The pilot fee is CAD by decision (Decision.md section 5); comparing a USD qualifying total with a CAD threshold is a commercial question for the owner, not changed here. Resolved in B16 after the owner's decision (section "B16 2026-11-17").
 - **Approval status "superseded"** was not added: a closed late-receiving approval uses the existing `withdrawn` status, which needs no migration and keeps the row as history.
+
+## B16 2026-11-17
+
+Source: the owner decided (2026-11-17) that USD accounts are in scope and that the pilot fee is set per account in its own currency (Decision.md section 5); this closes the first item of "B15 left". Branch `feat/b16-pilot-currency`, migration 0028. Each change was first covered by a test that fails on B15 (`main`). No currency is converted and no USD price is stated anywhere: the USD amount is the owner's to set. No write to QuickBooks; the sandbox accounts, `matchdesk_dev` and the dev stack on 5173/8101 were not touched; no secret was printed or committed. All data synthetic.
+
+| Change | Before | Now | Test |
+|---|---|---|---|
+| Pilot record carries fee and currency | `price` and `refund_threshold` with no currency; read as CAD everywhere | `pilot_engagements.currency` (default CAD, so every earlier record stays CAD 500), always set to the account's currency on save (`reporting.save_pilot`); the threshold is set to the fee (Decision.md 5.1) and a different threshold is refused (422); fee more than 0, at most two decimals (422 otherwise, never rounded into shape); fee, currency and threshold fixed once the governing version is set (code 409 and the extended trigger) | `test_a_usd_account_has_a_usd_pilot_and_its_refund_is_evaluated_in_usd` |
+| Default fee | CAD 500 for every account | CAD 500 for a CAD account only; another currency has no default, so creating the record without a fee is refused naming the currency | same; `test_a_cad_account_is_unchanged_at_cad_500` |
+| Refund evaluation in one currency | the CAD threshold compared with a USD total | `backtest_reports.currency` stored when a version is drafted (null before B16, read as the account's); `refund_evaluation` and `set_governing` refuse (409, "never converts currencies") when the report's currency differs from the pilot's; a non-CAD account with no pilot record has no threshold (409); the answer names `currency` and `threshold_currency` | `test_mismatched_currencies_are_refused_never_converted`, `test_a_usd_account_without_a_pilot_record_has_no_threshold` |
+| Every place the fee, threshold or result is shown | "CAD" hard-coded (`cad()`, PDF "Price CAD", S-18 labels) | S-18 "Pilot fee (USD)" with no default outside CAD, threshold shown as the fee, a CAD record on a USD account restated; S-03, S-13 section 7, S-18 list and summary in the pilot's currency; S-13 states a report and pilot in two currencies and offers no governing choice; PDF "Pilot fee USD …, refund threshold of USD …" and the refund result; CSV columns `currency`, `pilot_fee`, `pilot_currency`, `refund_threshold`, `refund_result` and `currency` on each row; audit `pilot.created`/`updated`/`governing_set` carry `currency`. The weekly email states no fee or threshold, so it is unchanged | `test_pdf_and_csv_state_the_pilot_currency`; `b16-pilot-currency.test.tsx` (6, all failing on B15) |
+| Found in the browser walk: report PDF answered 500 | a flagged row whose bill is "Already paid" or "Not yet paid" was 99 characters wide (only "Not known" fitted the 96), so the export's width check failed; present since B14, not caused by B16 | supplier column 19 wide instead of 22 (long names still wrap whole) | `test_report_pdf_fits_a_row_already_paid_or_not_yet_paid` (fails with 22); `test_b14_majors` M4 adjusted to the narrower column |
+
+### B16 commands and results (from `matchdesk-ap/`)
+
+| Command | Result |
+|---|---|
+| `make test` | 467 passed (461 before B16; 6 new in `test_b16_pilot_currency.py`, 5 of them failing on B15 and the sixth with the old column width; `test_b7_pieces` now sets the threshold through the fee) |
+| `make check` | passed |
+| Web type check, ESLint, Vitest, production build (`make web-check`) | passed; Vitest 205 (199 before; 6 new) |
+| `cd web && npx playwright test` with the tracked specs (own stack `matchdesk_e2e`) | 22 passed; `matchdesk_dev` unchanged by the run |
+| In-app browser, isolated "shots" stack (`matchdesk_shots`, API 8103, web 5175), preloaded demo tenant, torn down afterwards | CAD account: S-18 "Pilot fee (CAD)" 500.00, threshold CAD 500.00. Tenant set to USD in that database: S-18 "Pilot fee (USD)" empty with "Enter the pilot fee in USD" and "This record is in CAD (CAD 500.00) and the account is in USD"; 400 entered and saved (version 2, "USD 400.00 pilot"). Controller: S-03 "USD 400.00 … Threshold: USD 400.00, the pilot fee". New October draft: section 7 in USD; CSV `USD,400.00,USD,400.00,Not decided`; PDF "Pilot fee USD 400.00", no "CAD" (after the column fix; before it the PDF answered 500). Draft marked CAD in that database: section 7 says the report is in CAD and the terms in USD and offers no governing choice |
+
+### B16 left, and why
+
+- **The USD fee itself** is not set anywhere: it is the owner's to set per account on S-18 (Decision.md section 5).
+- **Report screens other than section 7** still label a report's figures with the account's currency (B15), not the version's stored `currency`; they differ only if an account's currency changes after a version was drafted.
+- **Decision.md 5.1 point 4** still reads "CAD 500" as the proposal's example; the section 5 row states that the threshold is the fee in the account's currency.
 

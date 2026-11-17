@@ -185,7 +185,16 @@ The account "Sandbox Distributor CA (Intuit sandbox)" (currency CAD) is connecte
 2. **Tolerances save twice in a row.** After a save the form shows stored values without trailing zeros (0.01, not 0.010000) and the next save is accepted; a value with more than 4 significant decimals is still refused.
 3. **A PNG or JPEG invoice is shown on S-07** as an image with zoom, **Fit width**, expand and download. It still waits under **Needs review**, because the local reader reads text PDFs only.
 4. **Voiding a receiving import closes its pending late-receiving approval** ("approval withdrawn" in the audit log); nothing is approved, and the report is no longer blocked by it.
-5. **Money carries the account's currency.** On the USD sandbox account the screens, the weekly email and the report PDF say USD (for example "total in QuickBooks USD 205.00"), and USD invoices are matched instead of stopping as "currency not supported". The pilot price and refund threshold stay in CAD.
+5. **Money carries the account's currency.** On the USD sandbox account the screens, the weekly email and the report PDF say USD (for example "total in QuickBooks USD 205.00"), and USD invoices are matched instead of stopping as "currency not supported". Since B16 the pilot fee and refund threshold follow the account's currency too (section 17).
+
+## 17. What changed in B16 (pilot fee in the account's currency)
+
+The owner decided that USD accounts are in scope (Decision.md section 5). The pilot record now carries its fee **and currency**, always the account's, and the refund threshold is the fee in that currency (Decision.md 5.1).
+
+1. **A CAD account is unchanged.** On the demo account S-18 shows **Pilot fee (CAD)** with 500.00 and **Refund threshold** CAD 500.00; S-03 and S-13 section 7 read "CAD 500.00".
+2. **A USD account has a USD pilot.** On a USD account (the USD sandbox account, or any account whose currency is USD) S-18 shows **Pilot fee (USD)** with no amount: there is no USD default, so enter the fee from the signed terms (more than 0, at most two decimals) and **Create pilot record**. The threshold beside it repeats the fee. S-03, S-13 section 7, the report PDF and CSV (`currency`, `pilot_fee`, `pilot_currency`, `refund_threshold`, `refund_result`) and the audit log then say USD.
+3. **Never converted, never mixed.** A pilot record created before B16 is CAD 500. On an account now in USD, S-18 says "This record is in CAD (CAD 500.00) and the account is in USD" and asks for the USD fee; until then S-13 section 7 states that the report is in USD and the terms in CAD, offers no governing choice, and the refund evaluation is refused with that reason. Once a governing version is chosen, the fee and its currency cannot change.
+4. **The weekly email** states no pilot fee or threshold, so it is unchanged (it already uses the account's currency since B15).
 
 ## Not built yet (each needs an outside account; the screens say so)
 
