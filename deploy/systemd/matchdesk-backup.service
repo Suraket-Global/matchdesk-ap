@@ -1,0 +1,10 @@
+[Unit]
+Description=MatchDesk daily backup (database and file volume, encrypted)
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/matchdesk/app/deploy/backup.sh
+Nice=10
+IOSchedulingClass=idle

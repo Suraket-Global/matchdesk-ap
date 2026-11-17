@@ -1,0 +1,192 @@
+# B18: MatchDesk on one server (TRD section 7). Run from /opt/matchdesk (see deploy/README.md):
+#   docker compose --env-file /opt/matchdesk/.env -f /opt/matchdesk/app/deploy/compose.yml <command>
+# Every published port is bound to 127.0.0.1: Docker's published ports bypass ufw, so nothing here is
+# reachable from outside the server. B19 puts a TLS proxy in front of web on 80/443.
+name: matchdesk
+
+x-app-env: &app-env
+  MATCHDESK_ENV: production
+  MATCHDESK_LOG_LEVEL: INFO
+  MATCHDESK_DATABASE_URL: postgresql+psycopg://matchdesk_app:${MATCHDESK_APP_DB_PASSWORD:?set in .env}@db:5432/matchdesk
+  MATCHDESK_MIGRATION_DATABASE_URL: postgresql+psycopg://matchdesk_owner:${MATCHDESK_OWNER_DB_PASSWORD:?set in .env}@db:5432/matchdesk
+  # Public origin of the web app; sign-in links are built from it. Until B19 the SSH tunnel address.
+  MATCHDESK_APP_BASE_URL: ${MATCHDESK_APP_BASE_URL:?set in .env}
+  # Only the web container (fixed address below) may set X-Forwarded-For.
+  MATCHDESK_TRUSTED_PROXIES: 172.30.18.10
+  MATCHDESK_SESSION_KEY: ${MATCHDESK_SESSION_KEY:?set in .env}
+  MATCHDESK_TOKEN_KEY: ${MATCHDESK_TOKEN_KEY:?set in .env}
+  MATCHDESK_TOKEN_KEY_ID: ${MATCHDESK_TOKEN_KEY_ID:-k1}
+  MATCHDESK_INBOUND_SIGNING_KEY: ${MATCHDESK_INBOUND_SIGNING_KEY:?set in .env}
+  MATCHDESK_BLOB_BACKEND: local
+  MATCHDESK_BLOB_ROOT: /data/blobs
+  # Mail: the temporary Mailpit container until the owner's SMTP account is set in .env.
+  MATCHDESK_SMTP_HOST: ${MATCHDESK_SMTP_HOST:-mailpit}
+  MATCHDESK_SMTP_PORT: ${MATCHDESK_SMTP_PORT:-1025}
+  MATCHDESK_SMTP_STARTTLS: ${MATCHDESK_SMTP_STARTTLS:-false}
+  MATCHDESK_SMTP_USERNAME: ${MATCHDESK_SMTP_USERNAME:-}
+  MATCHDESK_SMTP_PASSWORD: ${MATCHDESK_SMTP_PASSWORD:-}
+  MATCHDESK_MAIL_FROM: ${MATCHDESK_MAIL_FROM:-MatchDesk <no-reply@matchdesk.invalid>}
+  MATCHDESK_QBO_MODE: recorded
+  MATCHDESK_EXTRACTOR: local
+  MATCHDESK_INBOUND_PROVIDER: local
+
+services:
+  db:
+    image: postgres:16-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: matchdesk
+      POSTGRES_USER: matchdesk_owner
+      POSTGRES_PASSWORD: ${MATCHDESK_OWNER_DB_PASSWORD:?set in .env}
+      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U matchdesk_owner -d matchdesk"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  migrate:
+    image: matchdesk-app:${MATCHDESK_TAG:?set in .env}
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    command: ["python", "/app/deploy/migrate.py"]
+    environment:
+      <<: *app-env
+      MATCHDESK_APP_DB_PASSWORD: ${MATCHDESK_APP_DB_PASSWORD:?set in .env}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    image: matchdesk-app:${MATCHDESK_TAG:?set in .env}
+    restart: unless-stopped
+    command: ["python", "-m", "matchdesk.api"]
+    environment: *app-env
+    volumes:
+      - blobs:/data/blobs
+    ports:
+      - "127.0.0.1:8201:8101"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      mailpit:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8101/readyz', timeout=4).status == 200 else 1)"]
+      interval: 15s
+      timeout: 6s
+      retries: 5
+      start_period: 20s
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+
+  worker:
+    image: matchdesk-app:${MATCHDESK_TAG:?set in .env}
+    restart: unless-stopped
+    command: ["python", "-m", "matchdesk.worker"]
+    environment: *app-env
+    volumes:
+      - blobs:/data/blobs
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    # TRD 8.7: parsing runs under a 1 GB memory limit.
+    mem_limit: 1g
+    healthcheck:
+      # The worker has no port: healthy when its process is alive and the database answers as the
+      # application role.
+      test: ["CMD", "python", "-c", "import os,psycopg; psycopg.connect(os.environ['MATCHDESK_DATABASE_URL'].replace('+psycopg',''), connect_timeout=4).close()"]
+      interval: 30s
+      timeout: 8s
+      retries: 3
+      start_period: 15s
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+
+  web:
+    image: matchdesk-web:${MATCHDESK_TAG:?set in .env}
+    build:
+      context: ..
+      dockerfile: deploy/web.Dockerfile
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8202:8080"   # app
+      - "127.0.0.1:8203:8081"   # landing page
+    depends_on:
+      api:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      default:
+        ipv4_address: 172.30.18.10
+
+  # Temporary, until the owner's SMTP account is configured (then remove it and set MATCHDESK_SMTP_*).
+  mailpit:
+    image: axllent/mailpit:v1.27
+    restart: unless-stopped
+    environment:
+      MP_MAX_MESSAGES: 500
+    ports:
+      - "127.0.0.1:8225:8025"   # web inbox only; SMTP (1025) stays inside the Compose network
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # Synthetic demo account (docs/PLAY.md), run by hand only: `--profile demo run --rm demo-seed`.
+  # seed_demo.py refuses MATCHDESK_ENV=production, so this one-shot runs with MATCHDESK_ENV=demo;
+  # the api and worker stay in production. Remove the demo account before the first real account.
+  # Its output (with the demo operator's TOTP secret) goes to a root-only file, never to a log.
+  demo-seed:
+    image: matchdesk-app:${MATCHDESK_TAG:?set in .env}
+    profiles: ["demo"]
+    command: ["python", "scripts/seed_demo.py", "--preload", "--files-dir", "/tmp/play"]
+    environment:
+      <<: *app-env
+      MATCHDESK_ENV: demo
+    volumes:
+      - blobs:/data/blobs
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: "no"
+    tmpfs:
+      - /tmp
+    networks:
+      - default
+
+  # The demo operator's current one-time code (30 s), for signing in to the operator console.
+  operator-code:
+    image: matchdesk-app:${MATCHDESK_TAG:?set in .env}
+    profiles: ["demo"]
+    command: ["python", "scripts/operator_code.py"]
+    environment:
+      <<: *app-env
+      MATCHDESK_ENV: demo
+    restart: "no"
+    networks:
+      - default
+
+volumes:
+  pgdata:
+  blobs:
+
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 172.30.18.0/24
+          # Dynamic addresses from the upper half; web keeps its fixed 172.30.18.10.
+          ip_range: 172.30.18.128/25

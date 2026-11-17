@@ -1,0 +1,15 @@
+# Build context is the repository root; only what deploy/web.Dockerfile copies is needed.
+**
+!web/**
+!landing/**
+!deploy/nginx.conf
+!deploy/landing-csp.mjs
+web/node_modules
+web/dist
+web/test-results
+web/playwright-report
+web/shots/.run.json
+web/e2e/.run.json
+**/*.tsbuildinfo
+**/.env
+**/.env.*

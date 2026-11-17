@@ -1,0 +1,13 @@
+# Build context is the repository root; only what deploy/Dockerfile copies is needed.
+**
+!backend/pyproject.toml
+!backend/alembic.ini
+!backend/migrations/**
+!backend/src/**
+!backend/fixtures/**
+!backend/scripts/**
+!deploy/migrate.py
+**/__pycache__
+**/*.pyc
+**/.env
+**/.env.*
