@@ -8,7 +8,7 @@ import { apiQuery, describeScope, readScope } from "../lib/queue";
 import { pickException } from "../lib/matchview";
 import { useSession } from "../app/session";
 import { Banner, ErrorState, Loading, StatusChip, toast, usePageTitle } from "../components/ui";
-import { cad, money, price, qty, subtract, toCents } from "../lib/decimal";
+import { cur, money, price, qty, subtract, toCents } from "../lib/decimal";
 import { day, safePath } from "../lib/format";
 import { CONTROLLER_ONLY_CODES, RESOLUTION_CODES, RESOLUTION_HINTS, SUB_REASONS, typeWord, zeroCounted } from "../lib/words";
 import { chipFor } from "./Exceptions";
@@ -22,7 +22,7 @@ const PdfViewer = lazy(() => import("../components/PdfViewer"));
 
 const ABSENT_TEXT: Record<string, (amount: string) => string> = {
   not_received: (a) =>
-    `Your receiving log covers this order and shows nothing for this line. ${cad(a)} was invoiced. This is listed as "not received" unless you attach receiving evidence or tie a credit note.`,
+    `Your receiving log covers this order and shows nothing for this line. ${cur(a)} was invoiced. This is listed as "not received" unless you attach receiving evidence or tie a credit note.`,
   no_evidence: () =>
     "No receiving evidence covers this purchase order. MatchDesk cannot say whether the goods arrived. Attach a warehouse record or a delivery document your receiver signed. If you know the goods never came, your controller can confirm that.",
   supplier_slip_only: () =>
@@ -46,7 +46,7 @@ function chipWord(e: ExceptionItem): string {
 
 /** What a resolution does to the report and the queue, in words, before it is submitted (B8). */
 function consequence(code: string, amount: string | null, needsApproval: boolean): string {
-  const a = amount && amount !== "0.00" ? cad(amount) : "The amount";
+  const a = amount && amount !== "0.00" ? cur(amount) : "The amount";
   switch (code) {
     case "confirmed_overbilling":
       return `${a} stays in the back-test report as a finding the supplier owes. The exception closes for the queue.`;
@@ -74,11 +74,11 @@ function consequence(code: string, amount: string | null, needsApproval: boolean
 /** The last cell of the ledger strip: what the calculation comes to now (B14, acceptance m8). */
 export function ledgerTotal(exc: ExceptionItem): { label: string; value: string; open: boolean } {
   const variance = exc.variance_amount ?? exc.reported_amount;
-  if (exc.status === "resolved" && exc.resolution_code === "resolved_by_credit") return { label: "Credited", value: cad(variance), open: false };
-  if (exc.status === "waived") return { label: "Waived", value: cad(variance), open: false };
-  if (exc.status === "resolved") return { label: "Resolved", value: cad(variance), open: false };
-  if (zeroCounted(exc)) return { label: "Adds nothing", value: "CAD 0.00", open: false };
-  return { label: "Exposure", value: cad(exc.reported_amount ?? exc.variance_amount), open: true };
+  if (exc.status === "resolved" && exc.resolution_code === "resolved_by_credit") return { label: "Credited", value: cur(variance), open: false };
+  if (exc.status === "waived") return { label: "Waived", value: cur(variance), open: false };
+  if (exc.status === "resolved") return { label: "Resolved", value: cur(variance), open: false };
+  if (zeroCounted(exc)) return { label: "Adds nothing", value: cur("0.00"), open: false };
+  return { label: "Exposure", value: cur(exc.reported_amount ?? exc.variance_amount), open: true };
 }
 
 /** The calculation of one exception as a ledger line, each figure from the stored match result, the
@@ -108,7 +108,7 @@ function Ledger({ line, exc, here }: { line: InvoiceLine; exc: ExceptionItem; he
         ) : null,
     });
     cells.push({ k: "Excess", v: u(subtract(m.qty_invoiced_cum_net, received)), op: "=", tone: "bad" });
-    cells.push({ k: "Unit price", v: cad(m.po_unit_price), op: "×" });
+    cells.push({ k: "Unit price", v: cur(m.po_unit_price), op: "×" });
   } else if (exc.type === "qty_over_ordered" && m.qty_invoiced_cum_net && m.qty_ordered) {
     cells.push({ k: "Billed to date", v: u(m.qty_invoiced_cum_net) });
     cells.push({ k: "Ordered", v: u(m.qty_ordered), op: "−", note: po ? `PO ${po.po_number} line ${po.line_no ?? ""}` : null });
@@ -326,7 +326,7 @@ export function MatchViewPage() {
             {current && !current.invoice_line_id ? <span className="h-sub"> whole document</span> : line ? <span className="h-sub"> line {line.line_no}</span> : null}
           </h1>
           <p className="lede">
-            {inv.vendor_name ?? "Supplier not identified"}, dated {day(inv.doc_date)}, total <span className="money">{cad(inv.total)}</span>.{" "}
+            {inv.vendor_name ?? "Supplier not identified"}, dated {day(inv.doc_date)}, total <span className="money">{cur(inv.total)}</span>.{" "}
             {inv.qbo_bill ? `QuickBooks bill ${inv.qbo_bill.doc_number}: ${inv.qbo_bill.paid_status}.` : "No QuickBooks bill found."}
           </p>
         </div>
@@ -367,7 +367,7 @@ export function MatchViewPage() {
           {docExcs.map((e) => (
             <p key={e.id}>
               {typeWord(e.type)}
-              {money(e.reported_amount ?? e.variance_amount) ? ` (${cad(e.reported_amount ?? e.variance_amount)})` : ""} {chipFor(e)}{" "}
+              {money(e.reported_amount ?? e.variance_amount) ? ` (${cur(e.reported_amount ?? e.variance_amount)})` : ""} {chipFor(e)}{" "}
               {/* B14 (M1): an exception on the whole document is opened by name, never by chance. */}
               {current?.id === e.id ? (
                 <span className="small muted">Shown in the action panel.</span>
@@ -436,7 +436,7 @@ export function MatchViewPage() {
                         ? `(${chipWord(e)})`
                         : zeroCounted(e)
                           ? `(by ${qty(e.variance_qty)})`
-                          : money(e.reported_amount ?? e.variance_amount) && `(${cad(e.reported_amount ?? e.variance_amount)})`}
+                          : money(e.reported_amount ?? e.variance_amount) && `(${cur(e.reported_amount ?? e.variance_amount)})`}
                   </span>
                 ))}
               </div>
@@ -600,7 +600,7 @@ export function MatchViewPage() {
               <div className="panel-body">
                 <div>
                   <div className="muted small">{zeroCounted(current) ? "Adds nothing" : "Value"}</div>
-                  <div className="amount">{zeroCounted(current) ? "CAD 0.00" : amount ? cad(amount) : "—"}</div>
+                  <div className="amount">{zeroCounted(current) ? cur("0.00") : amount ? cur(amount) : "—"}</div>
                   {zeroCounted(current) && (
                     <div className="small muted">
                       {current.invoice_line_id ? "The line's amount is counted under another exception." : "The document's amount is already counted on its lines."}
@@ -699,7 +699,7 @@ export function MatchViewPage() {
                   <dt>Invoice price</dt>
                   <dd>{price(line.unit_price)}</dd>
                   <dt>Amount</dt>
-                  <dd>{cad(line.amount)}</dd>
+                  <dd>{cur(line.amount)}</dd>
                 </dl>
               )}
               {po ? (

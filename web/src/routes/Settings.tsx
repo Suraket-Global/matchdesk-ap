@@ -6,7 +6,7 @@ import type { Invitation, Page, SupportGrant, Tolerance, UserRow, Vendor } from 
 import { useSession } from "../app/session";
 import { SETTINGS_NAV } from "../app/routes";
 import { Banner, Dialog, ErrorState, Field, Loading, PageHead, StatusChip, toast, usePageTitle } from "../components/ui";
-import { AMOUNT_INPUT, compareDecimal, money, multiply, numberError, plainNumber, type NumberRules } from "../lib/decimal";
+import { AMOUNT_INPUT, compareDecimal, money, multiply, numberError, plainNumber, qty, currencyCode, type NumberRules } from "../lib/decimal";
 import { plural, when } from "../lib/format";
 import { ROLES } from "../lib/words";
 import { AccountDataPanel } from "./AccountData";
@@ -40,9 +40,9 @@ interface Tolerances {
 
 const FIELDS: { key: keyof Tolerance; label: string; hint: string }[] = [
   { key: "qty_tolerance", label: "Quantity tolerance", hint: "Units above received or ordered that still pass." },
-  { key: "price_tol_abs", label: "Price tolerance (amount)", hint: "Per unit, in CAD." },
+  { key: "price_tol_abs", label: "Price tolerance (amount)", hint: "Per unit, in the account's currency." },
   { key: "price_tol_pct", label: "Price tolerance (percent)", hint: "At most 10. The larger of the two applies." },
-  { key: "charge_allowance", label: "Charge allowance", hint: "Freight or fees not on the PO that still pass, in CAD." },
+  { key: "charge_allowance", label: "Charge allowance", hint: "Freight or fees not on the PO that still pass, in the account's currency." },
 ];
 
 const TOL_INPUT: NumberRules = { places: 4, whole: 10 };
@@ -65,7 +65,8 @@ export function TolerancesPage() {
   useEffect(() => {
     if (!q.data) return;
     const t = scope === "default" ? q.data.default : q.data.vendors.find((v) => v.vendor_id === scope) ?? q.data.default;
-    setVals(Object.fromEntries(FIELDS.map((f) => [f.key, String(t[f.key] ?? "")])));
+    // B15: stored values are shown without trailing zeros ("0.010000" -> "0.01").
+    setVals(Object.fromEntries(FIELDS.map((f) => [f.key, qty(String(t[f.key] ?? ""))])));
     setLimit(q.data.waiver_limit);
     setCap(q.data.waiver_period_cap);
     setPreview(null);
@@ -154,7 +155,7 @@ export function TolerancesPage() {
         <div className="panel-body">
           <div className="form-grid">
             {FIELDS.map((f) => (
-              <Field key={f.key} label={f.label} hint={f.hint}>
+              <Field key={f.key} label={f.label} hint={f.hint.replace("the account's currency", currencyCode())}>
                 {(ids) => (
                   <>
                     <input
@@ -175,8 +176,8 @@ export function TolerancesPage() {
           </div>
           {scope === "default" && (
             <div className="form-grid form-grid-gap">
-              <Field label="Clerk waiver limit per item (CAD)">{(f) => <input id={f.id} inputMode="decimal" className="num" value={limit} disabled={!editable} onChange={(e) => setLimit(e.target.value)} />}</Field>
-              <Field label="Clerk waiver cap per 30 days (CAD)">{(f) => <input id={f.id} inputMode="decimal" className="num" value={cap} disabled={!editable} onChange={(e) => setCap(e.target.value)} />}</Field>
+              <Field label={`Clerk waiver limit per item (${currencyCode()})`}>{(f) => <input id={f.id} inputMode="decimal" className="num" value={limit} disabled={!editable} onChange={(e) => setLimit(e.target.value)} />}</Field>
+              <Field label={`Clerk waiver cap per 30 days (${currencyCode()})`}>{(f) => <input id={f.id} inputMode="decimal" className="num" value={cap} disabled={!editable} onChange={(e) => setCap(e.target.value)} />}</Field>
             </div>
           )}
           <ToleranceExample values={lastValid.current} invalid={invalid} />
@@ -238,7 +239,7 @@ export function TolerancesPage() {
                     <td>{name(t.vendor_id)}</td>
                     {FIELDS.map((f) => (
                       <td key={f.key} className="num">
-                        {String(t[f.key])}
+                        {qty(String(t[f.key] ?? ""))}
                       </td>
                     ))}
                   </tr>
@@ -567,7 +568,7 @@ function SupportAccessPanel() {
   );
 }
 
-/** "A PO price of CAD 10.00 passes up to CAD 10.25 per unit": the tolerances on one invented line,
+/** "A PO price of CAD 10.00 (the account's currency) passes up to CAD 10.25 per unit": the tolerances on one invented line,
  * from the last valid values (B10, item 14). */
 export function ToleranceExample({ values, invalid }: { values: Record<string, string> | null; invalid: string | null }) {
   if (!values) return null;
@@ -581,8 +582,8 @@ export function ToleranceExample({ values, invalid }: { values: Record<string, s
     <div className="tol-example" data-testid="tolerance-example" aria-live="polite">
       {invalid && <p className="error-text small">Not valid yet: {invalid} The example below uses the last valid values.</p>}
       <p className="small">
-        <strong>Example:</strong> a PO price of CAD {price} passes up to CAD {money(ceiling)} per unit; 100 received passes when up to {qtyMax.replace(/\.?0+$/, "")} are invoiced;
-        a freight or fee line not on the PO passes up to CAD {money(values.charge_allowance || "0")}.
+        <strong>Example:</strong> a PO price of {currencyCode()} {price} passes up to {currencyCode()} {money(ceiling)} per unit; 100 received passes when up to {qtyMax.replace(/\.?0+$/, "")} are invoiced;
+        a freight or fee line not on the PO passes up to {currencyCode()} {money(values.charge_allowance || "0")}.
       </p>
     </div>
   );

@@ -6,7 +6,7 @@ import { errorText, get, send } from "../api/client";
 import type { Weekly, WeeklyRun } from "../api/types";
 import { useSession } from "../app/session";
 import { Banner, Dialog, Empty, ErrorState, Loading, PageHead, StatusChip, toast, usePageTitle } from "../components/ui";
-import { cad, money } from "../lib/decimal";
+import { cur, money, currencyCode } from "../lib/decimal";
 import { day, plural, when } from "../lib/format";
 import { queueLink } from "../lib/queue";
 
@@ -106,12 +106,12 @@ export function WeeklyPage() {
           <div className="cards">
             <div>
               <span className="muted small">Flagged discrepancies</span>
-              <span className="big">{cad(w.total.flagged_amount)}</span>
+              <span className="big">{cur(w.total.flagged_amount)}</span>
               <span className="small">findings and not received</span>
             </div>
             <div>
               <span className="muted small">Open exceptions</span>
-              <span className="big">{cad(w.total.open_value)}</span>
+              <span className="big">{cur(w.total.open_value)}</span>
               <span className="small">{plural(w.total.open_count, "exception")} waiting for a person</span>
             </div>
             <div>
@@ -141,9 +141,9 @@ export function WeeklyPage() {
                     <th scope="col" className="num">Documents</th>
                     <th scope="col" className="num">Lines</th>
                     <th scope="col" className="num">Passed</th>
-                    <th scope="col" className="num">Flagged (CAD)</th>
+                    <th scope="col" className="num">Flagged ({currencyCode()})</th>
                     <th scope="col" className="num">Open exceptions</th>
-                    <th scope="col" className="num">Open value (CAD)</th>
+                    <th scope="col" className="num">Open value ({currencyCode()})</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -153,7 +153,7 @@ export function WeeklyPage() {
                       <td className="num" data-label="Documents">{s.documents}</td>
                       <td className="num" data-label="Lines">{s.lines}</td>
                       <td className="num" data-label="Passed">{s.pass_rate_pct ? `${s.pass_rate_pct.replace(/\.0$/, "")}%` : "–"}</td>
-                      <td className="num" data-label="Flagged (CAD)">{money(s.flagged_amount)}</td>
+                      <td className="num" data-label={`Flagged (${currencyCode()})`}>{money(s.flagged_amount)}</td>
                       <td className="num" data-label="Open exceptions">
                         {s.open_count > 0 ? (
                           <Link to={queueLink({ vendor: s.vendor_id ?? "none", from: w.week_start, to: w.week_end, src: "weekly" })} aria-label={`${s.open_count} open exceptions for ${s.vendor_name ?? "supplier not identified"}, ${day(w.week_start)} to ${day(w.week_end)}`}>
@@ -163,7 +163,7 @@ export function WeeklyPage() {
                           s.open_count
                         )}
                       </td>
-                      <td className="num" data-label="Open value (CAD)">{money(s.open_value)}</td>
+                      <td className="num" data-label={`Open value (${currencyCode()})`}>{money(s.open_value)}</td>
                     </tr>
                   ))}
                 </tbody>

@@ -35,7 +35,29 @@ export function money(value: string | null | undefined): string {
   return c === null ? "" : formatCents(c);
 }
 
-/** "CAD 1,234.50". */
+// B15: the signed-in account's currency (from /me), set by the session before any screen renders.
+// Every amount of the account's documents is labelled with it; only the pilot terms (price and
+// refund threshold, Decision.md section 5) are always CAD and use `cad`.
+let accountCurrency = "CAD";
+export function setCurrency(code: string | null | undefined): void {
+  accountCurrency = (code ?? "").trim().toUpperCase() || "CAD";
+}
+export function currencyCode(): string {
+  return accountCurrency;
+}
+
+/** "USD 1,234.50" in the account's currency. */
+export function cur(value: string | null | undefined): string {
+  const m = money(value);
+  return m ? `${accountCurrency} ${m}` : "";
+}
+
+/** "USD 1,234.50" from integer cents, in the account's currency. */
+export function curCents(cents: bigint): string {
+  return `${accountCurrency} ${formatCents(cents)}`;
+}
+
+/** "CAD 1,234.50": the pilot terms only, which are in CAD whatever the account's currency. */
 export function cad(value: string | null | undefined): string {
   const m = money(value);
   return m ? `CAD ${m}` : "";
@@ -183,7 +205,10 @@ export function parseNumberInput(raw: string | null | undefined, rules: NumberRu
     else return { ok: false, error: "Commas go only between groups of three digits, as in 1,000.50." };
   }
   if (!/^\d*\.?\d*$/.test(s) || s === ".") return { ok: false, error: "Use digits, with a dot for decimals, for example 1000.50." };
-  const [w, f = ""] = s.split(".");
+  const [w, rawF = ""] = s.split(".");
+  // B15: trailing zeros are not decimal places that count ("0.010000" has two), so a stored
+  // NUMERIC(14,6) value shown back in a 4-place field is accepted; "0.00001" is still refused.
+  const f = rawF.length > rules.places && /^0*$/.test(rawF.slice(rules.places)) ? rawF.slice(0, rules.places) : rawF;
   if (f.length > rules.places) return { ok: false, error: rules.places === 0 ? "Whole numbers only." : `At most ${rules.places} decimal places.` };
   const whole = (w ?? "").replace(/^0+(?=\d)/, "") || "0";
   if (whole.length > rules.whole) return { ok: false, error: `This number is too large (at most ${rules.whole} digits before the decimal point).` };

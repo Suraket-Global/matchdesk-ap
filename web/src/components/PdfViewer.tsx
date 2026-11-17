@@ -9,6 +9,15 @@ import { DownloadButton } from "./DownloadButton";
 // (TRD 8.7): no eval, no XFA forms, no scripting; the bytes come only through the API.
 GlobalWorkerOptions.workerSrc = workerUrl;
 
+/** B15: the image type of a stored document from its first bytes (PNG or JPEG), or null for a PDF
+ * or anything else. Read from the bytes, not the file name, as the server stores them. */
+export function imageType(bytes: ArrayBuffer): "image/png" | "image/jpeg" | null {
+  const b = new Uint8Array(bytes.slice(0, 8));
+  if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return "image/png";
+  if (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return "image/jpeg";
+  return null;
+}
+
 export default function PdfViewer({ documentId, label, initialPage = 1 }: { documentId: string; label: string; initialPage?: number }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const wrap = useRef<HTMLDivElement>(null);
@@ -33,15 +42,27 @@ export default function PdfViewer({ documentId, label, initialPage = 1 }: { docu
   const [shown, setShown] = useState(1);
   const [error, setError] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  // B15: a PNG or JPEG invoice is shown as an image from the same authenticated bytes (a blob URL,
+  // allowed by the img-src policy); PDF.js draws only PDFs.
+  const [image, setImage] = useState<{ url: string; width: number; ext: string } | null>(null);
   useEffect(() => {
     let cancelled = false;
     let doc: PDFDocumentProxy | null = null;
+    let url: string | null = null;
     setError(false);
+    setImage(null);
     documentBytes(documentId)
-      .then((bytes) =>
-        getDocument({ data: new Uint8Array(bytes), isEvalSupported: false, enableXfa: false, disableAutoFetch: true }).promise,
-      )
+      .then((bytes) => {
+        const type = imageType(bytes);
+        if (type) {
+          url = URL.createObjectURL(new Blob([bytes], { type }));
+          if (!cancelled) setImage({ url, width: 0, ext: type === "image/png" ? "png" : "jpg" });
+          return null;
+        }
+        return getDocument({ data: new Uint8Array(bytes), isEvalSupported: false, enableXfa: false, disableAutoFetch: true }).promise;
+      })
       .then((d) => {
+        if (!d) return;
         doc = d;
         if (!cancelled) {
           setPdf(d);
@@ -52,6 +73,7 @@ export default function PdfViewer({ documentId, label, initialPage = 1 }: { docu
     return () => {
       cancelled = true;
       void doc?.destroy();
+      if (url) URL.revokeObjectURL(url);
     };
   }, [documentId, attempt]); // eslint-disable-line react-hooks/exhaustive-deps -- the first page is read once per document
   useEffect(() => {
@@ -90,6 +112,52 @@ export default function PdfViewer({ documentId, label, initialPage = 1 }: { docu
         </button>
       </div>
     );
+  if (image) {
+    // Fit: the pane width (never larger than the image itself); zoom: a share of the image's width.
+    const natural = image.width;
+    const room = (wrap.current?.clientWidth ?? 0) - 26;
+    const fitScale = natural && room > 0 ? Math.max(0.1, Math.min(1, room / natural)) : 1;
+    const z = zoom ?? fitScale;
+    return (
+      <div className={`pdf ${expanded ? "expanded" : ""}`} role={expanded ? "dialog" : undefined} aria-modal={expanded || undefined} aria-label={expanded ? `${label}, expanded` : undefined}>
+        <div className="pdf-toolbar">
+          <span className="small">Image</span>
+          <span className="grow" style={{ flex: 1 }} />
+          <button className="btn small icon-btn sm" onClick={() => setZoom(Math.max(0.25, z - 0.25))} aria-label="Zoom out">
+            <ZoomOut size={16} aria-hidden="true" />
+          </button>
+          <span className="small num" aria-live="polite">{Math.round(z * 100)}%</span>
+          <button className="btn small icon-btn sm" onClick={() => setZoom(Math.min(3, z + 0.25))} aria-label="Zoom in">
+            <ZoomIn size={16} aria-hidden="true" />
+          </button>
+          <button className="btn small ghost" aria-pressed={zoom === null} onClick={() => setZoom(null)}>
+            <MoveHorizontal size={14} aria-hidden="true" />
+            Fit width
+          </button>
+          <button className="btn small icon-btn sm" onClick={() => setExpanded((x) => !x)} aria-label={expanded ? "Close the expanded view" : "Expand the document"}>
+            {expanded ? <Minimize2 size={16} aria-hidden="true" /> : <Maximize2 size={16} aria-hidden="true" />}
+          </button>
+          <DownloadButton className="btn small icon-btn sm" path={`/api/v1/documents/${documentId}/content`} filename={`document.${image.ext}`} ariaLabel="Download original">
+            <Download size={16} aria-hidden="true" />
+          </DownloadButton>
+        </div>
+        <div className="pdf-canvas-wrap" ref={wrap} tabIndex={0} aria-label={label}>
+          <img
+            className="doc-image"
+            src={image.url}
+            alt={`${label}. The values read from it are listed as text beside it.`}
+            style={natural ? { width: `${Math.round(natural * z)}px` } : { maxWidth: "100%" }}
+            onLoad={(e) => {
+              // Read the width now: the event's target is gone by the time the updater runs.
+              const w = e.currentTarget.naturalWidth;
+              setImage((i) => (i ? { ...i, width: w } : i));
+            }}
+            onError={() => setError(true)}
+          />
+        </div>
+      </div>
+    );
+  }
   return (
     <div className={`pdf ${expanded ? "expanded" : ""}`} role={expanded ? "dialog" : undefined} aria-modal={expanded || undefined} aria-label={expanded ? `${label}, expanded` : undefined}>
       <div className="pdf-toolbar">

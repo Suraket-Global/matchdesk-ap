@@ -5,7 +5,7 @@ import { ApiError, errorText, get, send } from "../api/client";
 import type { FieldSource, InvoiceDetail, InvoiceSummary, Page, Review, Vendor } from "../api/types";
 import { Banner, Dialog, ErrorState, Loading, PageHead, StatusChip, toast, usePageTitle } from "../components/ui";
 import { failedChecks, FIELD_RULES, type LineValues } from "../lib/checks";
-import { formatCents, numberError, plainNumber, sumCents, toCents } from "../lib/decimal";
+import { currencyCode, formatCents, numberError, plainNumber, sumCents, toCents } from "../lib/decimal";
 import { qty } from "../lib/decimal";
 import { time, when } from "../lib/format";
 import { DeleteDocument } from "./DeleteDocument";
@@ -73,7 +73,7 @@ function Provenance({ src, changed, value, onHistory }: { src?: FieldSource; cha
  * so the clerk sees what a correction changes before confirming (FF-1006). B10 (outside QA item 12):
  * when they agree it is one compact line; on a mismatch it opens to both amounts, the exact
  * difference, the field to correct and where each amount comes from. */
-function TotalCheck({ printed, edited, tax, lines }: { printed: string; edited: string; tax: string; lines: string[] }) {
+function TotalCheck({ printed, edited, tax, lines, currency }: { printed: string; edited: string; tax: string; lines: string[]; currency: string }) {
   const calc = sumCents(lines.map((l) => plainNumber(l))) + (toCents(plainNumber(tax) || "0") ?? 0n);
   const field = toCents(plainNumber(edited));
   const read = toCents(plainNumber(printed));
@@ -83,7 +83,7 @@ function TotalCheck({ printed, edited, tax, lines }: { printed: string; edited: 
     return (
       <section className="total-check compact ok" aria-label="Total check" data-testid="total-check">
         <p role="status">
-          <strong>Total agrees:</strong> <span className="num">CAD {formatCents(field)}</span> = lines + tax
+          <strong>Total agrees:</strong> <span className="num">{currency} {formatCents(field)}</span> = lines + tax
           {changed ? ` (you changed it from ${formatCents(read!)})` : read !== null ? ", as printed" : ""}.
         </p>
       </section>
@@ -155,6 +155,8 @@ export function ReviewPage() {
     const r = q.data?.review;
     if (!r || loadedFor.current === `${invoiceId}:${r.version}`) return;
     if (dirty && loadedFor.current?.startsWith(`${invoiceId}:`)) return;
+    // B15: never go back to an older version of the same document than the one on screen.
+    if (loadedFor.current?.startsWith(`${invoiceId}:`) && Number(loadedFor.current.split(":")[1]) > r.version) return;
     loadedFor.current = `${invoiceId}:${r.version}`;
     const base = fromReview(r);
     const draft = r.review_draft;
@@ -226,6 +228,9 @@ export function ReviewPage() {
     const at = edits.current;
     try {
       const r = await send<Review>("PATCH", `/api/v1/invoices/${invoiceId}/extraction`, payload(true), { ifMatch: version });
+      // B15: the saved draft becomes the cached review, so the load effect never puts the older
+      // read values (and their older version) back once the edit counter says "saved".
+      qc.setQueryData<InvoiceDetail>(["invoice", invoiceId], (old) => (old ? { ...old, review: r } : old));
       setVersion(r.version);
       loadedFor.current = `${invoiceId}:${r.version}`;
       setSavedAt(new Date().toISOString());
@@ -233,7 +238,7 @@ export function ReviewPage() {
     } catch (err) {
       if (!onConflict(err)) setError(`Draft not saved: ${errorText(err)} Your values are still here; try again.`);
     }
-  }, [dirty, invoiceId, payload, version, onConflict]);
+  }, [dirty, invoiceId, payload, version, onConflict, qc]);
 
   // Saves a draft on the server every 30 seconds while there are changes. Nothing in browser storage.
   useEffect(() => {
@@ -415,7 +420,7 @@ export function ReviewPage() {
               </p>
             )}
           </div>
-          <TotalCheck printed={asRead.header.total ?? ""} edited={header.total ?? ""} tax={header.tax_total ?? ""} lines={lines.map((l) => l.amount)} />
+          <TotalCheck printed={asRead.header.total ?? ""} edited={header.total ?? ""} tax={header.tax_total ?? ""} lines={lines.map((l) => l.amount)} currency={(header.currency ?? "").trim().toUpperCase() || currencyCode()} />
           <div className="panel">
             <div className="panel-head">
               <h2>Header</h2>

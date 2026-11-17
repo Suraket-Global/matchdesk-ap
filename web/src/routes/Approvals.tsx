@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, errorText, get, send } from "../api/client";
 import type { Alias, Approval, ExceptionPage, Page, ReceivingImport } from "../api/types";
 import { Dialog, Empty, ErrorState, Field, Loading, PageHead, toast, usePageTitle } from "../components/ui";
-import { cad } from "../lib/decimal";
+import { cur } from "../lib/decimal";
 import { qty } from "../lib/decimal";
 import { plural, when } from "../lib/format";
 import { typeWord, EVIDENCE_CLASSES } from "../lib/words";
@@ -12,7 +12,7 @@ import { typeWord, EVIDENCE_CLASSES } from "../lib/words";
 function sentence(a: Approval): string {
   if (a.subject_type === "waiver" && a.exception) {
     const e = a.exception;
-    return `Waive ${cad(a.amount ?? e.reported_amount ?? e.variance_amount)} on ${e.vendor_name ?? "the supplier"} ${e.doc_type === "credit_note" ? "credit note" : "invoice"} ${e.doc_number}${e.line_no ? `, line ${e.line_no}` : ""} (${typeWord(e.type).toLowerCase()}). It will be listed in the report as waived, with your name.`;
+    return `Waive ${cur(a.amount ?? e.reported_amount ?? e.variance_amount)} on ${e.vendor_name ?? "the supplier"} ${e.doc_type === "credit_note" ? "credit note" : "invoice"} ${e.doc_number}${e.line_no ? `, line ${e.line_no}` : ""} (${typeWord(e.type).toLowerCase()}). It will be listed in the report as waived, with your name.`;
   }
   if (a.subject_type === "alias_conversion" && a.alias) {
     const al = a.alias;
@@ -46,7 +46,7 @@ function DecisionCard({ a, importName, onDecide }: { a: Approval; importName?: R
           </>
         ) : e ? (
           <>
-            <p className="d-big">Waive {cad(a.amount ?? e.reported_amount ?? e.variance_amount)}</p>
+            <p className="d-big">Waive {cur(a.amount ?? e.reported_amount ?? e.variance_amount)}</p>
             <p>
               {typeWord(e.type)} on {e.vendor_name ?? "the supplier"} {e.doc_number}
               {e.line_no ? `, line ${e.line_no}` : ""}.
@@ -126,7 +126,7 @@ function DecisionCard({ a, importName, onDecide }: { a: Approval; importName?: R
                       {x.doc_number ?? "Document"}
                       {x.line_no ? ` line ${x.line_no}` : ""}
                     </Link>
-                    : {typeWord(x.type)}, {cad(x.value)}
+                    : {typeWord(x.type)}, {cur(x.value)}
                   </li>
                 ))}
               </ul>
@@ -265,7 +265,7 @@ export function ApprovalsPage() {
               <ul style={{ margin: 0, paddingLeft: 18 }}>
                 {waived.data!.items.map((e) => (
                   <li key={e.id}>
-                    {e.vendor_name} {e.doc_number}: {typeWord(e.type)} {cad(e.reported_amount ?? e.variance_amount)} {e.resolution_note ? `"${e.resolution_note}"` : ""}
+                    {e.vendor_name} {e.doc_number}: {typeWord(e.type)} {cur(e.reported_amount ?? e.variance_amount)} {e.resolution_note ? `"${e.resolution_note}"` : ""}
                   </li>
                 ))}
               </ul>

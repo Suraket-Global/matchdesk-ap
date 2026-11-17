@@ -4,7 +4,7 @@ import { errorText, get, getAll, send } from "../api/client";
 import type { InvoiceDetail, InvoiceSummary, PurchaseOrder } from "../api/types";
 import { useSession } from "../app/session";
 import { Banner, ErrorState, Loading, PageHead, toast, usePageTitle } from "../components/ui";
-import { cad, price, qty } from "../lib/decimal";
+import { cur, price, qty } from "../lib/decimal";
 import { qboHistory, unsigned } from "../lib/po";
 import { day, plural, when } from "../lib/format";
 
@@ -79,7 +79,7 @@ export function PurchaseOrderPage() {
       <PageHead
         title={`PO ${po.po_number}`}
         crumbs={<Link to="/invoices">Invoices</Link>}
-        lede={`${po.vendor_name ?? ""} · ${day(po.txn_date)} · ${po.qbo_status ?? "status not read"} · total in QuickBooks ${po.total ? cad(po.total) : "not read"}${po.total ? " (as QuickBooks states it, which can include tax; the lines below are before tax)" : ""}`}
+        lede={`${po.vendor_name ?? ""} · ${day(po.txn_date)} · ${po.qbo_status ?? "status not read"} · total in QuickBooks ${po.total ? cur(po.total) : "not read"}${po.total ? " (as QuickBooks states it, which can include tax; the lines below are before tax)" : ""}`}
         actions={
           can("start_sync") && (
             <button className="btn" onClick={() => reread.mutate()} disabled={reread.isPending}>

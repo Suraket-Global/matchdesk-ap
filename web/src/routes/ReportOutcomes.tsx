@@ -7,7 +7,7 @@ import { errorText, get, getAll, send } from "../api/client";
 import type { InvoiceSummary, Outcomes, Report } from "../api/types";
 import { useSession } from "../app/session";
 import { Dialog, StatusChip, toast } from "../components/ui";
-import { AMOUNT_INPUT, cad, compareDecimal, numberError, plainNumber } from "../lib/decimal";
+import { AMOUNT_INPUT, cur, compareDecimal, numberError, plainNumber, currencyCode } from "../lib/decimal";
 import { day, plural } from "../lib/format";
 import { typeWord } from "../lib/words";
 
@@ -50,17 +50,17 @@ export function OutcomesSection({ report, flagged }: { report: Report; flagged: 
             <dl className="outcome-totals">
               <div>
                 <dt>Flagged</dt>
-                <dd className="num">{cad(o.totals.flagged.amount)}</dd>
+                <dd className="num">{cur(o.totals.flagged.amount)}</dd>
                 <dd className="small muted">{plural(o.totals.flagged.count, "discrepancy", "discrepancies")}</dd>
               </div>
               <div>
                 <dt>Confirmed by the controller</dt>
-                <dd className="num">{cad(o.totals.controller_confirmed.amount)}</dd>
+                <dd className="num">{cur(o.totals.controller_confirmed.amount)}</dd>
                 <dd className="small muted">{plural(o.totals.controller_confirmed.count, "confirmation")}</dd>
               </div>
               <div>
                 <dt>Credit recovered</dt>
-                <dd className="num">{cad(o.totals.credit_recovered.amount)}</dd>
+                <dd className="num">{cur(o.totals.credit_recovered.amount)}</dd>
                 <dd className="small muted">{plural(o.totals.credit_recovered.count, "credit")}</dd>
               </div>
             </dl>
@@ -76,7 +76,7 @@ export function OutcomesSection({ report, flagged }: { report: Report; flagged: 
                 <tr>
                   <th scope="col">Document</th>
                   <th scope="col">Type</th>
-                  <th scope="col" className="num">Flagged (CAD)</th>
+                  <th scope="col" className="num">Flagged ({currencyCode()})</th>
                   <th scope="col">Confirmed by the controller</th>
                   <th scope="col">Credit recovered</th>
                   <th scope="col">State and next step</th>
@@ -95,11 +95,11 @@ export function OutcomesSection({ report, flagged }: { report: Report; flagged: 
                         <div className="muted small">{sn.vendor_name ?? ""}</div>
                       </td>
                       <td data-label="Type">{f.section === "not_received" ? "Not received" : typeWord(f.type)}</td>
-                      <td data-label="Flagged (CAD)" className="num">{f.amount}</td>
+                      <td data-label={`Flagged (${currencyCode()})`} className="num">{f.amount}</td>
                       <td data-label="Confirmed by the controller">
                         {rec.controller_confirmed ? (
                           <span>
-                            <span className="num">{cad(rec.controller_confirmed.amount)}</span>
+                            <span className="num">{cur(rec.controller_confirmed.amount)}</span>
                             <span className="muted small"> by {rec.controller_confirmed.recorded_by_name ?? "the controller"}, {day(rec.controller_confirmed.recorded_at)}</span>
                           </span>
                         ) : can("record_finding_outcome") ? (
@@ -113,7 +113,7 @@ export function OutcomesSection({ report, flagged }: { report: Report; flagged: 
                       <td data-label="Credit recovered">
                         {rec.credit_recovered ? (
                           <span>
-                            <span className="num">{cad(rec.credit_recovered.amount)}</span>
+                            <span className="num">{cur(rec.credit_recovered.amount)}</span>
                             <span className="muted small"> {rec.credit_recovered.credit_reference ?? "credit note"}, {day(rec.credit_recovered.recorded_at)}</span>
                           </span>
                         ) : rec.controller_confirmed && can("record_finding_outcome") ? (
@@ -196,7 +196,7 @@ function RecordDialog({
     <Dialog
       open
       title={outcome === "credit_recovered" ? "Record the credit recovered" : "Record the controller's confirmation"}
-      description={`${sn.doc_number ?? "Document"}${sn.line_no ? ` line ${sn.line_no}` : ""}: flagged ${cad(finding.amount)}. Recorded once; it cannot be edited afterwards.`}
+      description={`${sn.doc_number ?? "Document"}${sn.line_no ? ` line ${sn.line_no}` : ""}: flagged ${cur(finding.amount)}. Recorded once; it cannot be edited afterwards.`}
       onClose={onClose}
       footer={
         <>
@@ -214,7 +214,7 @@ function RecordDialog({
       }
     >
       <div className="field">
-        <label htmlFor="oc-amount">{outcome === "credit_recovered" ? "Amount credited (CAD)" : "Overcharge confirmed (CAD)"}</label>
+        <label htmlFor="oc-amount">{outcome === "credit_recovered" ? `Amount credited (${currencyCode()})` : `Overcharge confirmed (${currencyCode()})`}</label>
         <input
           id="oc-amount"
           className="num"
@@ -229,7 +229,7 @@ function RecordDialog({
             {numberError(amount, AMOUNT_INPUT)}
           </span>
         )}
-        <span className="hint">At most {cad(cap)}{outcome === "credit_recovered" ? ", the confirmed amount" : ", the flagged amount"}.</span>
+        <span className="hint">At most {cur(cap)}{outcome === "credit_recovered" ? ", the confirmed amount" : ", the flagged amount"}.</span>
       </div>
       {outcome === "credit_recovered" && (
         <>

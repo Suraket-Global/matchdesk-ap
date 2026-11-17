@@ -7,7 +7,7 @@ import type { Page, Refund, Report } from "../api/types";
 import { useSession } from "../app/session";
 import { usePeriod } from "../app/period";
 import { Banner, Dialog, Empty, ErrorState, Loading, PageHead, StatusChip, toast, usePageTitle } from "../components/ui";
-import { cad, cadCents, compareDecimal, formatCents, money, sumCents } from "../lib/decimal";
+import { cad, cur, curCents, compareDecimal, formatCents, money, sumCents, currencyCode } from "../lib/decimal";
 import { day, monthName, monthRange, plural, when } from "../lib/format";
 import { typeWord, zeroCounted } from "../lib/words";
 import { PilotSection, usePilot } from "./Pilot";
@@ -159,9 +159,9 @@ export function ReportsPage() {
                 <th scope="col">Period</th>
                 <th scope="col" className="num">Version</th>
                 <th scope="col">Status</th>
-                <th scope="col" className="num">Flagged discrepancies (CAD)</th>
+                <th scope="col" className="num">Flagged discrepancies ({currencyCode()})</th>
                 <th scope="col" className="num">of which not received</th>
-                <th scope="col" className="num">Unverified (CAD)</th>
+                <th scope="col" className="num">Unverified ({currencyCode()})</th>
                 <th scope="col">Data cut-off</th>
               </tr>
             </thead>
@@ -179,9 +179,9 @@ export function ReportsPage() {
                     {r.id === governingId && <span className="gov-tag">Governing</span>}
                     {r.is_stale && r.status === "approved" && <div className="small muted">Out of date</div>}
                   </td>
-                  <td className="num" data-label="Flagged discrepancies (CAD)">{formatCents(sumCents([r.findings_amount, r.not_received_amount]))}</td>
+                  <td className="num" data-label={`Flagged discrepancies (${currencyCode()})`}>{formatCents(sumCents([r.findings_amount, r.not_received_amount]))}</td>
                   <td className="num" data-label="of which not received">{money(r.not_received_amount)}</td>
-                  <td className="num" data-label="Unverified (CAD)">{money(r.unverified_amount)}</td>
+                  <td className="num" data-label={`Unverified (${currencyCode()})`}>{money(r.unverified_amount)}</td>
                   <td data-label="Data cut-off">{when(r.data_cutoff_at)}</td>
                 </tr>
               ))}
@@ -213,7 +213,7 @@ function FindingsTable({ rows, caption, showPaid = true, period }: { rows: Findi
             <th scope="col">Item</th>
             {showPaid && <th scope="col">Paid</th>}
             <th scope="col">Confirmed by the controller</th>
-            <th scope="col" className="num">Amount (CAD)</th>
+            <th scope="col" className="num">Amount ({currencyCode()})</th>
           </tr>
         </thead>
         <tbody>
@@ -240,7 +240,7 @@ function FindingsTable({ rows, caption, showPaid = true, period }: { rows: Findi
                     <span className="muted">{STATUS_WORDS[s.status ?? ""] ?? "Not yet"}</span>
                   )}
                 </td>
-                <td data-label="Amount (CAD)" className="num">
+                <td data-label={`Amount (${currencyCode()})`} className="num">
                   {money(f.amount)}
                   {zeroCounted({ reported_amount: f.amount, variance_amount: s.variance_amount ?? null }) && (
                     <div className="small muted">counted under another exception on this line</div>
@@ -444,19 +444,19 @@ export function ReportPage() {
       <div className="cards">
         <div>
           <span className="muted small"><AlertTriangle size={14} aria-hidden="true" style={{ verticalAlign: "-2px", marginRight: 6 }} />Flagged discrepancies</span>
-          <span className="big">{cadCents(flagged)}</span>
+          <span className="big">{curCents(flagged)}</span>
           <span className="small">
-            {plural(flaggedCount, "item")}: findings {cad(r.findings_amount)} + not received {cad(r.not_received_amount)}
+            {plural(flaggedCount, "item")}: findings {cur(r.findings_amount)} + not received {cur(r.not_received_amount)}
           </span>
         </div>
         <div>
           <span className="muted small"><PackageX size={14} aria-hidden="true" style={{ verticalAlign: "-2px", marginRight: 6 }} />of which not received</span>
-          <span className="big">{cad(r.not_received_amount)}</span>
+          <span className="big">{cur(r.not_received_amount)}</span>
           <span className="small">{plural(S.not_received?.count ?? 0, "line")}</span>
         </div>
         <div>
           <span className="muted small"><HelpCircle size={14} aria-hidden="true" style={{ verticalAlign: "-2px", marginRight: 6 }} />Unverified, not checkable</span>
-          <span className="big">{cad(r.unverified_amount)}</span>
+          <span className="big">{cur(r.unverified_amount)}</span>
           <span className="small">{plural(S.unverified?.count ?? 0, "item")}</span>
         </div>
         <div>
@@ -469,7 +469,7 @@ export function ReportPage() {
         <div>
           <dt>Flagged by the rules</dt>
           <dd>
-            <span className="num">{cadCents(flagged)}</span> <span className="muted small">{plural(flaggedCount, "item")}</span>
+            <span className="num">{curCents(flagged)}</span> <span className="muted small">{plural(flaggedCount, "item")}</span>
           </dd>
         </div>
         <div>
@@ -477,12 +477,12 @@ export function ReportPage() {
           <dd>
             {counts ? (
               <>
-                <span className="num">{cad(counts.controller_confirmed.amount)}</span>{" "}
+                <span className="num">{cur(counts.controller_confirmed.amount)}</span>{" "}
                 <span className="muted small">{plural(counts.controller_confirmed.count, "item")} recorded</span>
               </>
             ) : (
               <>
-                <span className="num">{cadCents(sumCents(confirmed.map((c) => c.amount)))}</span>{" "}
+                <span className="num">{curCents(sumCents(confirmed.map((c) => c.amount)))}</span>{" "}
                 <span className="muted small">{plural(confirmed.length, "item")} resolved as confirmed</span>
               </>
             )}
@@ -492,7 +492,7 @@ export function ReportPage() {
           <dt>Credit recovered</dt>
           {counts ? (
             <dd data-testid="credit-recovered">
-              <span className="num">{cad(counts.credit_recovered.amount)}</span>{" "}
+              <span className="num">{cur(counts.credit_recovered.amount)}</span>{" "}
               <span className="muted small">{plural(counts.credit_recovered.count, "item")} recorded</span>
             </dd>
           ) : (
@@ -530,7 +530,7 @@ export function ReportPage() {
               <tr>
                 <th scope="col">Type</th>
                 <th scope="col" className="num">Items</th>
-                <th scope="col" className="num">Amount (CAD)</th>
+                <th scope="col" className="num">Amount ({currencyCode()})</th>
               </tr>
             </thead>
             <tbody>
@@ -558,7 +558,7 @@ export function ReportPage() {
               <tr>
                 <th scope="col">Supplier</th>
                 <th scope="col" className="num">Items</th>
-                <th scope="col" className="num">Amount (CAD)</th>
+                <th scope="col" className="num">Amount ({currencyCode()})</th>
               </tr>
             </thead>
             <tbody>
@@ -575,7 +575,7 @@ export function ReportPage() {
         <p className="small muted">
           Paid split:{" "}
           {Object.entries(r.totals.paid_split)
-            .map(([k, v]) => `${k === "unknown" ? "payment not known" : k === "paid" ? "already paid" : "not yet paid"} ${cad(v)}`)
+            .map(([k, v]) => `${k === "unknown" ? "payment not known" : k === "paid" ? "already paid" : "not yet paid"} ${cur(v)}`)
             .join(", ") || "none"}
           .
         </p>
@@ -597,7 +597,7 @@ export function ReportPage() {
           <dd>{r.class_c_only_lines}</dd>
           <dt>Unverified</dt>
           <dd>
-            {plural(S.unverified?.count ?? 0, "item")}, {cad(r.unverified_amount)}
+            {plural(S.unverified?.count ?? 0, "item")}, {cur(r.unverified_amount)}
           </dd>
           <dt>Purchase-order history read from</dt>
           <dd>{day(r.history_read_from) || "Not recorded"}</dd>
@@ -650,15 +650,15 @@ export function ReportPage() {
         <h2>7. Pilot terms and refund calculation</h2>
         {r.status !== "approved" && (
           <p>
-            The refund is decided only on the approved, governing version. This draft shows qualifying discrepancies of {cad(r.qualifying_amount)}; the figure can still
+            The refund is decided only on the approved, governing version. This draft shows qualifying discrepancies of {cur(r.qualifying_amount)}; the figure can still
             change.
           </p>
         )}
         {r.status === "approved" && refund.data && (
           <p className="workings" style={{ display: "block" }}>
             <span className="sentence">
-              Qualifying discrepancies in this version: {cad(refund.data.qualifying_total)}. Threshold {cad(refund.data.threshold)}.{" "}
-              {refund.data.refund_due ? "Refund applies." : "No refund."} Unverified (could not be checked): {cad(refund.data.unverified_total)}.
+              Qualifying discrepancies in this version: {cur(refund.data.qualifying_total)}. Threshold {cad(refund.data.threshold)}.{" "}
+              {refund.data.refund_due ? "Refund applies." : "No refund."} Unverified (could not be checked): {cur(refund.data.unverified_total)}.
             </span>
           </p>
         )}
@@ -696,8 +696,8 @@ export function ReportPage() {
           </div>
         )}
         <p>
-          Approve version {r.version_no} of the {monthName(r.period_start.slice(0, 7))} back-test. Flagged discrepancies {cadCents(flagged)} (findings{" "}
-          {cad(r.findings_amount)} + not received {cad(r.not_received_amount)}). Unverified (could not be checked): {cad(r.unverified_amount)} on{" "}
+          Approve version {r.version_no} of the {monthName(r.period_start.slice(0, 7))} back-test. Flagged discrepancies {curCents(flagged)} (findings{" "}
+          {cur(r.findings_amount)} + not received {cur(r.not_received_amount)}). Unverified (could not be checked): {cur(r.unverified_amount)} on{" "}
           {plural(S.unverified?.count ?? 0, "item")}. {plural(stillOpen.length, "item")} still open in the exception queue{" "}
           {stillOpen.length === 1 ? "is" : "are"} reported in those sections with {stillOpen.length === 1 ? "its" : "their"} queue status; undecided items (section 5):{" "}
           {open.length}. Approved figures cannot be changed; later corrections create a new version.

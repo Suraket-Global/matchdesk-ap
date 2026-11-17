@@ -5,6 +5,8 @@ export interface Me {
   memberships: { tenant_id: string; role: string; tenant_name: string }[];
   active_tenant_id: string | null;
   role: string | null;
+  /** B15: the active account's currency (ISO code), which labels its money. */
+  currency?: string | null;
   /** Set while an operator reads an account under a support grant (B7, S-18). */
   support?: { grant_id: string; tenant_name: string | null; ends_at: string | null } | null;
   idle_expires_at: string;

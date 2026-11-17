@@ -3,7 +3,7 @@ import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { get } from "../api/client";
 import type { InvoiceSummary, Page, Vendor } from "../api/types";
 import { Empty, ErrorState, Loading, PageHead, StatusChip, usePageTitle } from "../components/ui";
-import { money } from "../lib/decimal";
+import { money, currencyCode } from "../lib/decimal";
 import { day, plural } from "../lib/format";
 
 const STATES: [string, string][] = [
@@ -86,7 +86,7 @@ export function InvoicesPage() {
                 <th scope="col">Supplier</th>
                 <th scope="col">PO</th>
                 <th scope="col" className="num">
-                  Total (CAD)
+                  Total ({currencyCode()})
                 </th>
                 <th scope="col">State</th>
               </tr>
@@ -103,7 +103,7 @@ export function InvoicesPage() {
                   <td data-label="Date">{day(i.doc_date)}</td>
                   <td data-label="Supplier">{i.vendor_name ?? <span className="muted">Not identified</span>}</td>
                   <td data-label="PO">{i.po_number}</td>
-                  <td data-label="Total (CAD)" className="num">{money(i.total)}</td>
+                  <td data-label={`Total (${currencyCode()})`} className="num">{money(i.total)}</td>
                   <td data-label="State">
                     <StatusChip status={i.displayed_state ?? "queued"} />
                   </td>

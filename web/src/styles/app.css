@@ -2160,6 +2160,14 @@ body.is-resizing {
   box-shadow: var(--shadow-md);
   border-radius: 2px;
 }
+.pdf-canvas-wrap .doc-image {
+  display: block;
+  margin: 0 auto;
+  max-width: none;
+  background: #fff;
+  box-shadow: var(--shadow-md);
+  border-radius: 2px;
+}
 .review-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);

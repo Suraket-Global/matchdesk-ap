@@ -10,7 +10,7 @@ import { useKeys } from "../app/shortcuts";
 import { CheckCircle2, ChevronRight, FileBarChart, Inbox, Info, SlidersHorizontal, Upload, X } from "lucide-react";
 import { Dialog, Empty, ErrorState, PageHead, StatusChip, toast, usePageTitle } from "../components/ui";
 import { TableSkeleton } from "../components/States";
-import { AMOUNT_INPUT, cad, cadCents, formatCents, money, numberError, parseNumberInput, qty, sumCents, toCents } from "../lib/decimal";
+import { AMOUNT_INPUT, cur, curCents, formatCents, money, numberError, parseNumberInput, qty, sumCents, toCents, currencyCode } from "../lib/decimal";
 import { ageText, monthName, plural } from "../lib/format";
 import { apiQuery, assigneeWords, dateRangeWords, DEFAULT_STATUS, readScope, rememberQueue, scopeDates, STATUS_WORDS } from "../lib/queue";
 import { EXCEPTION_STATUS, RESOLUTION_CODES, RESOLUTION_HINTS, SUB_REASONS, typeWord, zeroCounted } from "../lib/words";
@@ -222,7 +222,7 @@ export function ExceptionsPage() {
         )}
         {(scope.min || scope.max) && (
           <span className="scope-chip">
-            <span className="k">Value</span> {scope.min ? cad(scope.min) : "any"} to {scope.max ? cad(scope.max) : "any"}
+            <span className="k">Value</span> {scope.min ? cur(scope.min) : "any"} to {scope.max ? cur(scope.max) : "any"}
             <button type="button" className="chip-x" aria-label="Remove the value filter" onClick={() => set({ min: "", max: "" })}>
               <X size={14} aria-hidden="true" />
             </button>
@@ -278,11 +278,11 @@ export function ExceptionsPage() {
           </select>
         </div>
         <div className="field">
-          <label htmlFor="f-min">Value from (CAD)</label>
+          <label htmlFor="f-min">Value from ({currencyCode()})</label>
           <ValueFilter id="f-min" placeholder="0.00" value={scope.min} onValue={(v) => set({ min: v })} />
         </div>
         <div className="field">
-          <label htmlFor="f-max">Value to (CAD)</label>
+          <label htmlFor="f-max">Value to ({currencyCode()})</label>
           <ValueFilter id="f-max" placeholder="Any" value={scope.max} onValue={(v) => set({ max: v })} />
         </div>
         <div className="field">
@@ -325,7 +325,7 @@ export function ExceptionsPage() {
       {can("resolve") && chosen.length > 0 && (
         <div className="bulkbar" role="region" aria-label="Bulk actions">
           <span>
-            <strong>{chosen.length}</strong> selected · <strong>{cadCents(sumCents(chosen.map(value)))}</strong>
+            <strong>{chosen.length}</strong> selected · <strong>{curCents(sumCents(chosen.map(value)))}</strong>
           </span>
           <button type="button" className="btn primary" disabled={chosenTypes.size !== 1} onClick={() => setBulkOpen(true)}>
             Resolve {plural(chosen.length, "item")} as…
@@ -338,7 +338,7 @@ export function ExceptionsPage() {
         </div>
       )}
       <p className="sr-only" role="status" aria-live="polite">
-        {list.isFetching || !first ? "" : `${plural(total, "exception")} in this scope, ${cad(first.total_value ?? "0")}.`}
+        {list.isFetching || !first ? "" : `${plural(total, "exception")} in this scope, ${cur(first.total_value ?? "0")}.`}
       </p>
       {list.isLoading && <TableSkeleton label="Loading exceptions" />}
       {list.error && <ErrorState error={list.error} retry={() => list.refetch()} />}
@@ -405,7 +405,7 @@ export function ExceptionsPage() {
                     {e.doc_number ?? "No number"}
                     {e.line_no ? <span className="muted"> line {e.line_no}</span> : null}
                   </span>
-                  <span className="case-amt money">{zeroCounted(e) ? "CAD 0.00" : cad(value(e))}</span>
+                  <span className="case-amt money">{zeroCounted(e) ? cur("0.00") : cur(value(e))}</span>
                 </div>
                 <div className="case-why">{reason(e)}</div>
                 <div className="case-sup">
@@ -445,7 +445,7 @@ export function ExceptionsPage() {
                     Qty difference
                   </th>
                   <th scope="col" className="num" aria-sort={scope.sort === "value" ? "descending" : "none"}>
-                    Amount (CAD)
+                    Amount ({currencyCode()})
                   </th>
                   <th scope="col" aria-sort={scope.sort === "age" ? "ascending" : "none"}>
                     Age
@@ -522,7 +522,7 @@ export function ExceptionsPage() {
             </table>
           </div>
           <p className="queue-total-line">
-            <strong>{plural(total, "exception")}</strong>, <strong className="money">{cad(first?.total_value)}</strong> in this scope
+            <strong>{plural(total, "exception")}</strong>, <strong className="money">{cur(first?.total_value)}</strong> in this scope
             {rows.length < total ? ` (${rows.length} shown)` : ""}.
           </p>
         </>
@@ -560,7 +560,7 @@ export function ExceptionsPage() {
           <span className="v">{measured ? pctText(cov?.receipt_coverage_pct) : "Not measured"}</span>
           {measured && (
             <span className="s">
-              Not received {cad(notReceived.data?.total_value ?? "0")} · Unverified {cad(unverified.data?.total_value ?? "0")}
+              Not received {cur(notReceived.data?.total_value ?? "0")} · Unverified {cur(unverified.data?.total_value ?? "0")}
             </span>
           )}
         </summary>
@@ -585,12 +585,12 @@ export function ExceptionsPage() {
             </div>
             <div>
               <span className="k">Not received </span>
-              <span className={`v ${notReceived.data?.total_count ? "danger" : ""}`}>{cad(notReceived.data?.total_value ?? "0")}</span>
+              <span className={`v ${notReceived.data?.total_count ? "danger" : ""}`}>{cur(notReceived.data?.total_value ?? "0")}</span>
               <span className="s"> {plural(notReceived.data?.total_count ?? 0, "line")}: the log covers the order and shows nothing</span>
             </div>
             <div>
               <span className="k">Unverified </span>
-              <span className={`v ${unverified.data?.total_count ? "warn" : ""}`}>{cad(unverified.data?.total_value ?? "0")}</span>
+              <span className={`v ${unverified.data?.total_count ? "warn" : ""}`}>{cur(unverified.data?.total_value ?? "0")}</span>
               <span className="s"> {plural(unverified.data?.total_count ?? 0, "item")} that could not be checked: no receiving evidence, extraction not confirmed, or no purchase-order line</span>
             </div>
             <div>
@@ -666,7 +666,7 @@ export function BulkDialog({ items: chosenNow, onClose }: { items: ExceptionItem
       {!res && (
         <>
           <p>
-            {plural(items.length, "item")} of type <strong>{typeWord(t)}</strong>, total value <strong>{cadCents(total)}</strong>.
+            {plural(items.length, "item")} of type <strong>{typeWord(t)}</strong>, total value <strong>{curCents(total)}</strong>.
           </p>
           {t === "receipt_absent" && <p className="muted">A receipt-absent exception cannot be waived in bulk.</p>}
           <fieldset>
@@ -689,8 +689,8 @@ export function BulkDialog({ items: chosenNow, onClose }: { items: ExceptionItem
           {code === "waived" && (
             <p className={overCap ? "error-text" : "muted"}>
               {overCap
-                ? `The total passes the 30-day waiver cap of ${cad(tol.data?.waiver_period_cap)}, so the whole batch goes to your controller.`
-                : `Items above ${cad(tol.data?.waiver_limit)} each, or a batch that would pass the 30-day cap, go to your controller for approval.`}
+                ? `The total passes the 30-day waiver cap of ${cur(tol.data?.waiver_period_cap)}, so the whole batch goes to your controller.`
+                : `Items above ${cur(tol.data?.waiver_limit)} each, or a batch that would pass the 30-day cap, go to your controller for approval.`}
             </p>
           )}
           {run.error && <p className="error-text">{errorText(run.error)}</p>}

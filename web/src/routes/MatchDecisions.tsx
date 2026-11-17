@@ -7,7 +7,7 @@ import { errorText, get, send } from "../api/client";
 import type { ExceptionItem, Member } from "../api/types";
 import { useSession } from "../app/session";
 import { toast } from "../components/ui";
-import { cad } from "../lib/decimal";
+import { cur } from "../lib/decimal";
 import { day } from "../lib/format";
 
 type Detail = ExceptionItem;
@@ -53,7 +53,7 @@ function decisionAmount(e: ExceptionItem): string | null {
 /** What the chosen decision does to the money, in one sentence (B10, outside QA item 11). */
 export function decisionEffect(decision: string, e: ExceptionItem, creditRef: string | null): string {
   const amount = decisionAmount(e);
-  const a = amount ? cad(amount) : "The amount";
+  const a = amount ? cur(amount) : "The amount";
   const ref = creditRef ?? "that QuickBooks credit";
   switch (decision) {
     case "credited":
@@ -105,7 +105,7 @@ export function ControllerDecision({ exc, detail, onDone }: { exc: ExceptionItem
               <dt>Candidate credit</dt>
               <dd>
                 {creditRef ?? "QuickBooks vendor credit (no number)"}
-                {bill?.total ? `, ${cad(bill.total)}` : ""}
+                {bill?.total ? `, ${cur(bill.total)}` : ""}
                 {bill?.txn_date ? `, ${day(bill.txn_date)}` : ""}
               </dd>
             </div>
@@ -116,7 +116,7 @@ export function ControllerDecision({ exc, detail, onDone }: { exc: ExceptionItem
           </div>
           <div>
             <dt>Amount</dt>
-            <dd className="num">{amount ? cad(amount) : "Not stated"}</dd>
+            <dd className="num">{amount ? cur(amount) : "Not stated"}</dd>
           </div>
           <div className="wide">
             <dt>Why only possible</dt>

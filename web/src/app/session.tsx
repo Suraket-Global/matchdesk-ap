@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, get, onConnectionEvent, send, setCsrfToken } from "../api/client";
 import type { Me } from "../api/types";
+import { setCurrency } from "../lib/decimal";
 
 // The signed-in user, role and permissions. Screens never decide a permission on their own; they
 // ask `can`, which mirrors schema.md 4.1 for showing controls. The server checks every request.
@@ -67,6 +68,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     retry: false,
   });
   const me = meQuery.data ?? null;
+  // B15: before the screens below render, so their amounts carry the account's currency.
+  setCurrency(me?.currency);
   useEffect(() => {
     setCsrfToken(me?.csrf_token ?? null);
     if (me) setExpired(false);
