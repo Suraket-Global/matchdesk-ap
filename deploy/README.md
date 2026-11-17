@@ -141,6 +141,21 @@ dc up -d   # migrate re-applies the application role's password, then api and wo
 After a restore onto a new server, `.env` must carry the same `MATCHDESK_TOKEN_KEY` (it seals the
 TOTP seeds and QuickBooks tokens) and `MATCHDESK_BACKUP_KEY`.
 
+## Live on bitloomix.io (2026-11-18)
+
+The server's existing Cloudflare tunnel (`/etc/cloudflared/config.yml`, shared with other apps)
+carries MatchDesk; no port is opened and ufw is unchanged. Two Cloudflare DNS records (proxied CNAME
+to the tunnel) and two ingress lines, added before the final 404 rule:
+
+- `matchdesk.bitloomix.io` → `http://127.0.0.1:8203` (landing page)
+- `matchdesk-app.bitloomix.io` → `http://127.0.0.1:8202` (the app)
+
+`MATCHDESK_APP_BASE_URL=https://matchdesk-app.bitloomix.io` in `.env`. A change to the tunnel config
+needs `systemctl restart cloudflared`, which briefly interrupts the other apps on the tunnel: back up
+the file first and check every hostname after. Still open: the owner's SMTP (Mailpit holds sign-in
+mail until then), client addresses behind the tunnel (`CF-Connecting-IP` is not yet passed on, so
+rate limits see the tunnel's address), removing the demo account before the first real customer.
+
 ## What B19 adds with the domain
 
 - DNS: `yourdomain.com` and `app.yourdomain.com` to the server.

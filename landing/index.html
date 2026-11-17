@@ -876,7 +876,7 @@ body:not(.legal) .legal-view{display:none}
 
 </article></div>
 <div class="legal-view" id="view-pilot-agreement" hidden><a class="back" href="#top">Back to MatchDesk</a><article class="doc">
-<div class="printbar"><button type="button" onclick="window.print()">Print or save as PDF</button></div>
+<div class="printbar"><button type="button" class="print-btn">Print or save as PDF</button></div>
 <h1>Back-test and 30-day pilot agreement</h1>
 <p class="meta">Template. Fill in the highlighted fields, then both sides sign. Version of <span data-cfg="updated"></span>.</p>
 
@@ -995,6 +995,7 @@ document.querySelectorAll("[data-cfg-mail]").forEach(el => {
 });
 
 
+document.querySelectorAll(".print-btn").forEach(b => b.addEventListener("click", () => window.print()));
 // ---- views: the landing page, or one legal page, chosen by the address (#privacy, #terms, #pilot-agreement) ----
 (() => {
   const views = ["privacy", "terms", "pilot-agreement"];
