@@ -35,8 +35,8 @@ from matchdesk.qbo.models import PoLineRow, PurchaseOrderRow, QboBillRow, Vendor
 from matchdesk.receiving import counting_receipt_totals, current_declaration, describe_declaration
 from matchdesk.receiving.models import ReceiptLineRow, ReceivingImportRow
 from matchdesk.reporting.models import BacktestReport, ReportFinding
-from matchdesk.reporting.refund import DEFAULT_THRESHOLD, RefundCalculation
-from matchdesk.tenancy import advisory_lock
+from matchdesk.reporting.refund import RefundCalculation, same_currency
+from matchdesk.tenancy import advisory_lock, tenant_currency
 
 REMOVED_BY_EVIDENCE = frozenset({"resolved_by_credit", "source_corrected", "not_a_duplicate"})
 UNFINISHED_DOCUMENT_STATES = ("queued", "running", "retry_wait", "needs_review")
@@ -224,6 +224,7 @@ def create_draft(
         totals={},
         created_by=user_id,
         supersedes_report_id=max(prior, key=lambda r: r.version_no).id if prior else None,
+        currency=tenant_currency(s),  # B16: the figures' currency, frozen with the version
     )
     s.add(report)
     s.flush()
@@ -579,11 +580,15 @@ def approve(s: Session, report: BacktestReport, user_id: uuid.UUID) -> BacktestR
     return report
 
 
-def refund_evaluation(report: BacktestReport, threshold: Decimal = DEFAULT_THRESHOLD) -> RefundCalculation:
+def refund_evaluation(
+    report: BacktestReport, threshold: Decimal, *, threshold_currency: str, report_currency: str
+) -> RefundCalculation:
     """From the stored qualifying total of the approved (governing) report only (IT-17). A superseded
-    version is refused (B3/B4 review M6); the threshold is the server's, never the caller's."""
+    version is refused (B3/B4 review M6); the threshold is the server's, never the caller's. B16: the
+    threshold and the report total must be in one currency; otherwise refused, never converted."""
     if report.status != "approved" or report.approved_at is None:
         raise ConflictError("the refund criterion is evaluated on the approved report version only")
+    same_currency(report_currency, threshold_currency)
     qualifying = dec(report.qualifying_amount or 0)
     return RefundCalculation(
         qualifying, dec(report.unverified_amount or 0), refund_due=qualifying < dec(threshold)
@@ -618,6 +623,7 @@ def describe_report(r: BacktestReport) -> dict[str, Any]:
         "not_received_amount": str(r.not_received_amount),
         "unverified_amount": str(r.unverified_amount),
         "qualifying_amount": str(r.qualifying_amount),
+        "currency": r.currency,  # B16: null on versions drafted before B16 (the account's)
         "is_stale": r.is_stale,
         "approved_by": str(r.approved_by) if r.approved_by else None,
         "approved_at": r.approved_at.isoformat() if r.approved_at else None,
@@ -696,10 +702,32 @@ def flagged_amount(r: BacktestReport) -> Decimal:
     return round_cents(dec(r.findings_amount or 0) + dec(r.not_received_amount or 0))
 
 
-def export_csv(r: BacktestReport, findings: list[ReportFinding]) -> bytes:
+def pilot_terms_text(pilot: dict[str, Any], is_governing: bool) -> tuple[str, str, str]:
+    """B16: the pilot fee and the threshold with their currency, and the refund result in words, as
+    the PDF and the CSV state them (``pilot`` is ``describe_pilot``)."""
+    code = str(pilot.get("currency") or "")
+    fee = f"{code} {pilot['price']}" if pilot.get("price") else "not recorded"
+    threshold = f"{code} {pilot['refund_threshold']}" if pilot.get("refund_threshold") else "not recorded"
+    if is_governing and pilot.get("refund_due") is not None:
+        result = "Refund applies" if pilot["refund_due"] else "No refund"
+    elif pilot.get("governing_report_id"):
+        result = "Another version governs the refund"
+    else:
+        result = "Not decided: no governing version yet"
+    return fee, threshold, result
+
+
+def export_csv(
+    r: BacktestReport, findings: list[ReportFinding], context: dict[str, Any] | None = None
+) -> bytes:
     """Column names say the same as the screen (B6 review M5): ``flagged_discrepancies`` is findings
     plus not received. Dates stay ISO 8601 (YYYY-MM-DD) so a spreadsheet reads them as dates; codes
-    are written as words and booleans as Yes or No (review minor)."""
+    are written as words and booleans as Yes or No (review minor). B16: ``currency`` names the
+    figures' currency, and the pilot fee and threshold carry their own (``context`` as for the PDF)."""
+    ctx = context or {}
+    code = str(r.currency or ctx.get("currency") or "")
+    pilot = ctx.get("pilot") or {}
+    result = pilot_terms_text(pilot, bool(ctx.get("is_governing")))[2] if pilot else ""
     buf = io.StringIO()
     w = csv.writer(buf)
     if r.status != "approved":
@@ -718,6 +746,11 @@ def export_csv(r: BacktestReport, findings: list[ReportFinding]) -> bytes:
             "not_received",
             "unverified",
             "qualifying_total_for_refund",
+            "currency",
+            "pilot_fee",
+            "pilot_currency",
+            "refund_threshold",
+            "refund_result",
         ]
     )
     w.writerow(
@@ -731,6 +764,11 @@ def export_csv(r: BacktestReport, findings: list[ReportFinding]) -> bytes:
             r.not_received_amount,
             r.unverified_amount,
             r.qualifying_amount,
+            code,
+            pilot.get("price") or "",
+            pilot.get("currency") or "",
+            pilot.get("refund_threshold") or "",
+            result,
         ]
     )
     w.writerow([])
@@ -749,6 +787,7 @@ def export_csv(r: BacktestReport, findings: list[ReportFinding]) -> bytes:
             "paid",
             "queue_status",
             "resolution",
+            "currency",
         ]
     )
     for f in findings:
@@ -770,6 +809,7 @@ def export_csv(r: BacktestReport, findings: list[ReportFinding]) -> bytes:
                     _word(PAID_WORDS, f.paid_status),
                     _word(STATUS_WORDS, sn.get("status")),
                     _word(RESOLUTION_WORDS, sn.get("resolution_code")),
+                    code,
                 )
             ]
         )
@@ -871,9 +911,9 @@ def export_pdf(
     same as the screen and the CSV. ``context`` adds what the report row does not hold: the account
     name, who approved, the pilot terms and the refund result (the export route builds it)."""
     ctx = context or {}
-    # B15: the account's currency labels the report's figures; the pilot price and threshold are
-    # the signed terms, in CAD (Decision.md section 5).
-    money_code = str(ctx.get("currency") or "CAD")
+    # B15: the account's currency labels the report's figures; B16: stored with the version, and the
+    # pilot fee and threshold carry the pilot record's own currency.
+    money_code = str(r.currency or ctx.get("currency") or "CAD")
     sec = (r.totals or {}).get("sections", {})
     unmeasured = _unmeasured_line(r)
     status = {"draft": "Draft, not approved", "approved": "Approved", "superseded": "Superseded"}.get(
@@ -926,13 +966,20 @@ def export_pdf(
     if pilot:
         add()
         add("Pilot terms and refund")
+        fee, threshold, _result = pilot_terms_text(pilot, bool(ctx.get("is_governing")))
         add(
-            f"Price CAD {pilot.get('price') or 'not recorded'}. Refunded when the qualifying total of the "
-            f"governing report version is below CAD {pilot.get('refund_threshold') or 'not recorded'}."
+            f"Pilot fee {fee}. Refunded when the qualifying total of the governing report version is "
+            f"below the refund threshold of {threshold}, the fee itself."
         )
+        if str(pilot.get("currency") or "") != money_code:
+            add(
+                f"The report's figures are in {money_code} and the pilot terms in {pilot.get('currency')}; "
+                "MatchDesk never converts currencies, so the refund is not evaluated on this version."
+            )
         if ctx.get("is_governing") and pilot.get("refund_due") is not None:
             add(
-                f"This version governs the refund: qualifying total {money_code} {pilot.get('refund_qualifying_amount')}, "
+                f"This version governs the refund: qualifying total {pilot.get('currency')} "
+                f"{pilot.get('refund_qualifying_amount')} against {threshold}, "
                 f"so the pilot fee is {'refunded' if pilot['refund_due'] else 'not refunded'}."
             )
         elif pilot.get("governing_report_id"):

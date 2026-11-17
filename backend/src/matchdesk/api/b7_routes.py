@@ -27,7 +27,8 @@ log = get_logger("matchdesk.api.operator")
 
 
 class PilotBody(BaseModel):
-    price: Decimal | None = Field(default=None, ge=0, max_digits=14, decimal_places=2)
+    # B16: the fee in the account's currency; positive, at most two decimals (no default but CAD's).
+    price: Decimal | None = Field(default=None, gt=0, max_digits=14, decimal_places=2)
     period_start: date | None = None
     period_end: date | None = None
     refund_condition: str | None = Field(default=None, max_length=2000)
@@ -127,6 +128,7 @@ def register_b7_routes(app: FastAPI, settings: Settings, engine: Engine, mailer:
                     "report_version": r.version_no,
                     "qualifying": str(pilot.refund_qualifying_amount),
                     "threshold": str(pilot.refund_threshold),
+                    "currency": pilot.currency,  # B16: of the threshold and the qualifying total
                     "refund_due": pilot.refund_due,
                 },
             )
@@ -194,6 +196,7 @@ def register_b7_routes(app: FastAPI, settings: Settings, engine: Engine, mailer:
                     "id": str(t.id),
                     "name": t.name,
                     "status": t.status,
+                    "currency": t.currency,  # B16: the pilot fee is entered in it on S-18
                     "created_at": t.created_at.isoformat(),
                     "intake_address": intake.intake_address(t, settings),
                     "pilot": reporting.describe_pilot(pilots.get(t.id)) or None,
@@ -275,13 +278,15 @@ def register_b7_routes(app: FastAPI, settings: Settings, engine: Engine, mailer:
     ) -> dict[str, Any]:
         operator(ctx)
         with global_session(engine) as g:
-            if g.get(Tenant, tenant_id) is None:
+            tenant = g.get(Tenant, tenant_id)
+            if tenant is None:
                 raise NotFoundError("tenant")
+            currency = tenant.currency  # B16: the pilot record is always in the account's currency
         version = if_match(if_match_header) if if_match_header is not None else None
         values = body.model_dump(exclude_unset=True)
         try:
             with operator_session(engine) as s:
-                pilot, before, after = reporting.save_pilot(s, tenant_id, values, version)
+                pilot, before, after = reporting.save_pilot(s, tenant_id, values, version, currency)
                 pid = pilot.id
         except reporting.PilotVersionConflict as exc:
             raise StaleVersion(exc.current) from None

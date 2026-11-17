@@ -126,24 +126,24 @@ def register_report_routes(app: FastAPI, engine: Engine) -> None:
         with session(p.tenant_id, engine) as s:
             r = _load(s, report_id)
             findings = reporting.findings_of(s, r.id)
+            with global_session(engine) as g:
+                tenant = g.get(Tenant, p.tenant_id)
+                account = tenant.name if tenant else None
+            approver = views.user_names(s, [r.approved_by]).get(r.approved_by) if r.approved_by else None
+            pilot = reporting.get_pilot(s, p.tenant_id)
+            # B14 (acceptance M4): what the document states besides the report row. B16: the
+            # figures' currency (stored with the version since B16) and the pilot's own currency.
+            context = {
+                "account": account,
+                "currency": reporting.report_currency(s, r),
+                "approved_by_name": approver,
+                "pilot": reporting.describe_pilot(pilot),
+                "is_governing": bool(pilot and pilot.governing_report_id == r.id),
+            }
             if format == "pdf":
-                with global_session(engine) as g:
-                    tenant = g.get(Tenant, p.tenant_id)
-                    account = tenant.name if tenant else None
-                    currency = tenant.currency if tenant else None
-                approver = views.user_names(s, [r.approved_by]).get(r.approved_by) if r.approved_by else None
-                pilot = reporting.get_pilot(s, p.tenant_id)
-                # B14 (acceptance M4): what the document states besides the report row.
-                context = {
-                    "account": account,
-                    "currency": currency,
-                    "approved_by_name": approver,
-                    "pilot": reporting.describe_pilot(pilot),
-                    "is_governing": bool(pilot and pilot.governing_report_id == r.id),
-                }
                 data = reporting.export_pdf(r, findings, context)
             else:
-                data = reporting.export_csv(r, findings)
+                data = reporting.export_csv(r, findings, context)
             kind = "draft" if r.status != "approved" else "approved"
             name = f"backtest-{r.period_start}-{r.period_end}-v{r.version_no}-{kind}.{format}"
             return Response(
@@ -162,13 +162,20 @@ def register_report_routes(app: FastAPI, engine: Engine) -> None:
         require(p, "read")
         with session(p.tenant_id, engine) as s:
             r = _load(s, report_id)
-            threshold = reporting.threshold_for(s, p.tenant_id)
+            # B16: the threshold in the pilot's currency, the total in the report's; refused (409)
+            # when they differ or when a non-CAD account has no pilot fee yet. Never converted.
+            terms = reporting.refund_terms(s, p.tenant_id)
+            code = reporting.report_currency(s, r)
             pilot = reporting.get_pilot(s, p.tenant_id)
-            calc = reporting.refund_evaluation(r, threshold)
+            calc = reporting.refund_evaluation(
+                r, terms.threshold, threshold_currency=terms.currency, report_currency=code
+            )
             return {
                 "report_id": str(r.id),
                 "report_status": r.status,
-                "threshold": str(threshold),
+                "threshold": str(terms.threshold),
+                "currency": code,
+                "threshold_currency": terms.currency,
                 "qualifying_total": str(calc.qualifying_total),
                 "unverified_total": str(calc.unverified_total),
                 "refund_due": calc.refund_due,

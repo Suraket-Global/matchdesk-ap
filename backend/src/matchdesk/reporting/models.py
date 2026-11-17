@@ -20,6 +20,7 @@ from sqlalchemy import (
     Index,
     Integer,
     Numeric,
+    String,
     Text,
     UniqueConstraint,
 )
@@ -51,6 +52,7 @@ class BacktestReport(TenantMixin, Base):
             unique=True,
             postgresql_where="status = 'approved'",
         ),
+        CheckConstraint("currency is null or currency ~ '^[A-Z]{3}$'", name="currency_code"),  # B16
     )
     period_start: Mapped[date] = mapped_column(Date, nullable=False)
     period_end: Mapped[date] = mapped_column(Date, nullable=False)
@@ -73,6 +75,8 @@ class BacktestReport(TenantMixin, Base):
     approved_by: Mapped[uuid.UUID | None] = mapped_column(UUIDT, ForeignKey("users.id"))
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     supersedes_report_id: Mapped[uuid.UUID | None] = mapped_column(UUIDT)
+    # B16: the currency of the figures, stored when drafted; null before B16 (read as the account's).
+    currency: Mapped[str | None] = mapped_column(String(3))
 
 
 class ReportFinding(TenantMixin, Base):
@@ -110,6 +114,7 @@ class PilotEngagement(TenantMixin, Base):
         tfk("governing_report_id", "backtest_reports"),
         CheckConstraint("period_end >= period_start", name="period_order"),
         CheckConstraint("price >= 0 and refund_threshold >= 0", name="amounts"),
+        CheckConstraint("currency ~ '^[A-Z]{3}$'", name="currency_code"),  # B16
         CheckConstraint(enum_check("delivery_mode", ("manual", "application")), name="delivery_mode"),
         CheckConstraint(enum_check("payment_status", PAYMENT_STATES), name="payment_status"),
         CheckConstraint("outcome is null or " + enum_check("outcome", OUTCOMES), name="outcome"),
@@ -119,6 +124,8 @@ class PilotEngagement(TenantMixin, Base):
         ),
     )
     price: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
+    # B16: the currency of the fee and of the threshold, always the account's (Decision.md 5.1).
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, server_default="CAD")
     period_start: Mapped[date] = mapped_column(Date, nullable=False)
     period_end: Mapped[date] = mapped_column(Date, nullable=False)
     refund_condition: Mapped[str] = mapped_column(Text, nullable=False)

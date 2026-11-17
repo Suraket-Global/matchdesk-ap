@@ -14,10 +14,27 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from decimal import Decimal
 
-from matchdesk.core import ZERO, dec, round_cents
+from matchdesk.core import ZERO, ConflictError, dec, round_cents
 from matchdesk.matching import ExceptionResult, ValueClass
 
+# The CAD 500 fee of Decision.md section 5 [chat]: the threshold of a CAD account without a pilot
+# record. B16: an account in another currency has no default (``reporting.pilot.default_fee``).
 DEFAULT_THRESHOLD = Decimal("500.00")
+
+
+class CurrencyMismatch(ConflictError):
+    """B16: a report total and a threshold in two currencies were about to be compared."""
+
+
+def same_currency(report_code: str, pilot_code: str) -> None:
+    """Refuse to compare a report total with a threshold in another currency (B16). Nothing is
+    ever converted."""
+    if report_code.strip().upper() != pilot_code.strip().upper():
+        raise CurrencyMismatch(
+            f"The report's figures are in {report_code} and the pilot fee and refund threshold are in "
+            f"{pilot_code}. MatchDesk never converts currencies, so the refund cannot be evaluated "
+            f"until the pilot record states its fee in {report_code}."
+        )
 
 
 @dataclass(frozen=True)

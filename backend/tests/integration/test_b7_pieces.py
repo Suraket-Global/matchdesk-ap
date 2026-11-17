@@ -75,10 +75,10 @@ def test_pilot_record_threshold_and_governing_version(app_engine, client):  # ty
     w, ctrl, rid = approved_report(client, app_engine, "Fictional Distributor PL01")
     _op, oh = make_operator(app_engine)
     terms = {
-        "price": "500.00",
+        # B16: the refund threshold is the fee (Decision.md 5.1), in the account's currency.
+        "price": "10.00",
         "period_start": "2026-10-01",
         "period_end": "2026-10-31",
-        "refund_threshold": "10.00",
         "signed_terms_ref": "Pilot terms v1, signed 2026-10-01 (synthetic)",
     }
     put = client.put(f"/api/v1/operator/tenants/{w.tenant_id}/pilot", json=terms, headers=oh)
@@ -108,7 +108,7 @@ def test_pilot_record_threshold_and_governing_version(app_engine, client):  # ty
     # The threshold can no longer change; the database refuses a changed governing version too.
     t2 = client.put(
         f"/api/v1/operator/tenants/{w.tenant_id}/pilot",
-        json={"refund_threshold": "900.00"},
+        json={"price": "900.00"},
         headers={**oh, "If-Match": str(got["pilot"]["version"])},
     )
     assert t2.status_code == 409

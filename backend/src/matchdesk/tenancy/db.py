@@ -91,10 +91,15 @@ def session(tenant_id: uuid.UUID | str, engine: Engine | None = None) -> Iterato
         yield s
 
 
-def tenant_currency(s: Session) -> str:
+def tenant_currency(s: Session, tenant_id: uuid.UUID | None = None) -> str:
     """B15: the currency of the tenant this transaction is set to (``tenants.currency``), for
-    matching and for labelling money. Raises without a tenant context."""
-    tid = s.scalar(text("select nullif(current_setting('app.tenant_id', true), '')"))
+    matching and for labelling money. Raises without a tenant context. B16: ``tenant_id`` names the
+    account instead (``tenants`` is a global table), for the operator's session, which has none."""
+    tid = (
+        str(tenant_id)
+        if tenant_id is not None
+        else s.scalar(text("select nullif(current_setting('app.tenant_id', true), '')"))
+    )
     if not tid:
         raise TenantContextError("no tenant set for this transaction")
     code = s.scalar(text("select currency from tenants where id = cast(:t as uuid)"), {"t": tid})
