@@ -30,7 +30,7 @@ from matchdesk.extraction import (
 from matchdesk.extraction.models import ExtractionRunRow
 from matchdesk.intake.documents import materialise
 from matchdesk.intake.models import DocumentRow, UploadBatch
-from matchdesk.tenancy import enqueue, session, transition
+from matchdesk.tenancy import assert_upload_allowed, enqueue, session, transition
 from matchdesk.tenancy.models import IdempotencyKey
 
 log = get_logger("matchdesk.intake")
@@ -142,6 +142,9 @@ def add_file(
         doc = s.get(DocumentRow, seen.result_entity_id)
         assert doc is not None
         return doc
+    # Free sample check: no new file after its end or beyond its invoice limit (a retry above is
+    # still answered with the file it stored).
+    assert_upload_allowed(s, tenant_id)
     corr = get_correlation_id() or new_correlation_id()
     earlier = s.scalar(
         select(DocumentRow).where(

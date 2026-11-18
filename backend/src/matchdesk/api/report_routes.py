@@ -16,7 +16,7 @@ from matchdesk.api.common import Auth, body_hash, idempotent_replay, page_limit,
 from matchdesk.core import NotFoundError
 from matchdesk.identity import Tenant
 from matchdesk.reporting.models import BacktestReport
-from matchdesk.tenancy import global_session, session
+from matchdesk.tenancy import assert_pilot_feature, global_session, session
 
 
 class DraftBody(BaseModel):
@@ -117,6 +117,7 @@ def register_report_routes(app: FastAPI, engine: Engine) -> None:
     def post_approve(report_id: uuid.UUID, p: Auth) -> dict[str, Any]:
         require(p, "approve_report")
         with session(p.tenant_id, engine) as s:
+            assert_pilot_feature(s, p.tenant_id, "Approving a report")
             r = reporting.approve(s, _load(s, report_id), p.user_id)
             return reporting.describe_report(r)
 
@@ -124,6 +125,7 @@ def register_report_routes(app: FastAPI, engine: Engine) -> None:
     def export(report_id: uuid.UUID, p: Auth, format: Literal["pdf", "csv"] = "pdf") -> Response:
         require(p, "export_report")
         with session(p.tenant_id, engine) as s:
+            assert_pilot_feature(s, p.tenant_id, "Exporting a report")
             r = _load(s, report_id)
             findings = reporting.findings_of(s, r.id)
             with global_session(engine) as g:

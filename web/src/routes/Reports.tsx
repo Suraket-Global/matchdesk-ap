@@ -264,7 +264,9 @@ function FindingsTable({ rows, caption, showPaid = true, period }: { rows: Findi
 /** S-13 report: draft versus approved at a glance (DD-04), seven sections, approve, export. */
 export function ReportPage() {
   const { reportId } = useParams();
-  const { can } = useSession();
+  const { can, me } = useSession();
+  // Free sample check (2026-11-18): the draft is shown; approval and exports come with the pilot.
+  const inSample = !!me?.sample;
   const qc = useQueryClient();
   const navigate = useNavigate();
   const q = useQuery({ queryKey: ["report", reportId], queryFn: () => get<Report>(`/api/v1/reports/backtest/${reportId}`) });
@@ -359,6 +361,11 @@ export function ReportPage() {
         crumbs={<Link to="/reports">Back-test reports</Link>}
         lede={`${day(r.period_start)} to ${day(r.period_end)}. Data cut-off: ${when(r.data_cutoff_at)}`}
         actions={
+          inSample ? (
+            <span className="muted small" data-testid="sample-report-note">
+              Free sample check: approving this report and its PDF and CSV come with the paid pilot.
+            </span>
+          ) : (
           <>
             <button className="btn" onClick={() => exportAs("pdf")} disabled={!!exporting}>
               <Download size={16} aria-hidden="true" />
@@ -390,6 +397,7 @@ export function ReportPage() {
               </button>
             )}
           </>
+          )
         }
       />
       {r.status === "draft" && (

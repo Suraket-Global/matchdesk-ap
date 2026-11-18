@@ -31,7 +31,7 @@ ROLES = ("controller", "clerk", "viewer")
 class Tenant(GlobalMixin, Base):
     __tablename__ = "tenants"
     __table_args__ = (
-        CheckConstraint(enum_check("status", ("pilot", "active", "ended")), name="status"),
+        CheckConstraint(enum_check("status", ("sample", "pilot", "active", "ended")), name="status"),
         CheckConstraint("waiver_limit >= 0 and waiver_period_cap >= waiver_limit", name="waiver_limits"),
         CheckConstraint("qbo_mode is null or qbo_mode in ('recorded', 'intuit')", name="qbo_mode"),
     )
@@ -47,6 +47,9 @@ class Tenant(GlobalMixin, Base):
     # QuickBooks mode of this account (B11, migration 0023): null follows ``MATCHDESK_QBO_MODE``;
     # "intuit" connects this account to Intuit (the sandbox locally) beside the recorded demo.
     qbo_mode: Mapped[str | None] = mapped_column(Text)
+    # Free sample check (migration 0029): its end, 7 days after the account is created; kept after
+    # the pilot starts (``tenancy.sample``).
+    sample_ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class User(GlobalMixin, Base):

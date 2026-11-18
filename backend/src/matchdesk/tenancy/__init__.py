@@ -23,6 +23,14 @@ from matchdesk.tenancy.jobs import (
     run_claimed,
 )
 from matchdesk.tenancy.permissions import PERMISSIONS, can, permissions_for
+from matchdesk.tenancy.sample import (
+    SAMPLE_DAYS,
+    SAMPLE_INVOICE_LIMIT,
+    assert_pilot_feature,
+    assert_upload_allowed,
+    sample_ends,
+    sample_state,
+)
 from matchdesk.tenancy.secrets_box import SealError, seal, unseal
 from matchdesk.tenancy.transitions import advisory_lock, held_lock, lock_for_update, transition
 from matchdesk.tenancy.types import MONEY, PRICE, QTY, UUIDT, enum_check
@@ -32,6 +40,8 @@ __all__ = [
     "PERMISSIONS",
     "PRICE",
     "QTY",
+    "SAMPLE_DAYS",
+    "SAMPLE_INVOICE_LIMIT",
     "UUIDT",
     "Base",
     "ClaimedJob",
@@ -40,6 +50,8 @@ __all__ = [
     "SealError",
     "TenantMixin",
     "advisory_lock",
+    "assert_pilot_feature",
+    "assert_upload_allowed",
     "can",
     "claim",
     "enqueue",
@@ -53,6 +65,8 @@ __all__ = [
     "operator_session",
     "permissions_for",
     "run_claimed",
+    "sample_ends",
+    "sample_state",
     "seal",
     "session",
     "tenant_args",

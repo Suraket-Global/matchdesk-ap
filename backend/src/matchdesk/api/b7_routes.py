@@ -6,7 +6,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, date, datetime
 from decimal import Decimal
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
@@ -20,7 +20,7 @@ from matchdesk.core import ConflictError, Mailer, NotFoundError, Settings, get_l
 from matchdesk.identity.models import SupportGrant, Tenant
 from matchdesk.intake.models import InboundMessage, IntakeSender, UploadBatch, UsageEvent
 from matchdesk.reporting.models import BacktestReport, PilotEngagement
-from matchdesk.tenancy import global_session, held_lock, operator_session, session
+from matchdesk.tenancy import global_session, held_lock, operator_session, sample_ends, session
 
 INBOUND_PATH = "/api/v1/inbound/email"
 log = get_logger("matchdesk.api.operator")
@@ -52,6 +52,9 @@ class TenantCreate(BaseModel):
     # documents in any other currency are skipped. Chosen when the account is created. The owner
     # decided 2026-11-18: MatchDesk serves CAD and USD accounts only.
     currency: str = Field(default="CAD", pattern=r"^(?i:CAD|USD)$")
+    # Owner, 2026-11-18: a new account starts on the free sample check (7 days, up to 100 invoice
+    # files, no approved report or export); "pilot" opens a paid pilot at once.
+    offer: Literal["sample", "pilot"] = "sample"
 
 
 class ControllerInvite(BaseModel):
@@ -201,6 +204,7 @@ def register_b7_routes(app: FastAPI, settings: Settings, engine: Engine, mailer:
                     "name": t.name,
                     "status": t.status,
                     "currency": t.currency,  # B16: the pilot fee is entered in it on S-18
+                    "sample_ends_at": t.sample_ends_at.isoformat() if t.sample_ends_at else None,
                     "created_at": t.created_at.isoformat(),
                     "intake_address": intake.intake_address(t, settings),
                     "pilot": reporting.describe_pilot(pilots.get(t.id)) or None,
@@ -232,7 +236,13 @@ def register_b7_routes(app: FastAPI, settings: Settings, engine: Engine, mailer:
             g.execute(text("select pg_advisory_xact_lock(hashtext('operator:create_tenant'))"))
             if g.scalar(select(Tenant.id).where(func.lower(Tenant.name) == name.lower())) is not None:
                 raise ConflictError(f'An account named "{name}" already exists. Open it from the list.')
-            t = Tenant(name=name, status="pilot", currency=body.currency.upper())
+            sample = body.offer == "sample"
+            t = Tenant(
+                name=name,
+                status="sample" if sample else "pilot",
+                currency=body.currency.upper(),
+                sample_ends_at=sample_ends(datetime.now(UTC)) if sample else None,
+            )
             g.add(t)
             g.flush()
             tid = t.id
@@ -256,6 +266,32 @@ def register_b7_routes(app: FastAPI, settings: Settings, engine: Engine, mailer:
         )
         background.add_task(_send_mail, mail)
         return identity.first_controller_state(engine, tenant_id)
+
+    @app.post("/api/v1/operator/tenants/{tenant_id}/start-pilot")
+    def op_start_pilot(tenant_id: uuid.UUID, ctx: Ctx) -> dict[str, Any]:
+        """Free sample check -> paid pilot (owner, 2026-11-18): lifts the sample's limits. Audited in
+        the account's log with the operator as the actor."""
+        operator(ctx)
+        with global_session(engine) as g:
+            t = g.get(Tenant, tenant_id)
+            if t is None:
+                raise NotFoundError("tenant")
+            if t.status != "sample":
+                raise ConflictError(f"This account is not on the free sample check (status {t.status}).")
+            t.status = "pilot"
+        with session(tenant_id, engine) as s:
+            write_audit(
+                s,
+                tenant_id,
+                actor_type="operator",
+                actor_user_id=ctx.user_id,
+                action="account.pilot_started",
+                entity_type="tenant",
+                entity_id=tenant_id,
+                before={"status": "sample"},
+                after={"status": "pilot"},
+            )
+        return _tenant_rows([tenant_id])[0]
 
     @app.get("/api/v1/operator/tenants/{tenant_id}")
     def op_tenant(tenant_id: uuid.UUID, ctx: Ctx) -> dict[str, Any]:

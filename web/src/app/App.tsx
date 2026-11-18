@@ -6,7 +6,7 @@ import { NAV_GROUPS } from "./routes";
 import { lastQueueUrl } from "../lib/queue";
 import { PeriodProvider, usePeriod } from "./period";
 import { get, lastServerContact, send } from "../api/client";
-import type { Approval, ExceptionPage, Page, QboConnection } from "../api/types";
+import type { Approval, ExceptionPage, Me, Page, QboConnection } from "../api/types";
 import {
   AlertCircle,
   ArrowLeftRight,
@@ -298,6 +298,7 @@ function Shell({ children }: { children: ReactNode }) {
           <UserMenu />
         </header>
         {me?.support && <SupportBanner />}
+        {me?.sample && <SampleBanner sample={me.sample} />}
         {offline && (
           <div className="offline-banner" role="alert">
             <WifiOff size={16} aria-hidden="true" />
@@ -309,6 +310,22 @@ function Shell({ children }: { children: ReactNode }) {
         </main>
       </div>
       <IdleGuard />
+    </div>
+  );
+}
+
+/** Free sample check (2026-11-18): how much of it is used and when it ends. */
+export function SampleBanner({ sample }: { sample: NonNullable<Me["sample"]> }) {
+  const left = Math.max(0, sample.invoice_limit - sample.invoices_used);
+  return (
+    <div className="support-banner" role="status" data-testid="sample-banner">
+      <p>
+        <strong>Free sample check.</strong>{" "}
+        {sample.ended
+          ? "It has ended: the findings stay readable, and no more files can be added."
+          : `${sample.invoices_used} of ${sample.invoice_limit} invoices used (${left} left)${sample.ends_at ? `, until ${when(sample.ends_at)}` : ""}.`}{" "}
+        The approved report and its PDF and CSV come with the paid pilot.
+      </p>
     </div>
   );
 }

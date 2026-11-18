@@ -31,9 +31,10 @@ function TenantList() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [currency, setCurrency] = useState("CAD");
+  const [offer, setOffer] = useState<"sample" | "pilot">("sample");
   const ready = name.trim().length >= 2 && EMAIL_SHAPE.test(email.trim()) && ["CAD", "USD"].includes(currency);
   const create = useMutation({
-    mutationFn: () => send<OperatorTenant>("POST", "/api/v1/operator/tenants", { name: name.trim(), controller_email: email.trim(), currency }),
+    mutationFn: () => send<OperatorTenant>("POST", "/api/v1/operator/tenants", { name: name.trim(), controller_email: email.trim(), currency, offer }),
     onSuccess: (t) => {
       qc.invalidateQueries({ queryKey: ["operator"] });
       navigate(`/operator/tenants/${t.id}`);
@@ -117,6 +118,16 @@ function TenantList() {
           </select>
           <span className="hint" id="t-currency-hint">The client&apos;s QuickBooks home currency: MatchDesk serves CAD and USD accounts. Documents in other currencies are skipped. It cannot be changed later.</span>
         </div>
+        <div className="field">
+          <label htmlFor="t-offer">Start with</label>
+          <select id="t-offer" value={offer} onChange={(e) => setOffer(e.target.value as "sample" | "pilot")} aria-describedby="t-offer-hint">
+            <option value="sample">Free sample check (7 days, up to 100 invoices)</option>
+            <option value="pilot">Paid pilot</option>
+          </select>
+          <span className="hint" id="t-offer-hint">
+            During the free sample the findings show on screen; approving a report and exporting it come with the pilot. Start the pilot from the account&apos;s page.
+          </span>
+        </div>
         {/* B14 (M5): an account is created with its first controller, or nobody could sign in to it. */}
         <div className="field">
           <label htmlFor="t-email">First controller&apos;s email</label>
@@ -137,6 +148,31 @@ function TenantList() {
 }
 
 const EMAIL_SHAPE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+
+/** Free sample check -> paid pilot (2026-11-18): lifts the sample's limits for this account. */
+function StartPilot({ tenantId, endsAt }: { tenantId: string; endsAt: string | null }) {
+  const qc = useQueryClient();
+  const start = useMutation({
+    mutationFn: () => send<OperatorTenant>("POST", `/api/v1/operator/tenants/${tenantId}/start-pilot`, {}),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["operator"] });
+      toast("Pilot started: the sample's limits are lifted.", "success");
+    },
+  });
+  return (
+    <div className="panel panel-body" data-testid="sample-account">
+      <p style={{ marginTop: 0 }}>
+        <strong>Free sample check</strong>
+        {endsAt ? ` until ${when(endsAt)}` : ""}: up to 100 invoices, no approved report or export. Start the pilot once the
+        client has agreed and paid; then record the fee below.
+      </p>
+      <button className="btn primary small" disabled={start.isPending} onClick={() => start.mutate()}>
+        Start the pilot
+      </button>
+      {start.error && <span className="error-text" role="alert">{errorText(start.error)}</span>}
+    </div>
+  );
+}
 
 /** S-18 (B14, acceptance M5): how the account gets its first user. The operator invites the first
  * controller; once a controller exists this is only a statement, and the controller invites the rest. */
@@ -301,6 +337,7 @@ function TenantDetail() {
         crumbs={<Link to="/operator/tenants">Operator console</Link>}
         lede={`Account created ${when(t.created_at)}. Intake address: ${t.intake_address ?? "not set"}.`}
       />
+      {t.status === "sample" && <StartPilot tenantId={t.id} endsAt={t.sample_ends_at ?? null} />}
       {/* B8: payment, pilot and support access read first; editing comes after. */}
       <dl className="op-summary" aria-label="Account at a glance">
         <div>

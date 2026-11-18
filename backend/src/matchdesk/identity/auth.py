@@ -45,7 +45,14 @@ from matchdesk.identity.models import (
 )
 from matchdesk.identity.secrets_box import seal, unseal
 from matchdesk.identity.support import active_grant, leave_support
-from matchdesk.tenancy import advisory_lock, global_session, invitation_lookup_session, session, user_session
+from matchdesk.tenancy import (
+    advisory_lock,
+    global_session,
+    invitation_lookup_session,
+    sample_state,
+    session,
+    user_session,
+)
 
 LINK_TTL = timedelta(minutes=10)
 INVITE_TTL = timedelta(days=7)
@@ -536,6 +543,11 @@ def describe_me(engine: Engine, ctx: SessionContext) -> dict[str, Any]:
         # B15: the account's currency labels its money on every screen (it was always "CAD").
         tenant = s.get(Tenant, ctx.tenant_id) if ctx.tenant_id else None
         currency = tenant.currency if tenant is not None else None
+    sample = None
+    if ctx.tenant_id:
+        # Free sample check: its end and how many invoice files are used, for the banner.
+        with session(ctx.tenant_id, engine) as ts:
+            sample = sample_state(ts, ctx.tenant_id)
     return {
         "user": {
             "id": str(ctx.user_id),
@@ -550,6 +562,7 @@ def describe_me(engine: Engine, ctx: SessionContext) -> dict[str, Any]:
         "active_tenant_id": str(ctx.tenant_id) if ctx.tenant_id else None,
         "role": ctx.role,
         "currency": currency,
+        "sample": sample,
         "support": _support_body(engine, ctx),
         "idle_expires_at": ctx.idle_expires_at.isoformat(),
         "absolute_expires_at": ctx.absolute_expires_at.isoformat(),
