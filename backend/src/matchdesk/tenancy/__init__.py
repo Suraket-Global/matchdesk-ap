@@ -30,6 +30,7 @@ from matchdesk.tenancy.sample import (
     assert_upload_allowed,
     sample_ends,
     sample_state,
+    trial_progress,
 )
 from matchdesk.tenancy.secrets_box import SealError, seal, unseal
 from matchdesk.tenancy.transitions import advisory_lock, held_lock, lock_for_update, transition
@@ -73,6 +74,7 @@ __all__ = [
     "tenant_currency",
     "tfk",
     "transition",
+    "trial_progress",
     "unseal",
     "user_session",
 ]

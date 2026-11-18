@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import secrets
 import uuid
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, Response
 from pydantic import BaseModel, Field
@@ -28,6 +28,7 @@ from matchdesk.identity import (
     load_session,
     request_login_link,
     revoke_invitation,
+    set_tour_state,
     switch_tenant,
     update_membership,
 )
@@ -68,6 +69,11 @@ class InvitationCreate(BaseModel):
 
 class ActiveTenant(BaseModel):
     tenant_id: uuid.UUID
+
+
+class TourBody(BaseModel):
+    # "done" or "skipped"; null offers the tour again (Help menu, "Take the tour").
+    state: Literal["done", "skipped"] | None
 
 
 class MembershipPatch(BaseModel):
@@ -185,6 +191,11 @@ def register_auth_routes(app: FastAPI, settings: Settings, engine: Engine, maile
     @app.get("/api/v1/me")
     def get_me(ctx: Ctx, request: Request) -> dict[str, Any]:
         return _with_csrf(request, describe_me(engine, ctx))
+
+    @app.put("/api/v1/me/tour")
+    def put_tour(body: TourBody, ctx: Ctx) -> dict[str, Any]:
+        """Trial guidance (2026-11-19): the person finished or skipped the guided tour."""
+        return {"tour_state": set_tour_state(engine, ctx, body.state)}
 
     @app.put("/api/v1/me/active-tenant")
     def put_active_tenant(body: ActiveTenant, ctx: Ctx, request: Request) -> dict[str, Any]:

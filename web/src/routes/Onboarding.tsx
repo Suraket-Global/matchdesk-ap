@@ -9,6 +9,7 @@ import { Banner, Dialog, ErrorState, Loading, PageHead, StatusChip, toast, usePa
 import { Stepper } from "../components/Page";
 import { monthName, monthRange, plural, when } from "../lib/format";
 import { useState } from "react";
+import { HelpTip, SAMPLE_FILES } from "../components/Tour";
 
 export function useOnboarding() {
   const qbo = useQuery({ queryKey: ["qbo", "connection"], queryFn: () => get<QboConnection>("/api/v1/qbo/connection") });
@@ -129,11 +130,17 @@ export function OnboardingPage() {
         title="Onboarding checklist"
         lede="Four things MatchDesk needs for a back-test. Steps 3 and 4 can be done in either order."
         actions={
-          ob.processed > 0 ? (
-            <Link className="btn primary" to="/exceptions">
-              Go to exceptions
-            </Link>
-          ) : undefined
+          <>
+            <HelpTip label="how the checklist works" align="right">
+              Do the steps from top to bottom: connect QuickBooks, choose the test month and read it, load your receiving record, then upload the month&apos;s
+              invoices. Each step turns green when MatchDesk sees it done. Stuck? Use Book a setup call in the bar at the top, or Take the tour in your user menu.
+            </HelpTip>
+            {ob.processed > 0 && (
+              <Link className="btn primary" to="/exceptions">
+                Go to exceptions
+              </Link>
+            )}
+          </>
         }
       />
       {next && (
@@ -250,6 +257,11 @@ export function OnboardingPage() {
             {!ob.declaration && (
               <Link className={`btn small ${current === 2 ? "primary" : ""}`} to="/receiving">Load a receiving file</Link>
             )}
+            {!ob.declaration && (
+              <a className="btn small ghost" href={SAMPLE_FILES.receiving} download>
+                Sample file
+              </a>
+            )}
             <NoReceivingRecords declaration={ob.declaration} statement={ob.statement} hasImports={ob.committed.length > 0} />
           </div>
         </li>
@@ -259,6 +271,13 @@ export function OnboardingPage() {
             <p className="muted">
               And earlier invoices on the same purchase orders, where MatchDesk asks for them.
               {ob.files > 0 && ` ${plural(ob.files, "file")} uploaded, ${ob.processed} processed.`}
+            </p>
+            <p className="small">
+              PDFs, scans or phone photos.{" "}
+              <a href={SAMPLE_FILES.invoice} download>
+                See a sample invoice
+              </a>
+              .
             </p>
             {earlier.length > 0 && (
               <div className="earlier-needed" data-testid="earlier-invoices">

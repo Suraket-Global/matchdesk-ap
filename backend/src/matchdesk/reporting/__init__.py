@@ -74,6 +74,7 @@ from matchdesk.reporting.retention import (
     request_deletion,
     retry_archive,
 )
+from matchdesk.reporting.trial import due_trial_nudges
 from matchdesk.reporting.weekly import due_weekly, last_sent, retry_week, send_weekly, summary, week_of
 
 __all__ = [
@@ -110,6 +111,7 @@ __all__ = [
     "describe_pilot",
     "describe_report",
     "draft_blocking",
+    "due_trial_nudges",
     "due_weekly",
     "execute_due_deletions",
     "expire_archives",

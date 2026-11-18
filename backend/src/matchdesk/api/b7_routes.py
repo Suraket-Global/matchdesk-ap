@@ -20,7 +20,7 @@ from matchdesk.core import ConflictError, Mailer, NotFoundError, Settings, get_l
 from matchdesk.identity.models import SupportGrant, Tenant
 from matchdesk.intake.models import InboundMessage, IntakeSender, UploadBatch, UsageEvent
 from matchdesk.reporting.models import BacktestReport, PilotEngagement
-from matchdesk.tenancy import global_session, held_lock, operator_session, sample_ends, session
+from matchdesk.tenancy import global_session, held_lock, operator_session, sample_ends, sample_state, session
 
 INBOUND_PATH = "/api/v1/inbound/email"
 log = get_logger("matchdesk.api.operator")
@@ -190,6 +190,14 @@ def register_b7_routes(app: FastAPI, settings: Settings, engine: Engine, mailer:
                 q = q.where(Tenant.id.in_(tenant_ids))
             tenants = list(g.scalars(q).all())
         now = datetime.now(UTC)
+        # Trial guidance (2026-11-19): how far each 7-day free trial has got, as facts and counts
+        # only (connected, receiving loaded, invoice files, open findings), never document content,
+        # so the founder can help an account that is stuck.
+        trials: dict[uuid.UUID, dict[str, Any] | None] = {}
+        for t in tenants:
+            if t.status == "sample":
+                with session(t.id, engine) as ts:
+                    trials[t.id] = sample_state(ts, t.id, now)
         with operator_session(engine) as s:
             pilots = {pe.tenant_id: pe for pe in s.scalars(select(PilotEngagement))}
             grants: dict[uuid.UUID, list[SupportGrant]] = {}
@@ -205,6 +213,7 @@ def register_b7_routes(app: FastAPI, settings: Settings, engine: Engine, mailer:
                     "status": t.status,
                     "currency": t.currency,  # B16: the pilot fee is entered in it on S-18
                     "sample_ends_at": t.sample_ends_at.isoformat() if t.sample_ends_at else None,
+                    "trial": trials.get(t.id),
                     "created_at": t.created_at.isoformat(),
                     "intake_address": intake.intake_address(t, settings),
                     "pilot": reporting.describe_pilot(pilots.get(t.id)) or None,

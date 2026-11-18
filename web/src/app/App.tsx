@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Navigate, NavLink, Route, Routes, useLocation, useNavigate } from "react-router-dom";
+import { Link, Navigate, NavLink, Route, Routes, useLocation, useNavigate } from "react-router-dom";
+import { TourProvider, useTour } from "../components/Tour";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { SessionProvider, useSession } from "./session";
 import { NAV_GROUPS } from "./routes";
 import { lastQueueUrl } from "../lib/queue";
 import { PeriodProvider, usePeriod } from "./period";
 import { get, lastServerContact, send } from "../api/client";
-import type { Approval, ExceptionPage, Me, Page, QboConnection } from "../api/types";
+import type { Approval, ExceptionPage, Page, QboConnection, TrialState, TrialStep } from "../api/types";
 import {
   AlertCircle,
   ArrowLeftRight,
@@ -15,6 +16,7 @@ import {
   CalendarDays,
   CheckSquare,
   ChevronDown,
+  Compass,
   FileText,
   History,
   Eye,
@@ -206,6 +208,7 @@ function Shell({ children }: { children: ReactNode }) {
   const countWords: Record<string, string> = { "/exceptions": "open", "/approvals": "waiting" };
   const wide = /^\/invoices\/[^/]+(\/review)?$/.test(location.pathname);
   return (
+    <TourProvider>
     <div className={`shell ${collapsed ? "collapsed" : ""} ${navOpen ? "nav-open" : ""}`}>
       <a className="skip-link" href="#main">
         Skip to content
@@ -247,7 +250,7 @@ function Shell({ children }: { children: ReactNode }) {
                       const descId = `nav-count-${n.icon}`;
                       return (
                         <li key={n.to}>
-                          <NavLink to={n.to === "/exceptions" ? lastQueueUrl() : n.to} end={n.to === "/reports"} className="nav-link" aria-describedby={c > 0 ? descId : undefined} title={collapsed ? n.label : undefined}>
+                          <NavLink to={n.to === "/exceptions" ? lastQueueUrl() : n.to} end={n.to === "/reports"} className="nav-link" data-tour={`nav-${n.icon}`} aria-describedby={c > 0 ? descId : undefined} title={collapsed ? n.label : undefined}>
                             <I size={17} aria-hidden="true" />
                             <span className="label">{n.label}</span>
                             {c > 0 && (
@@ -311,21 +314,50 @@ function Shell({ children }: { children: ReactNode }) {
       </div>
       <IdleGuard />
     </div>
+    </TourProvider>
   );
 }
 
-/** 7-day free trial (2026-11-18; status "sample" in code): how much of it is used and when it ends. */
-export function SampleBanner({ sample }: { sample: NonNullable<Me["sample"]> }) {
+/** What the trial banner says is next, and where its button goes (trial guidance, 2026-11-19). */
+export const TRIAL_NEXT: Record<TrialStep, { words: string; to: string; action: string }> = {
+  connect_qbo: { words: "connect QuickBooks Online (read-only)", to: "/settings/quickbooks", action: "Connect QuickBooks" },
+  load_receiving: { words: "load your receiving record", to: "/receiving", action: "Load receiving file" },
+  upload_invoices: { words: "upload last month's supplier invoices", to: "/intake", action: "Upload invoices" },
+  review_documents: { words: "confirm the invoices waiting for you", to: "/invoices", action: "Confirm invoices" },
+  read_findings: { words: "look at your findings", to: "/exceptions", action: "See findings" },
+};
+
+export const SETUP_CALL_MAIL =
+  "mailto:matchdesk@bitloomix.io?subject=" + encodeURIComponent("Setup call for my MatchDesk trial") + "&body=" + encodeURIComponent("Two times that suit me this week:\n1.\n2.\n");
+
+/** 7-day free trial ("sample" in code): the day, the one next step, what is used, and help. */
+export function SampleBanner({ sample }: { sample: TrialState }) {
   const left = Math.max(0, sample.invoice_limit - sample.invoices_used);
+  const next = sample.progress ? TRIAL_NEXT[sample.progress.next_step] : null;
   return (
-    <div className="support-banner" role="status" data-testid="sample-banner">
+    <div className="support-banner" role="status" data-testid="sample-banner" data-tour="trial-banner">
       <p>
-        <strong>7-day free trial.</strong>{" "}
-        {sample.ended
-          ? "It has ended: the findings stay readable, and no more files can be added."
-          : `${sample.invoices_used} of ${sample.invoice_limit} invoices used (${left} left)${sample.ends_at ? `, until ${when(sample.ends_at)}` : ""}.`}{" "}
+        <strong>7-day free trial{sample.day ? `, day ${sample.day} of ${sample.days ?? 7}` : ""}.</strong>{" "}
+        {sample.ended ? (
+          "It has ended: the findings stay readable, and no more files can be added."
+        ) : (
+          <>
+            {next && <span className="trial-next">Next: {next.words}. </span>}
+            {sample.invoices_used} of {sample.invoice_limit} invoices used ({left} left){sample.ends_at ? `, until ${when(sample.ends_at)}` : ""}.
+          </>
+        )}{" "}
         The approved report and its PDF and CSV come with the paid pilot.
       </p>
+      <span className="trial-banner-actions">
+        {next && !sample.ended && (
+          <Link className="btn small primary" to={next.to}>
+            {next.action}
+          </Link>
+        )}
+        <a className="btn small" href={SETUP_CALL_MAIL}>
+          Book a setup call
+        </a>
+      </span>
     </div>
   );
 }
@@ -435,6 +467,7 @@ function initials(name: string): string {
 
 function UserMenu() {
   const { me, role, signOut } = useSession();
+  const { start: startTour } = useTour();
   const { enabled, setEnabled } = useShortcuts();
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
@@ -461,7 +494,7 @@ function UserMenu() {
   const name = me.user.display_name || me.user.email;
   return (
     <div className="menu-wrap" ref={wrap}>
-      <button className="user-button" aria-expanded={open} aria-haspopup="true" onClick={() => setOpen((o) => !o)}>
+      <button className="user-button" data-tour="user-menu" aria-expanded={open} aria-haspopup="true" onClick={() => setOpen((o) => !o)}>
         <span className="avatar" aria-hidden="true">
           {initials(name)}
         </span>
@@ -488,6 +521,23 @@ function UserMenu() {
             </select>
           </label>
           <hr />
+          {me.active_tenant_id && (
+            <button
+              onClick={() => {
+                setOpen(false);
+                startTour();
+              }}
+            >
+              <Compass size={16} aria-hidden="true" />
+              Take the tour
+            </button>
+          )}
+          {me.sample && (
+            <a href={SETUP_CALL_MAIL}>
+              <CalendarDays size={16} aria-hidden="true" />
+              Book a 15-minute setup call
+            </a>
+          )}
           <a href="mailto:matchdesk@bitloomix.io">
             <LifeBuoy size={16} aria-hidden="true" />
             Help and contact

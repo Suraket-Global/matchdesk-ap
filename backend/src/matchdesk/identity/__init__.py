@@ -33,6 +33,7 @@ from matchdesk.identity.auth import (
     request_login_link,
     resolve_session,
     revoke_invitation,
+    set_tour_state,
     switch_tenant,
     update_membership,
 )
@@ -107,6 +108,7 @@ __all__ = [
     "request_login_link",
     "resolve_session",
     "revoke_invitation",
+    "set_tour_state",
     "step_at",
     "switch_tenant",
     "tenant_grants",

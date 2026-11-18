@@ -20,7 +20,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import CITEXT, INET
+from sqlalchemy.dialects.postgresql import CITEXT, INET, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from matchdesk.tenancy import MONEY, UUIDT, Base, GlobalMixin, TenantMixin, enum_check, tenant_args
@@ -50,12 +50,15 @@ class Tenant(GlobalMixin, Base):
     # Free sample check (migration 0029): its end, 7 days after the account is created; kept after
     # the pilot starts (``tenancy.sample``).
     sample_ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Trial reminder emails already sent ('day1', 'day3', 'day6'; migration 0030), each once.
+    trial_nudges: Mapped[list[str]] = mapped_column(JSONB, nullable=False, server_default="[]")
 
 
 class User(GlobalMixin, Base):
     __tablename__ = "users"
     __table_args__ = (
         CheckConstraint("not is_operator or totp_secret_enc is not null", name="operator_needs_totp"),
+        CheckConstraint("tour_state is null or tour_state in ('done', 'skipped')", name="tour_state"),
     )
     email: Mapped[str] = mapped_column(CITEXT, nullable=False, unique=True)
     display_name: Mapped[str | None] = mapped_column(Text)
@@ -64,6 +67,10 @@ class User(GlobalMixin, Base):
     totp_secret_enc: Mapped[bytes | None] = mapped_column(LargeBinary)
     totp_last_step: Mapped[int | None] = mapped_column(BigInteger)
     deactivated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # The guided tour (migration 0030): finished or skipped, kept on the server so it is offered
+    # once per person on any device.
+    tour_state: Mapped[str | None] = mapped_column(Text)
+    tour_state_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class Membership(TenantMixin, Base):

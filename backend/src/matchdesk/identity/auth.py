@@ -535,11 +535,27 @@ def _support_body(engine: Engine, ctx: SessionContext) -> dict[str, Any] | None:
     }
 
 
+TOUR_STATES = ("done", "skipped")
+
+
+def set_tour_state(engine: Engine, ctx: SessionContext, state: str | None) -> str | None:
+    """The guided tour finished or skipped by this person (None offers it again: "Take the tour")."""
+    if state is not None and state not in TOUR_STATES:
+        raise ValueError("tour state must be done, skipped or null")
+    with global_session(engine) as s:
+        user = s.get(User, ctx.user_id)
+        assert user is not None
+        user.tour_state = state
+        user.tour_state_at = datetime.now(UTC) if state else None
+    return state
+
+
 def describe_me(engine: Engine, ctx: SessionContext) -> dict[str, Any]:
     with global_session(engine) as s:
         user = s.get(User, ctx.user_id)
         assert user is not None
         email, name = user.email, user.display_name
+        tour_state = user.tour_state
         # B15: the account's currency labels its money on every screen (it was always "CAD").
         tenant = s.get(Tenant, ctx.tenant_id) if ctx.tenant_id else None
         currency = tenant.currency if tenant is not None else None
@@ -563,6 +579,7 @@ def describe_me(engine: Engine, ctx: SessionContext) -> dict[str, Any]:
         "role": ctx.role,
         "currency": currency,
         "sample": sample,
+        "tour_state": tour_state,
         "support": _support_body(engine, ctx),
         "idle_expires_at": ctx.idle_expires_at.isoformat(),
         "absolute_expires_at": ctx.absolute_expires_at.isoformat(),

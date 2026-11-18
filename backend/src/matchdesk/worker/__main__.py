@@ -22,6 +22,7 @@ from matchdesk.qbo import SYNC_TASK, make_sync_handler, reader_for_tenant
 from matchdesk.receiving import purge_drafts_everywhere
 from matchdesk.reporting import (
     ARCHIVE_TASK,
+    due_trial_nudges,
     due_weekly,
     execute_due_deletions,
     expire_archives,
@@ -77,6 +78,10 @@ def scheduled(engine: Any, settings: Any, now: datetime | None = None) -> dict[s
         engine,
         [
             ("weekly_summary", lambda: due_weekly(engine, at, mailer_from_settings(settings), settings)),
+            (
+                "trial_reminders",
+                lambda: due_trial_nudges(engine, at, mailer_from_settings(settings), settings),
+            ),
             ("raw_email_cleanup", lambda: purge_raw(engine, settings, at)),
             ("receiving_draft_cleanup", lambda: purge_drafts_everywhere(engine, at)),
             ("archive_expiry", lambda: expire_archives(engine, at)),

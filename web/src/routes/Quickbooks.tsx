@@ -7,6 +7,7 @@ import { useSession } from "../app/session";
 import { usePeriod } from "../app/period";
 import { Banner, Dialog, ErrorState, Field, Loading, PageHead, StatusChip, toast, usePageTitle } from "../components/ui";
 import { monthRange, when } from "../lib/format";
+import { HelpTip } from "../components/Tour";
 
 const READS = "purchase orders, bills, vendor credits, vendors and items";
 
@@ -65,6 +66,13 @@ export function QuickbooksPage() {
         title="QuickBooks connection"
         crumbs={<a href="/settings">Settings</a>}
         lede="MatchDesk only reads. It never creates or changes anything in QuickBooks."
+        actions={
+          <HelpTip label="connecting QuickBooks" align="right">
+            The controller connects once with Intuit&apos;s own sign-in and chooses the company; MatchDesk never sees the QuickBooks password. It reads purchase
+            orders, bills, vendor credits, vendors and items for the dates you choose, and can be disconnected here at any time; the copy is then deleted after 30
+            days. QuickBooks Online Plus or Advanced with purchase orders turned on is needed.
+          </HelpTip>
+        }
       />
       {recorded && (
         <Banner tone="warn">

@@ -191,6 +191,7 @@ section{padding:88px 0}
 .fit li{padding-left:30px;position:relative}
 .fit .yes li::before,.fit .no li::before{position:absolute;left:0;top:0;font-weight:800;width:20px;text-align:center}
 .fit .yes li::before{content:"✓";color:var(--green)}
+.trial-ready{margin-top:40px}
 .fit .no li::before{content:"✕";color:var(--red)}
 
 /* safety */
@@ -519,6 +520,24 @@ body:not(.legal) .legal-view{display:none}
         <p>We go through the findings together. If they are worth acting on, the paid pilot checks the whole month and gives you the approved report. If not, you walk away and we delete your data.</p>
       </li>
     </ol>
+    <div class="fit trial-ready">
+      <div class="yes">
+        <h3>Have ready</h3>
+        <ul>
+          <li>QuickBooks Online Plus or Advanced, with purchase orders, and the person who can sign in to it</li>
+          <li>Last month's supplier invoices: PDFs, scans or phone photos (up to 100)</li>
+          <li>Your record of what arrived: a warehouse log or signed delivery slips, as CSV or Excel (<a href="https://matchdesk-app.bitloomix.io/samples/receiving-log-sample.csv" download>sample file</a>)</li>
+        </ul>
+      </div>
+      <div class="yes">
+        <h3>We help you</h3>
+        <ul>
+          <li>A guided tour in the app shows each step, and a checklist shows what is done and what is next</li>
+          <li>A free 15-minute setup call on day 1 if you want one</li>
+          <li>Short reminders by email on day 1, 3 and 6, and a reply within one business day</li>
+        </ul>
+      </div>
+    </div>
   </div>
 </section>
 
@@ -669,8 +688,16 @@ body:not(.legal) .legal-view{display:none}
         <p>That's fine. A warehouse log or receiver-signed packing slips work too; you upload the file and map its columns once. What does not count is the quantity QuickBooks shows as billed against the PO, or a supplier's slip with no receiver's mark.</p>
       </details>
       <details>
-        <summary>Do you need our QuickBooks login for the back-test?</summary>
-        <p>No. For the back-test you export the reports into a folder your company owns. For live checking afterwards, your controller connects QuickBooks with Intuit's own sign-in, and MatchDesk gets read-only access.</p>
+        <summary>Do you need our QuickBooks password?</summary>
+        <p>No. Your controller connects QuickBooks Online with Intuit's own sign-in and chooses the company. MatchDesk never sees the password, gets read-only access, and can be disconnected at any time from its QuickBooks page.</p>
+      </details>
+      <details>
+        <summary>What exactly happens in the 7-day free trial?</summary>
+        <p>We send your controller a sign-in. A short guided tour shows the four steps: connect QuickBooks, choose last month, load your receiving record, upload up to 100 invoices. MatchDesk then lists every line that disagrees, with its amount. You see the findings and the draft report on screen; the approved report with PDF and CSV comes with the paid pilot. No card is needed, and if you do not continue we delete your data.</p>
+      </details>
+      <details>
+        <summary>What if we get stuck during the trial?</summary>
+        <p>Every screen has a short "?" explanation, and the bar at the top always shows the next step with a button. You can also book a free 15-minute setup call from the app, or reply to any of our emails.</p>
       </details>
       <details>
         <summary>How exactly is the refund decided?</summary>

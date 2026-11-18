@@ -26,6 +26,7 @@ log = get_logger("matchdesk.reporting.operations")
 LATE_AFTER = timedelta(minutes=10)
 OPERATION_WORDS = {
     "weekly_summary": "Weekly summary email",
+    "trial_reminders": "Free-trial reminder emails (day 1, 3, 6)",
     "raw_email_cleanup": "Raw inbound email removal (7 days)",
     "receiving_draft_cleanup": "Receiving draft removal (7 days)",
     "archive_expiry": "Archive expiry (24 hours)",

@@ -3903,3 +3903,145 @@ tr.outcome-recovered td:first-child {
     grid-template-columns: 1fr;
   }
 }
+
+/* Trial guidance (2026-11-19): the guided tour and the "?" help tips. */
+.tour-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+}
+.tour-dim {
+  position: absolute;
+  inset: 0;
+  background: var(--overlay);
+}
+.tour-spot {
+  position: absolute;
+  border-radius: 10px;
+  box-shadow: 0 0 0 9999px var(--overlay);
+  outline: 2px solid var(--brand-300);
+  transition: top 0.15s ease, left 0.15s ease, width 0.15s ease, height 0.15s ease;
+  pointer-events: none;
+}
+.tour-card {
+  position: absolute;
+  width: min(380px, calc(100vw - 32px));
+  background: var(--surface-raised);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 24px 48px -16px rgb(21 26 33 / 40%);
+  padding: var(--s-5);
+  outline: none;
+}
+.tour-card.centred {
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+.tour-card h2 {
+  margin: 0 0 var(--s-2);
+  font-size: 1.1rem;
+}
+.tour-count {
+  margin: 0 0 var(--s-1);
+  font-size: 0.8rem;
+  color: var(--text-3);
+}
+.tour-body p {
+  margin: 0 0 var(--s-2);
+}
+.tour-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  margin-top: var(--s-3);
+}
+.tour-actions .spacer {
+  flex: 1;
+}
+.tour-dots {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  margin-top: var(--s-3);
+}
+.tour-dots span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--border-strong);
+}
+.tour-dots span.on {
+  background: var(--accent);
+}
+.tour-example {
+  display: grid;
+  gap: 2px;
+  padding: var(--s-3);
+  margin: var(--s-2) 0;
+  border-left: 3px solid var(--danger-solid);
+  background: var(--danger-bg);
+  color: var(--danger-fg);
+  border-radius: 8px;
+  font-size: 0.9rem;
+}
+.tour-example .amt {
+  font-weight: 700;
+}
+.help-tip {
+  position: relative;
+  display: inline-block;
+  vertical-align: middle;
+  margin-left: 6px;
+}
+.help-tip-btn {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1px solid var(--control-border);
+  background: var(--surface);
+  color: var(--text-2);
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+}
+.help-tip-btn:focus-visible {
+  box-shadow: var(--focus-ring);
+  outline: none;
+}
+.help-tip-pop {
+  position: absolute;
+  z-index: 50;
+  top: 26px;
+  left: 0;
+  width: min(300px, calc(100vw - 48px));
+  padding: var(--s-3);
+  background: var(--surface-raised);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow-sm);
+  font-size: 0.875rem;
+  font-weight: 400;
+  line-height: 1.45;
+}
+.trial-next {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2);
+}
+.trial-banner-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+}
+.help-tip.right .help-tip-pop {
+  left: auto;
+  right: 0;
+}
+.page-head .actions .help-tip {
+  align-self: center;
+}

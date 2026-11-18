@@ -79,6 +79,7 @@ function TenantList() {
                   </td>
                   <td data-label="Status">
                     <StatusChip status={t.status} />
+                    {t.trial && <TrialProgress trial={t.trial} />}
                   </td>
                   <td data-label="Pilot">
                     {t.pilot ? `${inCurrency(t.pilot.price, t.pilot.currency)}, ${day(t.pilot.period_start)} to ${day(t.pilot.period_end)}` : <span className="muted">No record yet</span>}
@@ -148,6 +149,33 @@ function TenantList() {
 }
 
 const EMAIL_SHAPE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+
+const STEP_WORDS: Record<string, string> = {
+  connect_qbo: "connect QuickBooks",
+  load_receiving: "load receiving",
+  upload_invoices: "upload invoices",
+  review_documents: "confirm documents",
+  read_findings: "read findings",
+};
+
+/** Trial guidance (2026-11-19): how far a free trial has got, so the founder can help one that is
+ * stuck. Facts and counts only; no document is shown. */
+function TrialProgress({ trial }: { trial: NonNullable<OperatorTenant["trial"]> }) {
+  const p = trial.progress;
+  return (
+    <div className="small muted" data-testid="trial-progress">
+      {trial.ended ? "Trial ended" : `Day ${trial.day ?? "?"} of ${trial.days ?? 7}`}
+      {p && (
+        <>
+          {` · ${p.steps_done} of 4 steps · next: ${STEP_WORDS[p.next_step] ?? p.next_step}`}
+          {` · ${trial.invoices_used} invoice${trial.invoices_used === 1 ? "" : "s"}`}
+          {p.findings > 0 && ` · ${p.findings} finding${p.findings === 1 ? "" : "s"}`}
+          {!p.qbo_connected && " · QuickBooks not connected"}
+        </>
+      )}
+    </div>
+  );
+}
 
 /** 7-day free trial ("sample" in code) -> paid pilot (2026-11-18): lifts the sample's limits for this account. */
 function StartPilot({ tenantId, endsAt }: { tenantId: string; endsAt: string | null }) {

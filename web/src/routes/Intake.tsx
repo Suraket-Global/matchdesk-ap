@@ -11,6 +11,7 @@ import { Banner, Dialog, Empty, ErrorState, Loading, PageHead, StatusChip, Throt
 import { FAILURE_CODES } from "../lib/words";
 import { plural, when } from "../lib/format";
 import { DeleteDocument } from "./DeleteDocument";
+import { HelpTip, SAMPLE_FILES } from "../components/Tour";
 
 const MAX_BYTES = 20 * 1024 * 1024;
 
@@ -264,7 +265,22 @@ export function IntakeListPage() {
   const items = [...(batches.data?.items ?? [])].sort((a, b) => b.created_at.localeCompare(a.created_at));
   return (
     <>
-      <PageHead title="Invoice intake" lede="Upload a month of invoices and credit notes and see what happened to each file." />
+      <PageHead
+        title="Invoice intake"
+        lede="Upload a month of invoices and credit notes and see what happened to each file."
+        actions={
+          <>
+            <a className="btn" href={SAMPLE_FILES.invoice} download>
+              Sample invoice
+            </a>
+            <HelpTip label="what to upload" align="right">
+              The supplier invoices and credit notes of your test month: PDFs, scans or phone photos (PNG or JPEG), up to 20 MB each. MatchDesk reads the supplier,
+              number, date, PO number, lines and total. A document read from a scan, or not read with certainty, waits under Needs review: compare the prefilled
+              fields with the image and confirm. On the free trial, up to 100 invoices.
+            </HelpTip>
+          </>
+        }
+      />
       {can("upload") && <DropZone onFiles={(f) => start(f)} disabled={busy} />}
       <PendingList pending={pending} />
       <section aria-labelledby="batches-h">

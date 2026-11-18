@@ -14,6 +14,7 @@ import { AMOUNT_INPUT, cur, curCents, formatCents, money, numberError, parseNumb
 import { ageText, monthName, plural } from "../lib/format";
 import { apiQuery, assigneeWords, dateRangeWords, DEFAULT_STATUS, readScope, rememberQueue, scopeDates, STATUS_WORDS } from "../lib/queue";
 import { EXCEPTION_STATUS, RESOLUTION_CODES, RESOLUTION_HINTS, SUB_REASONS, typeWord, zeroCounted } from "../lib/words";
+import { HelpTip } from "../components/Tour";
 
 export function chipFor(e: ExceptionItem) {
   if (e.status === "pending_approval") return <StatusChip status="pending_approval" />;
@@ -167,10 +168,17 @@ export function ExceptionsPage() {
       <PageHead
         title="Exception queue"
         actions={
+          <>
+          <HelpTip label="what an exception is" align="right">
+            A line that does not agree with its purchase order or with what your receiving record says arrived: billed above what arrived, above what was ordered,
+            at a higher price than the PO, or billed twice. Each shows its dollar amount and the documents behind it. A line with no receiving record is never shown
+            as matched. Open one to see the invoice, the PO and the receipts side by side, then resolve it with a reason.
+          </HelpTip>
           <Link className="btn" to="/reports">
             <FileBarChart size={16} aria-hidden="true" />
             Back-test report
           </Link>
+          </>
         }
       />
       {/* Scope: what this list covers, each part removable on its own. */}

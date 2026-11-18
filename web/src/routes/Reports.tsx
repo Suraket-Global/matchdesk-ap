@@ -13,6 +13,7 @@ import { typeWord, zeroCounted } from "../lib/words";
 import { PilotSection, usePilot } from "./Pilot";
 import { queueLink } from "../lib/queue";
 import { OutcomesSection, useOutcomes } from "./ReportOutcomes";
+import { HelpTip } from "../components/Tour";
 
 type Finding = NonNullable<Report["findings"]>[number];
 
@@ -104,9 +105,16 @@ export function ReportsPage() {
         title="Back-test reports"
         lede="The controller reviews a draft, approves one version, and exports it. Approved figures never change."
         actions={
-          <Link className="btn" to="/reports/weekly">
-            Weekly summary
-          </Link>
+          <>
+            <HelpTip label="what the back-test report is" align="right">
+              The month in one document: every flagged discrepancy with its amount, what could not be checked and why, and the receipt coverage. Create a draft for
+              the test month once its invoices and receiving records are loaded; the draft can be refreshed. The controller approves one version, which never
+              changes afterwards, and exports it as PDF or CSV (with the paid pilot).
+            </HelpTip>
+            <Link className="btn" to="/reports/weekly">
+              Weekly summary
+            </Link>
+          </>
         }
       />
       {can("draft_report") && (

@@ -1,0 +1,56 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [6 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Courier /Encoding /WinAnsiEncoding >>
+endobj
+4 0 obj
+<< /Title (Sample invoice FF-1002) /Producer (MatchDesk) >>
+endobj
+5 0 obj
+<< /Length 717 >>
+stream
+BT /F1 9 Tf 12 TL 40 742 Td
+(INVOICE) Tj T*
+(Sample invoice for MatchDesk. Synthetic: not a real invoice or company.) Tj T*
+() Tj T*
+(Vendor: Fictional Fasteners Ltd) Tj T*
+(Invoice No: FF-1002) Tj T*
+(Invoice Date: 2026-10-06) Tj T*
+(PO Number: 4471) Tj T*
+(Currency: CAD) Tj T*
+() Tj T*
+(HB-M8     Hex bolt M8                    60 EA      4.20     252.00) Tj T*
+(WS-M8     Washer M8                     100 EA      0.08       8.00) Tj T*
+() Tj T*
+(Subtotal: 260.00) Tj T*
+(Tax: 0.00) Tj T*
+(Total: 260.00) Tj T*
+() Tj T*
+(MatchDesk reads the labelled fields above \(Vendor, Invoice No, Invoice Date, PO Number, Total\)) Tj T*
+(and one line per item: code, description, quantity, unit, unit price, amount.) Tj T*
+ET
+endstream
+endobj
+6 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 5 0 R >>
+endobj
+xref
+0 7
+0000000000 65535 f 
+0000000015 00000 n 
+0000000064 00000 n 
+0000000121 00000 n 
+0000000216 00000 n 
+0000000291 00000 n 
+0000001059 00000 n 
+trailer
+<< /Size 7 /Root 1 0 R /Info 4 0 R >>
+startxref
+1185
+%%EOF

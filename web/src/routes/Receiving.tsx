@@ -8,6 +8,7 @@ import { usePeriod } from "../app/period";
 import { useSession } from "../app/session";
 import { Banner, Dialog, Empty, ErrorState, Field, Loading, PageHead, StatusChip, toast, usePageTitle } from "../components/ui";
 import { EVIDENCE_CLASSES } from "../lib/words";
+import { HelpTip, SAMPLE_FILES } from "../components/Tour";
 import { day, monthName, monthRange, plural, safePath, today, when } from "../lib/format";
 
 const REJECT_WORDS: Record<string, string> = {
@@ -104,6 +105,18 @@ export function ReceivingListPage() {
       <PageHead
         title="Receiving imports"
         lede="Warehouse receiving logs and receiver-signed delivery documents. Each receipt line shows the file, the row and the kind of evidence."
+        actions={
+          <>
+            <a className="btn" href={SAMPLE_FILES.receiving} download>
+              Sample receiving file
+            </a>
+            <HelpTip label="what a receiving file is" align="right">
+              The record your warehouse keeps of what actually arrived, exported as CSV or Excel: one row per delivered line, with the PO number, the quantity and the
+              date received (and the PO line or item code if you have it). You match its columns once; MatchDesk remembers the layout. A supplier&apos;s packing
+              slip without your receiver&apos;s marks does not count.
+            </HelpTip>
+          </>
+        }
       />
       <CoverageSummary />
       {can("upload") && <UploadForm />}
@@ -119,6 +132,12 @@ export function ReceivingListPage() {
               <p>
                 Upload the warehouse receiving log as CSV or XLSX. A layout that works: columns PO, Line, Qty, UOM, Received,
                 Receiver, one row per delivered line.
+              </p>
+              <p>
+                <a href={SAMPLE_FILES.receiving} download>
+                  Download a sample receiving file
+                </a>{" "}
+                to see the layout.
               </p>
             </Empty>
           </div>
