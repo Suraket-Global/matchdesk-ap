@@ -31,9 +31,9 @@ function TenantList() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [currency, setCurrency] = useState("CAD");
-  const ready = name.trim().length >= 2 && EMAIL_SHAPE.test(email.trim()) && /^[A-Za-z]{3}$/.test(currency.trim());
+  const ready = name.trim().length >= 2 && EMAIL_SHAPE.test(email.trim()) && ["CAD", "USD"].includes(currency);
   const create = useMutation({
-    mutationFn: () => send<OperatorTenant>("POST", "/api/v1/operator/tenants", { name: name.trim(), controller_email: email.trim(), currency: currency.trim().toUpperCase() }),
+    mutationFn: () => send<OperatorTenant>("POST", "/api/v1/operator/tenants", { name: name.trim(), controller_email: email.trim(), currency }),
     onSuccess: (t) => {
       qc.invalidateQueries({ queryKey: ["operator"] });
       navigate(`/operator/tenants/${t.id}`);
@@ -111,15 +111,11 @@ function TenantList() {
         </div>
         <div className="field">
           <label htmlFor="t-currency">Currency</label>
-          <select id="t-currency" value={["CAD", "USD"].includes(currency) ? currency : "OTHER"} onChange={(e) => setCurrency(e.target.value === "OTHER" ? "" : e.target.value)} aria-describedby="t-currency-hint">
+          <select id="t-currency" value={currency} onChange={(e) => setCurrency(e.target.value)} aria-describedby="t-currency-hint">
             <option value="CAD">CAD (Canadian dollar)</option>
             <option value="USD">USD (US dollar)</option>
-            <option value="OTHER">Other…</option>
           </select>
-          {!["CAD", "USD"].includes(currency) && (
-            <input aria-label="Currency code" value={currency} maxLength={3} onChange={(e) => setCurrency(e.target.value.toUpperCase())} placeholder="3-letter code, e.g. GBP" />
-          )}
-          <span className="hint" id="t-currency-hint">The client&apos;s QuickBooks home currency. Documents in other currencies are skipped. It cannot be changed later.</span>
+          <span className="hint" id="t-currency-hint">The client&apos;s QuickBooks home currency: MatchDesk serves CAD and USD accounts. Documents in other currencies are skipped. It cannot be changed later.</span>
         </div>
         {/* B14 (M5): an account is created with its first controller, or nobody could sign in to it. */}
         <div className="field">

@@ -393,8 +393,8 @@ def test_m5_invite_later_replace_and_refusals(app_engine, client):  # type: igno
 
 
 def test_operator_creates_an_account_in_the_currency_chosen(app_engine, client):  # type: ignore[no-untyped-def]
-    """An account for a USD (or any) client is created in that currency; CAD stays the default and a
-    malformed code is refused."""
+    """An account for a USD client is created in USD; CAD stays the default; any other currency and a
+    malformed code are refused."""
     _op, oh = make_operator(app_engine)
     usd = client.post(
         "/api/v1/operator/tenants",
@@ -415,3 +415,9 @@ def test_operator_creates_an_account_in_the_currency_chosen(app_engine, client):
         headers=oh,
     )
     assert bad.status_code == 422
+    pkr = client.post(
+        "/api/v1/operator/tenants",
+        json={"name": f"Fictional Pkrco {uuid.uuid4().hex[:6]}", "currency": "PKR"},
+        headers=oh,
+    )
+    assert pkr.status_code == 422  # owner, 2026-11-18: CAD and USD accounts only
