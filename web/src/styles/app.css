@@ -3920,7 +3920,6 @@ tr.outcome-recovered td:first-child {
   border-radius: 10px;
   box-shadow: 0 0 0 9999px var(--overlay);
   outline: 2px solid var(--brand-300);
-  transition: top 0.15s ease, left 0.15s ease, width 0.15s ease, height 0.15s ease;
   pointer-events: none;
 }
 .tour-card {
@@ -4028,10 +4027,12 @@ tr.outcome-recovered td:first-child {
   line-height: 1.45;
 }
 .trial-next {
-  display: inline-flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--s-2);
+  font-weight: 600;
+}
+.support-banner .btn.primary {
+  background: var(--review-fg);
+  border-color: var(--review-fg);
+  color: #ffffff;
 }
 .trial-banner-actions {
   display: flex;

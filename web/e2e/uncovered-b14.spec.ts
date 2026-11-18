@@ -321,6 +321,59 @@ test("B14 M5: the operator creates an account and its first controller signs in"
   await theirs.goto(link);
   await theirs.getByRole("button", { name: "Join" }).click();
   await expect(theirs.locator("header.topbar")).toBeVisible();
+  // Trial guidance (2026-11-19): a new account is a 7-day free trial; its controller is offered the
+  // guided tour once, walks it with Next, and the bar names the next step.
+  const shots = path.join(ROOT, "docs/screenshots/trial");
+  const tour = theirs.getByTestId("tour");
+  await expect(tour).toBeVisible();
+  await expect(tour).toContainText("Welcome to your 7-day free trial");
+  await theirs.screenshot({ path: path.join(shots, "1-welcome.png") });
+  await theirs.getByRole("button", { name: "Start the tour" }).click();
+  await expect(tour).toContainText("Your checklist");
+  // The highlight sits on the real menu item (no animation from the corner).
+  const spotAt = async (sel: string) =>
+    theirs.evaluate((q) => {
+      const t = document.querySelector(q)!.getBoundingClientRect();
+      const s = document.querySelector(".tour-spot")!.getBoundingClientRect();
+      return Math.abs(s.top + 6 - t.top) < 2 && Math.abs(s.left + 6 - t.left) < 2;
+    }, sel);
+  expect(await spotAt('[data-tour="nav-onboarding"]')).toBe(true);
+  await theirs.screenshot({ path: path.join(shots, "2-checklist.png") });
+  for (const title of ["1. Connect QuickBooks Online", "2. Load your receiving record", "3. Upload the month's invoices", "4. Your findings"]) {
+    await theirs.getByRole("button", { name: "Next" }).click();
+    await expect(tour.getByRole("heading", { name: title })).toBeVisible();
+  }
+  expect(await spotAt('[data-tour="nav-exceptions"]')).toBe(true);
+  await theirs.screenshot({ path: path.join(shots, "3-findings-example.png") });
+  for (const title of ["The back-test report", "Where you are", "Help is one click away"]) {
+    await theirs.getByRole("button", { name: "Next" }).click();
+    await expect(tour.getByRole("heading", { name: title })).toBeVisible();
+  }
+  await theirs.getByRole("button", { name: "Finish" }).click();
+  await expect(tour).toHaveCount(0);
+  const banner = theirs.getByTestId("sample-banner");
+  await expect(banner).toContainText("7-day free trial, day 1 of 7.");
+  await expect(banner).toContainText("Next: connect QuickBooks Online");
+  await theirs.screenshot({ path: path.join(shots, "4-banner.png") });
+  await theirs.reload();
+  await expect(theirs.locator("header.topbar")).toBeVisible();
+  await expect(theirs.getByTestId("tour")).toHaveCount(0); // finished: not offered again
+  await theirs.getByRole("button", { name: new RegExp(first) }).click();
+  await theirs.getByRole("button", { name: "Take the tour" }).click();
+  await expect(theirs.getByTestId("tour")).toBeVisible();
+  await theirs.keyboard.press("Escape");
+  await expect(theirs.getByTestId("tour")).toHaveCount(0);
+  // On a phone the tour is a centred card and the page does not scroll sideways.
+  await theirs.setViewportSize({ width: 375, height: 812 });
+  await theirs.goto("/onboarding");
+  await theirs.locator('[data-tour="user-menu"]').click(); // on a phone the button shows initials only
+  await theirs.getByRole("button", { name: "Take the tour" }).click();
+  await theirs.getByRole("button", { name: "Start the tour" }).click();
+  await expect(theirs.getByTestId("tour")).toContainText("Your checklist");
+  expect(await theirs.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await theirs.screenshot({ path: path.join(shots, "5-phone.png") });
+  await theirs.getByRole("button", { name: "Skip tour" }).click();
+  await theirs.setViewportSize({ width: 1440, height: 900 });
   const me = await theirs.evaluate(async () => (await fetch("/api/v1/me")).json());
   expect([me.role, me.user.email, me.memberships[0].tenant_name]).toEqual(["controller", first, name]);
   await theirs.goto("/settings/users");
