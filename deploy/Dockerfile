@@ -10,6 +10,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app/backend
 
+# Free OCR for scanned PDFs and photos of invoices (owner, 2026-11-18): Tesseract (English) and
+# pdftoppm (poppler), run locally by extraction/local_pdf.py; no hosted reader, no network.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-eng poppler-utils \
+    && rm -rf /var/lib/apt/lists/*
+
 # The pinned runtime dependencies of pyproject.toml, installed before the code for layer caching.
 COPY backend/pyproject.toml /app/backend/pyproject.toml
 RUN python - <<'EOF' > /tmp/requirements.txt

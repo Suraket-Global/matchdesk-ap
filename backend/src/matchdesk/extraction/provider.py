@@ -73,6 +73,10 @@ def verification_gates(output: dict[str, Any]) -> dict[str, bool]:
         # Adapters that report what they could not read with certainty (the local PDF reader):
         # any unread required field sends the document to a person (MH-05).
         gates["required_fields_read"] = not output["unread"]
+    if output.get("read_from_image"):
+        # Read by OCR from a scan or photo: a person always confirms the prefilled fields against
+        # the image before the document counts (a misread digit must never pass silently).
+        gates["read_from_image_confirmed"] = False
     return gates
 
 

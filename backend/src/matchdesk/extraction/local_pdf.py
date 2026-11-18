@@ -6,21 +6,77 @@ cannot read with certainty is left empty and named in ``unread``; the gate ``req
 then sends the document to a person. Free text, including any instruction written into a
 document, is never interpreted: it can only fail to match a pattern (HR-01's injection page).
 
-Scanned images and PDFs without a text layer produce an empty reading and go to review.
+Scanned PDFs (no text layer) and PNG/JPEG photos are read with Tesseract OCR when it is installed
+(free, open source, on the server; owner 2026-11-18, instead of a paid hosted reader). The same
+fixed patterns then apply, and a document read from an image always goes to a person to confirm
+(gate ``read_from_image_confirmed``): OCR can misread a digit, and the person checks the prefilled
+fields against the image. Without Tesseract an image produces an empty reading and goes to review.
 """
 
 from __future__ import annotations
 
 import io
 import re
+import shutil
+import subprocess
+import tempfile
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
+from pathlib import Path
 from typing import Any
 
 from matchdesk.core import parse_typed_decimal
 from matchdesk.extraction.provider import Extracted, ExtractionPermanentError
 
 MAX_PAGES = 60  # TRD 8.7
+OCR_MAX_PAGES = 10  # an invoice; longer scans go to a person unread
+OCR_TIMEOUT_SECONDS = 60
+_IMAGE_MAGIC = (b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff")
+
+
+def _run(args: list[str]) -> subprocess.CompletedProcess[bytes]:
+    return subprocess.run(args, capture_output=True, timeout=OCR_TIMEOUT_SECONDS, check=False)  # noqa: S603
+
+
+def ocr_text(data: bytes, is_pdf: bool) -> str | None:
+    """The text Tesseract reads from a scanned PDF or a PNG/JPEG, or None when OCR is not available
+    or fails. No network: Tesseract and pdftoppm run on this server."""
+    if shutil.which("tesseract") is None or (is_pdf and shutil.which("pdftoppm") is None):
+        return None
+    with tempfile.TemporaryDirectory(prefix="md-ocr-") as tmp:
+        folder = Path(tmp)
+        if is_pdf:
+            src = folder / "in.pdf"
+            src.write_bytes(data)
+            done = _run(
+                [
+                    "pdftoppm",
+                    "-r",
+                    "300",
+                    "-gray",
+                    "-png",
+                    "-l",
+                    str(OCR_MAX_PAGES),
+                    str(src),
+                    str(folder / "p"),
+                ]
+            )
+            if done.returncode != 0:
+                return None
+            images = sorted(folder.glob("p*.png"))
+        else:
+            img = folder / "in.img"
+            img.write_bytes(data)
+            images = [img]
+        texts: list[str] = []
+        for image in images:
+            out = _run(["tesseract", str(image), "stdout", "--psm", "6", "-l", "eng"])
+            if out.returncode != 0:
+                return None
+            texts.append(out.stdout.decode("utf-8", "replace"))
+        return "\n".join(texts)
+
+
 REQUIRED = ("vendor_name", "doc_number", "doc_date", "total")
 
 _LABELS: dict[str, re.Pattern[str]] = {
@@ -176,9 +232,22 @@ class LocalPdfExtractor:
     model = "pdf-text-patterns"
     prompt_version = "l1"
 
+    def _from_image(self, text: str | None, pages: int | None = None) -> Extracted:
+        if text is None or not text.strip():
+            output: dict[str, Any] = {"lines": [], "unread": ["all"]}
+        else:
+            output = read_text_fields(text)
+            output["read_from_image"] = True
+        if pages is not None:
+            output["page_count"] = pages
+        model = self.model + ("+tesseract" if output.get("read_from_image") else "")
+        return Extracted(self.provider, model, self.prompt_version, output)
+
     def extract(self, data: bytes) -> Extracted:
         if not data.startswith(b"%PDF-"):
-            # An image or another type: nothing can be read with certainty; a person keys it.
+            # A photo or scan (PNG/JPEG): OCR where available; otherwise a person keys it.
+            if data.startswith(_IMAGE_MAGIC):
+                return self._from_image(ocr_text(data, is_pdf=False))
             return Extracted(self.provider, self.model, self.prompt_version, {"lines": [], "unread": ["all"]})
         from pypdf import PdfReader
         from pypdf.errors import PdfReadError
@@ -192,6 +261,9 @@ class LocalPdfExtractor:
             text = "\n".join((page.extract_text() or "") for page in reader.pages)
         except PdfReadError as exc:
             raise ExtractionPermanentError("unreadable") from exc
+        if not text.strip():
+            # A scanned PDF: no text layer, so read the page images.
+            return self._from_image(ocr_text(data, is_pdf=True), pages=len(reader.pages))
         output = read_text_fields(text)
         output["page_count"] = len(reader.pages)
         return Extracted(self.provider, self.model, self.prompt_version, output)
