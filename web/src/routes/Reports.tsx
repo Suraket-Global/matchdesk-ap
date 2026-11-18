@@ -363,7 +363,7 @@ export function ReportPage() {
         actions={
           inSample ? (
             <span className="muted small" data-testid="sample-report-note">
-              Free sample check: approving this report and its PDF and CSV come with the paid pilot.
+              Free trial: approving this report and its PDF and CSV come with the paid pilot.
             </span>
           ) : (
           <>

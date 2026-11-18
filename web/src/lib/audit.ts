@@ -57,7 +57,7 @@ const ACTION: Record<string, string> = {
   sign_in: "Signed in",
   "tolerance.changed": "Tolerance changed",
   "waiver_limits.changed": "Waiver limits changed",
-  "account.pilot_started": "Pilot started (free sample check ended)",
+  "account.pilot_started": "Pilot started (free trial ended)",
   "pilot.created": "Pilot record created",
   "pilot.updated": "Pilot record changed",
   "pilot.governing_set": "Governing report version chosen",

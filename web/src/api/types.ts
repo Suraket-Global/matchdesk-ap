@@ -7,7 +7,7 @@ export interface Me {
   role: string | null;
   /** B15: the active account's currency (ISO code), which labels its money. */
   currency?: string | null;
-  /** Free sample check (2026-11-18): set while the account is on it. */
+  /** 7-day free trial (2026-11-18; status "sample" in code): set while the account is on it. */
   sample?: { ends_at: string | null; ended: boolean; invoices_used: number; invoice_limit: number } | null;
   /** Set while an operator reads an account under a support grant (B7, S-18). */
   support?: { grant_id: string; tenant_name: string | null; ends_at: string | null } | null;
@@ -827,7 +827,7 @@ export interface OperatorTenant {
   status: string;
   created_at: string;
   intake_address: string | null;
-  /** Free sample check: its end (set while or after the account was on it). */
+  /** 7-day free trial: its end (set while or after the account was on it). */
   sample_ends_at?: string | null;
   /** B16: the account's currency, in which the operator enters the pilot fee. */
   currency?: string;

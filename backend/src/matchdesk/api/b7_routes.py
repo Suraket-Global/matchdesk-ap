@@ -277,7 +277,7 @@ def register_b7_routes(app: FastAPI, settings: Settings, engine: Engine, mailer:
             if t is None:
                 raise NotFoundError("tenant")
             if t.status != "sample":
-                raise ConflictError(f"This account is not on the free sample check (status {t.status}).")
+                raise ConflictError(f"This account is not on the free trial (status {t.status}).")
             t.status = "pilot"
         with session(tenant_id, engine) as s:
             write_audit(

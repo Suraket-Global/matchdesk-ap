@@ -68,7 +68,7 @@ export const STATUS: Record<string, { tone: Tone; icon: string; word: string }> 
   processed: { tone: "matched", icon: "tick", word: "Accepted" },
   discarded: { tone: "waived", icon: "dash", word: "Discarded" },
   pilot: { tone: "neutral", icon: "dash", word: "Pilot" },
-  sample: { tone: "draft", icon: "clock", word: "Free sample" },
+  sample: { tone: "draft", icon: "clock", word: "Free trial" },
 };
 
 /** Status word with icon and tone from one table (DD-03). Green only for a line that passed every check. */

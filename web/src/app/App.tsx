@@ -314,13 +314,13 @@ function Shell({ children }: { children: ReactNode }) {
   );
 }
 
-/** Free sample check (2026-11-18): how much of it is used and when it ends. */
+/** 7-day free trial (2026-11-18; status "sample" in code): how much of it is used and when it ends. */
 export function SampleBanner({ sample }: { sample: NonNullable<Me["sample"]> }) {
   const left = Math.max(0, sample.invoice_limit - sample.invoices_used);
   return (
     <div className="support-banner" role="status" data-testid="sample-banner">
       <p>
-        <strong>Free sample check.</strong>{" "}
+        <strong>7-day free trial.</strong>{" "}
         {sample.ended
           ? "It has ended: the findings stay readable, and no more files can be added."
           : `${sample.invoices_used} of ${sample.invoice_limit} invoices used (${left} left)${sample.ends_at ? `, until ${when(sample.ends_at)}` : ""}.`}{" "}

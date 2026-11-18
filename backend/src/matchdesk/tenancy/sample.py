@@ -1,4 +1,4 @@
-"""The free sample check (owner, 2026-11-18): before any fee, a new account checks a sample of one
+"""The 7-day free trial, called "sample" in code (owner, 2026-11-18): before any fee, a new account checks a sample of one
 month. Up to ``SAMPLE_INVOICE_LIMIT`` invoice files, for ``SAMPLE_DAYS`` days from the account's
 creation; the approved report and its exports belong to the paid pilot. The operator starts the
 pilot (``tenants.status`` 'sample' -> 'pilot'), which lifts every limit here.
@@ -59,12 +59,12 @@ def assert_upload_allowed(s: Session, tenant_id: uuid.UUID, now: datetime | None
         return
     if st["ended"]:
         raise ConflictError(
-            "The free sample check has ended, so no more files can be added. "
+            "The 7-day free trial has ended, so no more files can be added. "
             "Ask MatchDesk to start the pilot to check the whole month."
         )
     if st["invoices_used"] >= SAMPLE_INVOICE_LIMIT:
         raise ConflictError(
-            f"The free sample check covers up to {SAMPLE_INVOICE_LIMIT} invoices, and they are all used. "
+            f"The free trial covers up to {SAMPLE_INVOICE_LIMIT} invoices, and they are all used. "
             "Ask MatchDesk to start the pilot to check the whole month."
         )
 
@@ -73,6 +73,6 @@ def assert_pilot_feature(s: Session, tenant_id: uuid.UUID, what: str) -> None:
     """Refuse what belongs to the paid pilot (an approved report, an export) during the sample."""
     if sample_state(s, tenant_id) is not None:
         raise ConflictError(
-            f"{what} comes with the paid pilot. During the free sample check the findings are shown on "
+            f"{what} comes with the paid pilot. During the free trial the findings are shown on "
             "screen; ask MatchDesk to start the pilot."
         )

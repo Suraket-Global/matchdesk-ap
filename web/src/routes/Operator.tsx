@@ -121,11 +121,11 @@ function TenantList() {
         <div className="field">
           <label htmlFor="t-offer">Start with</label>
           <select id="t-offer" value={offer} onChange={(e) => setOffer(e.target.value as "sample" | "pilot")} aria-describedby="t-offer-hint">
-            <option value="sample">Free sample check (7 days, up to 100 invoices)</option>
+            <option value="sample">7-day free trial (up to 100 invoices)</option>
             <option value="pilot">Paid pilot</option>
           </select>
           <span className="hint" id="t-offer-hint">
-            During the free sample the findings show on screen; approving a report and exporting it come with the pilot. Start the pilot from the account&apos;s page.
+            During the free trial the findings show on screen; approving a report and exporting it come with the pilot. Start the pilot from the account&apos;s page.
           </span>
         </div>
         {/* B14 (M5): an account is created with its first controller, or nobody could sign in to it. */}
@@ -149,20 +149,20 @@ function TenantList() {
 
 const EMAIL_SHAPE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
-/** Free sample check -> paid pilot (2026-11-18): lifts the sample's limits for this account. */
+/** 7-day free trial ("sample" in code) -> paid pilot (2026-11-18): lifts the sample's limits for this account. */
 function StartPilot({ tenantId, endsAt }: { tenantId: string; endsAt: string | null }) {
   const qc = useQueryClient();
   const start = useMutation({
     mutationFn: () => send<OperatorTenant>("POST", `/api/v1/operator/tenants/${tenantId}/start-pilot`, {}),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["operator"] });
-      toast("Pilot started: the sample's limits are lifted.", "success");
+      toast("Pilot started: the free trial's limits are lifted.", "success");
     },
   });
   return (
     <div className="panel panel-body" data-testid="sample-account">
       <p style={{ marginTop: 0 }}>
-        <strong>Free sample check</strong>
+        <strong>7-day free trial</strong>
         {endsAt ? ` until ${when(endsAt)}` : ""}: up to 100 invoices, no approved report or export. Start the pilot once the
         client has agreed and paid; then record the fee below.
       </p>
