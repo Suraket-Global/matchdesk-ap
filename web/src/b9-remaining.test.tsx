@@ -105,6 +105,55 @@ describe("S-03 no receiving records (B9)", () => {
   });
 });
 
+describe("S-03 receiving evidence statement (live test 2026-11-18)", () => {
+  it("lets the controller state class A before the first receiving file", async () => {
+    let attested = false;
+    handler = (url, init) => {
+      if (url.endsWith("/receiving/attestation") && init?.method === "POST") {
+        attested = true;
+        return { status: 201, body: { id: "a1", evidence_class: "A", ap_staff: [] } };
+      }
+      if (url.includes("/onboarding/status"))
+        return {
+          body: {
+            attestation: attested
+              ? { evidence_class: "A", source_description: "Warehouse supervisor, daily log", attested_by_name: "Dana Controller", attested_at: "2026-11-18T06:30:00Z" }
+              : null,
+            earlier_invoices_needed: [],
+          },
+        };
+      if (url.includes("/no-receiving-declaration")) return { body: { statement: "x", declaration: null } };
+      if (url.includes("/qbo/connection")) return { body: { status: "connected", company_name: "Demo" } };
+      if (url.includes("/pilot")) return { body: { pilot: null, governing: null } };
+      return { body: { items: [] } };
+    };
+    wrap(<OnboardingPage />, "/onboarding");
+    expect(await screen.findByTestId("attest-needed")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "State the receiving evidence" }));
+    const record = screen.getByRole("button", { name: "Record the evidence statement" });
+    expect(record).toBeDisabled();
+    await userEvent.type(screen.getByLabelText("Who keeps it and how"), "Warehouse supervisor, daily log");
+    await userEvent.type(screen.getByLabelText(/Accounts-payable users/), "Pat AP, Sam AP");
+    await userEvent.click(record);
+    const post = sent.find((s) => s.url.endsWith("/receiving/attestation"));
+    expect(post?.body).toEqual({ evidence_class: "A", source_description: "Warehouse supervisor, daily log", ap_staff: ["Pat AP", "Sam AP"] });
+    expect(await screen.findByTestId("attestation")).toHaveTextContent("class A evidence");
+    expect(screen.getByRole("button", { name: "Change the receiving evidence statement" })).toBeInTheDocument();
+  });
+
+  it("offers no statement to a clerk", async () => {
+    handler = (url) => {
+      if (url.includes("/onboarding/status")) return { body: { attestation: null, earlier_invoices_needed: [] } };
+      if (url.includes("/no-receiving-declaration")) return { body: { statement: "x", declaration: null } };
+      if (url.includes("/qbo/connection")) return { body: { status: "connected", company_name: "Demo" } };
+      return { body: { items: [] } };
+    };
+    wrap(<OnboardingPage />, "/onboarding", "*", "clerk");
+    expect(await screen.findByRole("heading", { name: "Load receiving evidence" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "State the receiving evidence" })).toBeNull();
+  });
+});
+
 const review = (extra: object = {}) => ({
   id: "inv1",
   document_id: "doc1",

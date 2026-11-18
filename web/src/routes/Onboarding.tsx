@@ -246,6 +246,7 @@ export function OnboardingPage() {
             />
           </div>
           <div style={{ gridColumn: "1 / -1" }}>
+            {!ob.declaration && <AttestReceiving attested={!!att} />}
             {!ob.declaration && (
               <Link className={`btn small ${current === 2 ? "primary" : ""}`} to="/receiving">Load a receiving file</Link>
             )}
@@ -283,6 +284,83 @@ export function OnboardingPage() {
           </div>
         </li>
       </ol>
+    </>
+  );
+}
+
+/** S-03 step 3: the controller states what kind of receiving evidence the account keeps. A class A or
+ * B receiving file is committed only up to the attested class, so a new account needs this first. */
+function AttestReceiving({ attested }: { attested: boolean }) {
+  const { can } = useSession();
+  const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [cls, setCls] = useState<"A" | "B" | "C">("A");
+  const [source, setSource] = useState("");
+  const [staff, setStaff] = useState("");
+  const save = useMutation({
+    mutationFn: () =>
+      send("POST", "/api/v1/receiving/attestation", {
+        evidence_class: cls,
+        source_description: source.trim(),
+        ap_staff: staff.split(",").map((n) => n.trim()).filter(Boolean),
+      }),
+    onSuccess: () => {
+      setOpen(false);
+      qc.invalidateQueries({ queryKey: ["onboarding-status"] });
+      toast("Recorded. Receiving files of this kind can now be imported.", "success");
+    },
+  });
+  if (!can("attest_receiving")) return null;
+  return (
+    <>
+      {!attested && (
+        <p className="small" data-testid="attest-needed">
+          Before the first receiving file: state what kind of receiving evidence this account keeps.
+        </p>
+      )}
+      <button className={`btn small ${attested ? "" : "primary"}`} onClick={() => setOpen(true)} style={{ marginRight: 8 }}>
+        {attested ? "Change the receiving evidence statement" : "State the receiving evidence"}
+      </button>
+      <Dialog
+        open={open}
+        title="What receiving evidence does this account keep?"
+        description="Recorded with your name and shown on the report. A receiving file counts only up to the class stated here."
+        onClose={() => setOpen(false)}
+        footer={
+          <>
+            <button className="btn" data-safe onClick={() => setOpen(false)}>
+              Cancel
+            </button>
+            <button className="btn primary" disabled={source.trim().length < 3 || save.isPending} onClick={() => save.mutate()}>
+              Record the evidence statement
+            </button>
+          </>
+        }
+      >
+        <fieldset className="field">
+          <legend>Kind of evidence</legend>
+          {(
+            [
+              ["A", "A · Warehouse record: the warehouse's own receiving log, kept by the receiver."],
+              ["B", "B · Signed delivery documents: the receiver signs or marks counts on each delivery."],
+              ["C", "C · Supplier documents only: packing slips with no receiver marks (never counts as a receipt)."],
+            ] as const
+          ).map(([v, label]) => (
+            <label key={v} style={{ display: "block" }}>
+              <input type="radio" name="att-class" value={v} checked={cls === v} onChange={() => setCls(v)} /> {label}
+            </label>
+          ))}
+        </fieldset>
+        <div className="field">
+          <label htmlFor="att-source">Who keeps it and how</label>
+          <input id="att-source" value={source} onChange={(e) => setSource(e.target.value)} placeholder="For example: warehouse supervisor, daily receiving log in Excel" />
+        </div>
+        <div className="field">
+          <label htmlFor="att-staff">Accounts-payable users in QuickBooks (optional, comma separated)</label>
+          <input id="att-staff" value={staff} onChange={(e) => setStaff(e.target.value)} placeholder="Item receipts they enter never count as receiving evidence" />
+        </div>
+        {save.error && <p className="error-text">{errorText(save.error)}</p>}
+      </Dialog>
     </>
   );
 }
