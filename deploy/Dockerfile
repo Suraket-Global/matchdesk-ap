@@ -15,6 +15,8 @@ WORKDIR /app/backend
 RUN apt-get update \
     && apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-eng poppler-utils \
     && rm -rf /var/lib/apt/lists/*
+# pdftoppm's font cache goes to /tmp (a tmpfs); the containers' file system is read-only.
+ENV XDG_CACHE_HOME=/tmp
 
 # The pinned runtime dependencies of pyproject.toml, installed before the code for layer caching.
 COPY backend/pyproject.toml /app/backend/pyproject.toml
