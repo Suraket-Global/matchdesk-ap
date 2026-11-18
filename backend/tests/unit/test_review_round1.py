@@ -245,3 +245,55 @@ def test_b1_009_top_level_import_rule_is_enforced(tmp_path):
     assert bad.returncode == 1
     assert "reporting imports matchdesk.exceptions.store" in bad.stdout
     assert "exceptions/ok.py" not in bad.stdout
+
+
+def _po_without_unit():
+    po = po_4471()
+    return replace(po, lines=tuple(replace(pl, uom=None) for pl in po.lines))
+
+
+def test_po_without_unit_takes_the_aliases_own_unit():
+    """Live test 2026-11-18: QuickBooks Online without units sends no unit on PO lines. The alias's
+    "our unit" stands in for it; without it nothing is assumed."""
+    same_unit = evaluate(
+        build(
+            docs=(invoice("i1", "INV-1", OCT, "60", "4.20", uom="EA"),),
+            po=_po_without_unit(),
+            aliases=(alias("1", supplier_uom="EA", item_uom="EA"),),
+            imports=(class_a(),),
+            receipts=(receipt("r1", "50", OCT),),
+        )
+    )
+    assert types(same_unit) == ["qty_over_received"]
+    over = next(e for e in same_unit.exceptions if e.type == T.QTY_OVER_RECEIVED)
+    assert over.reported_amount == D("42.00")
+    no_alias_unit = evaluate(
+        build(
+            docs=(invoice("i1", "INV-1", OCT, "60", "4.20", uom="EA"),),
+            po=_po_without_unit(),
+            aliases=(alias("1"),),
+            imports=(class_a(),),
+            receipts=(receipt("r1", "60", OCT),),
+        )
+    )
+    assert types(no_alias_unit) == ["uom_unresolved"]
+    cases = evaluate(
+        build(
+            docs=(invoice("i1", "INV-1", OCT, "5", "50.40", uom="CS"),),
+            po=_po_without_unit(),
+            aliases=(alias("12", approved=True, supplier_uom="CS", item_uom="EA"),),
+            imports=(class_a(),),
+            receipts=(receipt("r1", "60", OCT),),
+        )
+    )
+    assert types(cases) == []
+    unapproved = evaluate(
+        build(
+            docs=(invoice("i1", "INV-1", OCT, "5", "50.40", uom="CS"),),
+            po=_po_without_unit(),
+            aliases=(alias("12", approved=False, supplier_uom="CS", item_uom="EA"),),
+            imports=(class_a(),),
+            receipts=(receipt("r1", "60", OCT),),
+        )
+    )
+    assert types(unapproved) == ["alias_unconfirmed"]

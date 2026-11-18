@@ -696,6 +696,14 @@ def _conversion(line: DocLine, po_line: PoLine, alias: Alias) -> Decimal | None:
     """Item units per invoice unit, or None when the unit cannot be converted (check 5)."""
     inv_uom = normalise_uom(line.uom)
     po_uom = normalise_uom(po_line.uom)
+    if po_uom is None and inv_uom is not None:
+        # QuickBooks Online without units of measure sends no unit on purchase-order lines (live
+        # test 2026-11-18): the PO counts in the item's own unit, which the confirmed alias names as
+        # "our unit". Without that unit on the alias nothing is assumed and the line stops (check 5).
+        # (No unit on either document is handled below, as before.)
+        po_uom = normalise_uom(alias.item_uom)
+        if po_uom is None:
+            return None
     if inv_uom is None:
         # No unit on the invoice: assume the PO unit only when the alias does not convert (B1-008).
         sup = normalise_uom(alias.supplier_uom)
