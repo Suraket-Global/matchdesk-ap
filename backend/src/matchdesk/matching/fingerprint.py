@@ -15,6 +15,11 @@ from enum import Enum
 
 from matchdesk.matching.types import MatchInput
 
+# Raise this whenever the rules' code changes what a stored result would be. It is part of every
+# fingerprint, so after a deploy every stored result reads as out of date and the worker's minute
+# tick matches it again (live test 2026-11-18: an engine fix left the old results in place).
+ENGINE_VERSION = "2026-11-18.1"
+
 
 def _canonical(value: object) -> object:
     if dataclasses.is_dataclass(value) and not isinstance(value, type):
@@ -55,5 +60,7 @@ def assert_no_floats(value: object) -> None:
 
 
 def input_fingerprint(inp: MatchInput) -> bytes:
-    text = json.dumps(_canonical(inp), sort_keys=True, separators=(",", ":"))
+    text = json.dumps(
+        {"engine": ENGINE_VERSION, "input": _canonical(inp)}, sort_keys=True, separators=(",", ":")
+    )
     return hashlib.sha256(text.encode()).digest()

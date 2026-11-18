@@ -583,11 +583,17 @@ function EmailIntake() {
         </h2>
       </div>
       <div className="panel-body stack">
-        <p style={{ margin: 0 }}>
+        {d.receiving_mail === false && (
+          <p style={{ margin: 0 }} data-testid="email-intake-off">
+            Email intake is not switched on for this account yet. Upload the files above for now; MatchDesk tells you when an
+            address is ready.
+          </p>
+        )}
+        {d.receiving_mail !== false && <p style={{ margin: 0 }}>
           Suppliers or your team can email invoices to{" "}
           {d.address ? <strong className="mono-address">{d.address}</strong> : <span className="muted">an address MatchDesk sets up for you</span>}. PDF, PNG and
           JPEG attachments from an allowed sender go straight into a batch; anything else waits here for you.
-        </p>
+        </p>}
         <div>
           <h3 className="small-head">Allowed senders</h3>
           {d.senders.length ? (

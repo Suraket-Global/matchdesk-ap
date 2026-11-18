@@ -137,4 +137,11 @@ describe("S-06 email intake", () => {
     await userEvent.click(screen.getByRole("button", { name: "Release into a batch" }));
     await waitFor(() => expect(calls.some((c) => c.url.includes("/intake/messages/m1/decision"))).toBe(true));
   });
+  it("says email intake is off instead of showing a placeholder address (live test 2026-11-18)", async () => {
+    const email = { address: null, receiving_mail: false, provider: "local", senders: [], messages: [] };
+    handler = (url) => (url.includes("/intake/email") ? { body: email } : { body: { items: [] } });
+    wrap(<IntakeListPage />, me("controller"), "/intake");
+    expect(await screen.findByTestId("email-intake-off")).toHaveTextContent("not switched on");
+    expect(screen.queryByText(/@intake\./)).toBeNull();
+  });
 });

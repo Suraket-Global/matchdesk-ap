@@ -350,6 +350,11 @@ def register_b7_routes(app: FastAPI, settings: Settings, engine: Engine, mailer:
         with global_session(engine) as g:
             t = g.get(Tenant, p.tenant_id)
             address = intake.intake_address(t, settings) if t else None
+        # Live test 2026-11-18: in production with no inbound mail domain set up, the address would
+        # be a placeholder nobody can send to; say email intake is off instead of showing it.
+        receiving_mail = intake.email_intake_on(settings)
+        if not receiving_mail:
+            address = None
         with session(p.tenant_id, engine) as s:
             senders = s.scalars(select(IntakeSender).order_by(IntakeSender.address_or_domain)).all()
             msgs = s.scalars(
@@ -365,6 +370,7 @@ def register_b7_routes(app: FastAPI, settings: Settings, engine: Engine, mailer:
             }
             return {
                 "address": address,
+                "receiving_mail": receiving_mail,
                 "provider": settings.inbound_provider,
                 "senders": [{"id": str(x.id), "address_or_domain": x.address_or_domain} for x in senders],
                 "messages": [

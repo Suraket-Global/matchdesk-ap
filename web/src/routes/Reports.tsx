@@ -591,7 +591,10 @@ export function ReportPage() {
           <dt>Invoiced PO lines inside a complete warehouse log (A)</dt>
           <dd>
             {pct(r.coverage_class_a_pct)}
-            <div className="small muted">Includes lines the log shows as not received, so it can be higher than receipt coverage.</div>
+            <div className="small muted">
+              A line counts when complete logs run from its purchase order's date to 14 days after the invoice date. Includes lines
+              the log shows as not received, so it can be higher than receipt coverage.
+            </div>
           </dd>
           <dt>Lines with supplier slips only</dt>
           <dd>{r.class_c_only_lines}</dd>

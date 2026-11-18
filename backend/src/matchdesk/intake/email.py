@@ -86,6 +86,12 @@ def verify_signature(
         raise InboundRefused(401, "bad signature")
 
 
+def email_intake_on(settings: Settings) -> bool:
+    """False in production while no inbound mail domain is set up: the address would be a
+    placeholder nobody can send to (live test 2026-11-18)."""
+    return not (settings.env == "production" and settings.intake_domain.endswith(".invalid"))
+
+
 def intake_address(tenant: Tenant, settings: Settings) -> str | None:
     return f"{tenant.intake_address_local}@{settings.intake_domain}" if tenant.intake_address_local else None
 

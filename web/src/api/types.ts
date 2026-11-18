@@ -844,6 +844,7 @@ export interface FirstController {
 
 export interface IntakeEmail {
   address: string | null;
+  receiving_mail?: boolean;
   provider: string;
   senders: { id: string; address_or_domain: string }[];
   messages: {

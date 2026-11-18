@@ -959,8 +959,11 @@ def export_pdf(
     add()
     add("Receiving evidence")
     add(f"Receipt coverage of the item lines: {_pct_word(r.receipt_coverage_pct)}")
-    add(f"  by a warehouse record (class A): {_pct_word(r.coverage_class_a_pct)}")
-    add(f"  by a signed delivery document (class B): {_pct_word(r.coverage_class_b_pct)}")
+    add(f"  of which by a signed delivery document (class B): {_pct_word(r.coverage_class_b_pct)}")
+    add(
+        "Item lines inside a complete warehouse log (class A, from the purchase order's date to 14 days "
+        f"after the invoice; includes lines the log shows as not received): {_pct_word(r.coverage_class_a_pct)}"
+    )
     add(f"Lines with a supplier slip only (never counted as a receipt): {r.class_c_only_lines or 0}")
     for extra in (*_declaration_lines(r), *_inconsistent_lines(r), *_deleted_lines(r)):
         add(extra, indent="  ")
