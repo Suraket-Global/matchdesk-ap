@@ -48,6 +48,9 @@ class TenantCreate(BaseModel):
     name: str = Field(min_length=2, max_length=200)
     # B14 (acceptance M5): the account's first controller, invited as the account is created.
     controller_email: str | None = Field(default=None, min_length=3, max_length=254, pattern=EMAIL)
+    # The account's currency (ISO 4217 code): its documents, reports and pilot fee are in it, and
+    # QuickBooks documents in any other currency are skipped. Chosen when the account is created.
+    currency: str = Field(default="CAD", pattern=r"^[A-Za-z]{3}$")
 
 
 class ControllerInvite(BaseModel):
@@ -228,7 +231,7 @@ def register_b7_routes(app: FastAPI, settings: Settings, engine: Engine, mailer:
             g.execute(text("select pg_advisory_xact_lock(hashtext('operator:create_tenant'))"))
             if g.scalar(select(Tenant.id).where(func.lower(Tenant.name) == name.lower())) is not None:
                 raise ConflictError(f'An account named "{name}" already exists. Open it from the list.')
-            t = Tenant(name=name, status="pilot")
+            t = Tenant(name=name, status="pilot", currency=body.currency.upper())
             g.add(t)
             g.flush()
             tid = t.id

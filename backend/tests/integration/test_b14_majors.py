@@ -390,3 +390,28 @@ def test_m5_invite_later_replace_and_refusals(app_engine, client):  # type: igno
         == 404
     )
     assert excs  # helper kept in use for readers of this module
+
+
+def test_operator_creates_an_account_in_the_currency_chosen(app_engine, client):  # type: ignore[no-untyped-def]
+    """An account for a USD (or any) client is created in that currency; CAD stays the default and a
+    malformed code is refused."""
+    _op, oh = make_operator(app_engine)
+    usd = client.post(
+        "/api/v1/operator/tenants",
+        json={"name": f"Fictional Usdco {uuid.uuid4().hex[:6]}", "currency": "usd"},
+        headers=oh,
+    )
+    assert usd.status_code == 201, usd.text
+    cad = client.post(
+        "/api/v1/operator/tenants", json={"name": f"Fictional Cadco {uuid.uuid4().hex[:6]}"}, headers=oh
+    )
+    assert cad.status_code == 201, cad.text
+    rows = {t["id"]: t for t in client.get("/api/v1/operator/tenants", headers=oh).json()["items"]}
+    assert rows[usd.json()["id"]]["currency"] == "USD"
+    assert rows[cad.json()["id"]]["currency"] == "CAD"
+    bad = client.post(
+        "/api/v1/operator/tenants",
+        json={"name": f"Fictional Badco {uuid.uuid4().hex[:6]}", "currency": "US$"},
+        headers=oh,
+    )
+    assert bad.status_code == 422
