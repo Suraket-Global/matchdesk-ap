@@ -18,7 +18,7 @@ RUN rm -f /etc/nginx/conf.d/default.conf
 COPY deploy/nginx.conf /etc/nginx/conf.d/matchdesk.conf
 COPY --from=build /src/landing-csp.conf /etc/nginx/snippets/landing-csp.conf
 COPY --from=build /src/web/dist /srv/app
-COPY landing/index.html landing/favicon.svg /srv/landing/
+COPY landing/index.html landing/favicon.svg landing/report.png /srv/landing/
 # nginx's master process starts as root to bind; workers run as the image's "nginx" user.
 EXPOSE 8080 8081
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 CMD wget -q -O /dev/null http://127.0.0.1:8080/healthz || exit 1
